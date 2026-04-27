@@ -72,8 +72,9 @@ pip install belote-cli
 belote
 
 # Custom settings
-belote --difficulty hard --target 500
+belote --difficulty hard --target 500 --seed 123 --speed fast
 ```
+
 
 ## Controls
 
@@ -91,12 +92,18 @@ belote --difficulty hard --target 500
 ## Features
 
 - **Rich Terminal UI:** Full-screen green felt table with detailed card graphics, face card art (Roi ♔, Dame ♕, Valet ⚔), and distinct color palettes.
-- **Main Menu:** Configure Difficulty, Target Score, and Game Speed, and access **Rules & History** (EN/FR) without restarting the app.
+- **Main Menu:** Configure Mode, Difficulty, Target Score, and Game Speed, and access **Rules & History** (EN/FR) without restarting the app.
+- **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
+- **Statistics:** Global tracking of games played/won, win rate, capots, and streaks.
+- **Hotseat Mode:** Play with a friend locally (Human vs Human vs 2 AI).
+- **Sound Effects:** Auditory feedback for trick wins, Belote, Chute, and Capot.
+- **Animation Skip:** Press `Space` or `Esc` to skip AI delays and scoring animations.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
 - **Trick History:** Visual "Last Trick" panel helps track the flow of the game.
 - **High Fidelity:** Full implementation of French Belote rules including a two-round bidding system, "Dix de Der", and "Capot" (250 pts) announcements.
 - **Rules & History Viewer:** A scrollable, bilingual (English/French) in-game reference for the game's heritage and mechanics.
 - **Robust Input:** High-performance unbuffered key reading for responsive navigation and 'q' to quit functionality.
+- **Replayability:** Use `--seed <number>` to reproduce the exact same deck and AI choices.
 
 ## AI
 

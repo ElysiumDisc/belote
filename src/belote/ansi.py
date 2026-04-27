@@ -90,52 +90,52 @@ def scroll_region(top: int, bottom: int) -> str:
 
 # Palette constants
 def felt_bg() -> str:
-    return bg(20, 90, 50)
+    return bg(25, 75, 45) # Deeper, more muted green
 
 
 def red_fg() -> str:
-    return fg(220, 60, 60)
+    return fg(190, 45, 45) # Muted crimson
 
 
 def black_fg() -> str:
-    return fg(20, 20, 20)
+    return fg(40, 40, 40) # Slightly softer black
 
 
 def card_face_bg() -> str:
-    return bg(245, 245, 235)
+    return bg(248, 245, 230) # Richer cream/parchment
 
 
 def face_card_bg() -> str:
-    return bg(255, 245, 180)
+    return bg(250, 240, 200) # Golden-aged parchment
 
 
 def card_back_bg() -> str:
-    return bg(120, 30, 30)
+    return bg(110, 35, 35) # Deep burgundy
 
 
 def highlight_bg() -> str:
-    return bg(240, 200, 80)
+    return bg(230, 190, 70) # Brass/Gold highlight
 
 
 def gold_fg() -> str:
-    return fg(240, 200, 80)
+    return fg(210, 170, 60) # Antique gold
 
 
 def white_fg() -> str:
-    return fg(240, 240, 240)
+    return fg(235, 235, 230) # Off-white
 
 
 def light_gray_fg() -> str:
-    return fg(180, 180, 180)
+    return fg(160, 160, 155) # Muted stone gray
 
 
 def green_fg() -> str:
-    return fg(80, 220, 120)
+    return fg(60, 160, 90) # Sage green
 
 
 def banner_bg() -> str:
-    return bg(60, 60, 180)
+    return bg(50, 65, 120) # Muted royal blue
 
 
 def banner_fg() -> str:
-    return fg(255, 255, 100)
+    return fg(240, 220, 150) # Pale gold text

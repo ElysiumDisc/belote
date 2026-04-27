@@ -4,7 +4,7 @@ import shutil
 import sys
 import time
 
-from .deck import Card, Rank, Suit
+from .deck import Card, Rank, Suit, card_points
 from .game import (
     GameState,
     Phase,
@@ -13,6 +13,8 @@ from .game import (
     legal_cards,
     team_of,
     partner,
+    trick_winner_seat,
+    replace,
 )
 from .ansi import (
     RESET, BOLD, DIM, REVERSE, UNDERLINE,
@@ -23,12 +25,12 @@ from .ansi import (
     face_card_bg,
 )
 from .input import KeyReader, KeyEvent, Key
+from .rules import RULES_CONTENT
 
 
-# Card display dimensions — fixed constants only, no terminal queries at module level.
-# Terminal width is queried fresh inside render() on every frame.
-CARD_W = 6
-CARD_H = 5
+# Card display dimensions — optimized for "Supreme Quality" 9x7 layout.
+CARD_W = 9
+CARD_H = 7
 CARD_GAP = 1
 
 # Fixed visible width for the WEST and EAST side columns in the middle section.
@@ -40,10 +42,13 @@ def _card_symbol(card: Card) -> str:
 
 
 def _card_face(card: Card, selected: bool = False, legal: bool = True) -> list[str]:
-    """Render a card as CARD_H lines of width CARD_W."""
-    sym = card.rank.value + " " if len(card.rank.value) == 1 else card.rank.value
+    """Render a card as CARD_H lines of width CARD_W with Art Nouveau styling."""
+    rank_str = card.rank.value
     suit_sym = card.suit.symbol
-    face_text = f"{sym}{suit_sym}"
+    
+    # Top-left and bottom-right rank displays
+    tl_rank = rank_str.ljust(2)
+    br_rank = rank_str.rjust(2)
 
     is_face = card.rank in (Rank.JACK, Rank.QUEEN, Rank.KING)
     
@@ -57,40 +62,62 @@ def _card_face(card: Card, selected: bool = False, legal: bool = True) -> list[s
         bg_code = card_face_bg()
 
     prefix = "" if legal else DIM
-
     inner_w = CARD_W - 2
     
-    # Optional miniature art for face cards
-    art = "  "
-    if card.rank == Rank.JACK:
-        art = "⚔ "
-    elif card.rank == Rank.QUEEN:
-        art = "♕ "
-    elif card.rank == Rank.KING:
-        art = "♔ "
-    elif card.rank == Rank.ACE:
-        art = "★ "
+    # Ornate Art Nouveau-inspired elements
+    art_top = " " * inner_w
+    art_mid = " " * inner_w
+    art_bot = " " * inner_w
 
+    if card.rank == Rank.JACK:
+        art_top = "  ▄▆▄  "
+        art_mid = f"  {suit_sym}V{suit_sym}  "
+        art_bot = "  ▀▆▀  "
+    elif card.rank == Rank.QUEEN:
+        art_top = "  ╭▼╮  "
+        art_mid = f"  {suit_sym}Q{suit_sym}  "
+        art_bot = "  ╰─╯  "
+    elif card.rank == Rank.KING:
+        art_top = "  ╔█╗  "
+        art_mid = f"  {suit_sym}K{suit_sym}  "
+        art_bot = "  ╚═╝  "
+    elif card.rank == Rank.ACE:
+        art_top = "   ▲   "
+        art_mid = f"  {suit_sym}A{suit_sym}  "
+        art_bot = "   ▼   "
+    else:
+        # Pips for numbered cards - simplified but elegant
+        art_mid = f"   {suit_sym}   "
+
+    # Use ornate border characters
     return [
-        f"{prefix}{bg_code}{color}┌{'─' * inner_w}┐{RESET}",
-        f"{prefix}{bg_code}{color}│{face_text.ljust(inner_w)}│{RESET}",
-        f"{prefix}{bg_code}{color}│{art.center(inner_w)}│{RESET}",
-        f"{prefix}{bg_code}{color}│{face_text.rjust(inner_w)}│{RESET}",
-        f"{prefix}{bg_code}{color}└{'─' * inner_w}┘{RESET}",
+        f"{prefix}{bg_code}{color}╔{'═' * inner_w}╗{RESET}",
+        f"{prefix}{bg_code}{color}║{tl_rank}{' ' * (inner_w-2)}║{RESET}",
+        f"{prefix}{bg_code}{color}║{art_top}║{RESET}",
+        f"{prefix}{bg_code}{color}║{art_mid}║{RESET}",
+        f"{prefix}{bg_code}{color}║{art_bot}║{RESET}",
+        f"{prefix}{bg_code}{color}║{' ' * (inner_w-2)}{br_rank}║{RESET}",
+        f"{prefix}{bg_code}{color}╚{'═' * inner_w}╝{RESET}",
     ]
 
 
 def _card_back() -> list[str]:
-    """Render a face-down card."""
+    """Render a face-down card with an ornate pattern."""
     inner_w = CARD_W - 2
-    hatch = "╳" * (inner_w // 2)
-    return [
-        f"{card_back_bg()}┌{'─' * inner_w}┐{RESET}",
-        f"{card_back_bg()}│{' ' * inner_w}│{RESET}",
-        f"{card_back_bg()}│{hatch.center(inner_w)}│{RESET}",
-        f"{card_back_bg()}│{' ' * inner_w}│{RESET}",
-        f"{card_back_bg()}└{'─' * inner_w}┘{RESET}",
+    # Decorative lattice pattern for the back
+    pattern = [
+        " ░▒▓▒░ ",
+        " ░▒▓▒░ ",
+        " ░▒▓▒░ ",
+        " ░▒▓▒░ ",
+        " ░▒▓▒░ ",
     ]
+    
+    res = [f"{card_back_bg()}╔{'═' * inner_w}╗{RESET}"]
+    for line in pattern:
+        res.append(f"{card_back_bg()}║{line}║{RESET}")
+    res.append(f"{card_back_bg()}╚{'═' * inner_w}╝{RESET}")
+    return res
 
 
 def _card_back_small() -> str:
@@ -118,7 +145,7 @@ def _felt_placeholder() -> list[str]:
     top    = felt_bg() + dim + "┌" + "─" * inner_w + "┐" + RESET
     mid    = felt_bg() + dim + "│" + " " * inner_w + "│" + RESET
     bottom = felt_bg() + dim + "└" + "─" * inner_w + "┘" + RESET
-    return [top, mid, mid, mid, bottom]
+    return [top] + [mid] * (CARD_H - 2) + [bottom]
 
 
 def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
@@ -144,10 +171,10 @@ def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
 
     rows.append(_felt_blank(center_w))                       # top padding
     rows.append(n_label)                                     # N label
-    for line in n_card:                                      # North card (5 rows)
+    for line in n_card:                                      # North card (7 rows)
         rows.append(_felt_pad(line, center_w))
     rows.append(_felt_blank(center_w))                       # gap
-    for i in range(CARD_H):                                  # West + East (5 rows)
+    for i in range(CARD_H):                                  # West + East (7 rows)
         rows.append(
             felt_bg() + " " * w_start + RESET +
             w_card[i] +
@@ -156,12 +183,12 @@ def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
             felt_bg() + " " * r_pad + RESET
         )
     rows.append(_felt_blank(center_w))                       # gap
-    for line in s_card:                                      # South card (5 rows)
+    for line in s_card:                                      # South card (7 rows)
         rows.append(_felt_pad(line, center_w))
     rows.append(s_label)                                     # S label
     rows.append(_felt_blank(center_w))                       # bottom padding
 
-    return rows  # 21 rows total
+    return rows  # 27 rows total
 
 
 def _render_hand_horizontal(
@@ -226,19 +253,17 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
         # Show the up-card in the center
         up_face = _card_face(state.up_card)
         center_rows = [
-            ansi_center(f"{BOLD}{white_fg()}ROUND {state.bidding_round}{RESET}", 20),
-            "",
-            ansi_center(up_face[0], 20),
-            ansi_center(up_face[1], 20),
-            ansi_center(up_face[2], 20),
-            ansi_center(up_face[3], 20),
-            ansi_center(up_face[4], 20),
+            ansi_center(f"{light_gray_fg()}UP CARD{RESET}", 20),
             "",
         ]
-        # Pad to match trick mat height if needed
-        while len(center_rows) < 21: # Trick mat is 21 rows
+        for row in up_face:
+            center_rows.append(ansi_center(row, 20))
+        center_rows.append("")
+
+        # Pad to match trick mat height if needed (now 27 rows)
+        while len(center_rows) < 27:
             center_rows.insert(0, "")
-            if len(center_rows) < 21:
+            if len(center_rows) < 27:
                 center_rows.append("")
     else:
         trick = state.current_trick
@@ -294,45 +319,20 @@ def _build_hud(state: GameState, term_w: int) -> str:
     taker_name = state.taker.name if state.taker else "-"
 
     # Live round points
-    ns_round = state.tricks_won_by_team(0)  # We'll need to count points instead of tricks
-    ew_round = state.tricks_won_by_team(1)
-    
-    # Actually calculate card points for better 'live' feel
-    from .deck import card_points
-    ns_pts = 0
-    ew_pts = 0
-    for trick in state.completed_tricks:
-        from .game import trick_winner_seat, team_of
-        winner = trick_winner_seat(trick, state.trump)
-        p = sum(card_points(tc.card, state.trump) for tc in trick)
-        if winner and team_of(winner) == 0:
-            ns_pts += p
-        elif winner:
-            ew_pts += p
-            
-    # Include Dix de Der in live score if 8 tricks are done
-    if len(state.completed_tricks) == 8:
-        from .game import trick_winner_seat, team_of
-        winner = trick_winner_seat(state.completed_tricks[-1], state.trump)
-        if winner and team_of(winner) == 0:
-            ns_pts += 10
-        elif winner:
-            ew_pts += 10
+    ns_pts, ew_pts = state.current_round_points
 
     left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
     mid  = (f"{white_fg()}Trump: {trump_sym}   "
             f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
             f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
-            f"Trick {trick_num}/8   Taker: {taker_name}{RESET}")
+            f"Trick {trick_num}/8   Taker: {taker_name}   "
+            f"{DIM}[H]istory [Z]Undo{RESET}")
     bar  = left + "   " + mid
     return ansi_ljust(bar, term_w)
 
 
 def animate_score_update(state: GameState, target_ns: int, target_ew: int, duration: float = 1.0) -> None:
     """Animate the team scores rolling up to their new values."""
-    import time
-    from .game import replace
-    
     start_ns, start_ew = state.team_scores
     steps = 20
     delay = duration / steps
@@ -427,8 +427,8 @@ def render(state: GameState, selection: int | None = None) -> str:
         prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
         lines.append(ansi_center(prompt, term_w))
 
-    # Pad to minimum height
-    while len(lines) < 26:
+    # Pad to minimum height to prevent screen flickering
+    while len(lines) < 45:
         lines.append("")
 
     # CRITICAL: use \r\n not \n.
@@ -436,7 +436,7 @@ def render(state: GameState, selection: int | None = None) -> str:
     # Without \r, the cursor moves DOWN but not back to column 1, so every
     # subsequent line starts where the previous one ended — producing the
     # diagonal stagger visible in the screenshot. \r\n fixes this.
-    return out + "\r\n".join(lines) + show_cursor()
+    return "".join([out, "\r\n".join(lines), show_cursor()])
 
 
 def display(state: GameState, selection: int | None = None) -> None:
@@ -486,10 +486,17 @@ def prompt_card(state: GameState, reader: KeyReader) -> Card | None:
                         if 0 <= idx < len(hand) and hand[idx] in legal:
                             return hand[idx]
             case Key.CHAR:
-                if event.char and event.char.isdigit():
-                    idx = int(event.char) - 1
-                    if 0 <= idx < len(hand) and hand[idx] in legal:
-                        return hand[idx]
+                if event.char:
+                    char = event.char.lower()
+                    if char == 'h':
+                        show_history(state, reader)
+                        continue
+                    if char == 'z':
+                        return "UNDO" # type: ignore[return-value]
+                    if char.isdigit():
+                        idx = int(char) - 1
+                        if 0 <= idx < len(hand) and hand[idx] in legal:
+                            return hand[idx]
 
 
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
@@ -570,10 +577,16 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 return options[sel]
             case Key.CHAR:
                 if event.char:
-                    if event.char.lower() == 'p':
+                    char = event.char.lower()
+                    if char == 'h':
+                        show_history(state, reader)
+                        continue
+                    if char == 'z':
+                        return "UNDO"
+                    if char == 'p':
                         return None
                     try:
-                        idx = int(event.char) - 1
+                        idx = int(char) - 1
                         if 0 <= idx < len(options):
                             return options[idx]
                     except ValueError:
@@ -582,36 +595,44 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
 
 def show_rules(reader: KeyReader) -> None:
     """Display scrollable rules and history in EN/FR."""
-    from .rules import RULES_CONTENT
     lang = "en"
     scroll = 0
     
-    while True:
-        term_w, term_h = shutil.get_terminal_size(fallback=(120, 40))
-        content = RULES_CONTENT[lang]
+    # Pre-render both languages
+    cached_renders: dict[str, list[str]] = {}
+    
+    def get_render(l: str) -> list[str]:
+        if l in cached_renders:
+            return cached_renders[l]
         
-        # Build all lines first
-        all_lines = []
-        all_lines.append(f"{BOLD}{gold_fg()}{content['title']}{RESET}")
-        all_lines.append("=" * visible_len(content['title']))
-        all_lines.append("")
+        content = RULES_CONTENT[l]
+        lines = []
+        lines.append(f"{BOLD}{gold_fg()}{content['title']}{RESET}")
+        lines.append("=" * visible_len(content['title']))
+        lines.append("")
         
         for section in content['sections']:
-            all_lines.append(f"{BOLD}{white_fg()}{section['header']}{RESET}")
-            all_lines.append("-" * len(section['header']))
+            lines.append(f"{BOLD}{white_fg()}{section['header']}{RESET}")
+            lines.append("-" * len(section['header']))
             # Wrap text manually
             words = section['text'].split()
             line = "  "
             for w in words:
                 if len(line) + len(w) > 70:
-                    all_lines.append(line)
+                    lines.append(line)
                     line = "  " + w + " "
                 else:
                     line += w + " "
-            all_lines.append(line)
-            all_lines.append("")
+            lines.append(line)
+            lines.append("")
             
-        all_lines.append(f"{DIM}Press [T] to Toggle Language ({lang.upper()}) | [Q/Enter] Back{RESET}")
+        lines.append(f"{DIM}Press [T] to Toggle Language ({l.upper()}) | [Q/Enter] Back{RESET}")
+        cached_renders[l] = lines
+        return lines
+
+    while True:
+        term_w, term_h = shutil.get_terminal_size(fallback=(120, 40))
+        all_lines = get_render(lang)
 
         # Window the lines
         view_h = term_h - 4
@@ -620,7 +641,7 @@ def show_rules(reader: KeyReader) -> None:
         
         out = clear_screen() + hide_cursor()
         rendered = "\r\n".join(ansi_center(line, term_w) for line in visible_lines)
-        sys.stdout.write(out + rendered)
+        sys.stdout.write("".join([out, rendered]))
         sys.stdout.flush()
         
         event = reader.read()
@@ -637,101 +658,158 @@ def show_rules(reader: KeyReader) -> None:
                     scroll = 0
 
 
+CARDS_ART = [
+    f"      {white_fg()}⢠⣴⣶⣶⣶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⣿⣿⣿⣿⣿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"     {white_fg()}⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"     {white_fg()}⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀⠀⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀{RESET}",
+    f"      {white_fg()}⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿{RESET}",
+    f"       {white_fg()}⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟{RESET}",
+    f"         {white_fg()}⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁⠀{RESET}",
+]
+
+CUP_TEMPLATE = [
+    "                       {steam0}",
+    "                        {steam1}",
+    "                 {gold}___...(-------)-....___{reset}",
+    "             {gold}.-''       )    (          ''-.{reset}",
+    "       {gold}.-'``'|-._             )         _.-|{reset}",
+    "      {gold}/  .--.|   `''---...........---''`   |{reset}",
+    "     {gold}/  /    |  {opt0}                |{reset}",
+    "     {gold}|  |    |  {opt1}                |{reset}",
+    "      {gold}\\  \\   |  {opt2}                |{reset}",
+    "       {gold}`\\ `\\ |  {opt3}                |{reset}",
+    "         {gold}`\\ `|  {opt4}                |{reset}",
+    "         {gold}_/ /\\  {opt5}                /{reset}",
+    "        {gold}(__/  \\                           /{reset}",
+    "     {gold}_..---''` \\                         /`''---.._{reset}",
+    "  {gold}.-'           \\                       /          '-.{reset}",
+    " {gold}:               `-.__             __.-'              :{reset}",
+    " {gold}:                  ) ''---...---'' (                 :{reset}",
+    "  {gold}'._               `''...___...--''`              _.'{reset}",
+    " {gold}jgs \\''--..__                              __..--''/{reset}",
+    "     {gold}'._     '''----.....______.....----'''     _.'{reset}",
+    "        {gold}`''--..,,_____            _____,,..--''`{reset}",
+    "                      {gold}`'''----'''`{reset}",
+]
+
+STEAMS = [
+    ("      (      ", "       )     (", "      (      "),
+    ("       )     ", "      (      )", "       )     "),
+    ("      (      ", "       )     (", "      (      "),
+    ("     (       ", "      )     (", "     (       ")
+]
+
 def _render_main_menu_art(sel: int, options: list[str], frame: int) -> list[str]:
     """Render the full main menu art with cards logo and chalice container."""
     f = frame % 4
-    # Steam frames
-    steams = [
-        ("      (      ", "       )     (", "      (      "),
-        ("       )     ", "      (      )", "       )     "),
-        ("      (      ", "       )     (", "      (      "),
-        ("     (       ", "      )     (", "     (       ")
-    ]
-    st = steams[f]
+    st = STEAMS[f]
     
-    g = gold_fg()
-    w = white_fg()
-    
-    cards_art = [
-        f"      {w}⢠⣴⣶⣶⣶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"      {w}⣿⣿⣿⣿⣿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"     {w}⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"     {w}⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"      {w}⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀{RESET}",
-        f"    {w}⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀⠀⠀⠀⠀⠀{RESET}",
-        f"    {w}⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆⠀⠀⠀⠀{RESET}",
-        f"    {w}⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀⠀⠀⠀{RESET}",
-        f"      {w}⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀{RESET}",
-        f"      {w}⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿{RESET}",
-        f"       {w}⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟{RESET}",
-        f"         {w}⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁⠀{RESET}",
-    ]
-
-    # The Vessel / Chalice frame template
-    cup = [
-        f"                       {w}{st[0]}{RESET}",
-        f"                        {w}{st[1]}{RESET}",
-        f"                 {g}___...(-------)-....___{RESET}",
-        f"             {g}.-''       )    (          ''-.{RESET}",
-        f"       {g}.-'``'|-._             )         _.-|{RESET}",
-        f"      {g}/  .--.|   `''---...........---''`   |{RESET}",
-        f"     {g}/  /    |  [[ OPT 0 ]]                |{RESET}",
-        f"     {g}|  |    |  [[ OPT 1 ]]                |{RESET}",
-        f"      {g}\\  \\   |  [[ OPT 2 ]]                |{RESET}",
-        f"       {g}`\\ `\\ |  [[ OPT 3 ]]                |{RESET}",
-        f"         {g}`\\ `|  [[ OPT 4 ]]                |{RESET}",
-        f"         {g}_/ /\\  [[ OPT 5 ]]                /{RESET}",
-        f"        {g}(__/  \\                           /{RESET}",
-        f"     {g}_..---''` \\                         /`''---.._{RESET}",
-        f"  {g}.-'           \\                       /          '-.{RESET}",
-        f" {g}:               `-.__             __.-'              :{RESET}",
-        f" {g}:                  ) ''---...---'' (                 :{RESET}",
-        f"  {g}'._               `''...___...--''`              _.'{RESET}",
-        f" {g}jgs \\''--..__                              __..--''/{RESET}",
-        f"     {g}'._     '''----.....______.....----'''     _.'{RESET}",
-        f"        {g}`''--..,,_____            _____,,..--''`{RESET}",
-        f"                      {g}`'''----'''`{RESET}",
-    ]
-
     # Process placeholders
+    opts = {}
+    for i in range(6):
+        label = options[i] if i < len(options) else ""
+        if i == sel:
+            text = f"{REVERSE} > {label} < {RESET}"
+        else:
+            text = f"  {label}  "
+        opts[f"opt{i}"] = ansi_center(text, 29)
+
     final_cup = []
-    for line in cup:
-        new_line = line
-        for i in range(6):
-            tag = f"[[ OPT {i} ]]"
-            if tag in line:
-                label = options[i] if i < len(options) else ""
-                if i == sel:
-                    text = f"{REVERSE} > {label} < {RESET}"
-                else:
-                    text = f"  {label}  "
-                # Center text in a fixed 29-character wide field
-                centered = ansi_center(text, 29)
-                new_line = line.replace(tag, centered)
-        final_cup.append(new_line)
+    for line in CUP_TEMPLATE:
+        final_cup.append(line.format(
+            steam0=f"{white_fg()}{st[0]}{RESET}",
+            steam1=f"{white_fg()}{st[1]}{RESET}",
+            gold=gold_fg(),
+            reset=RESET,
+            **opts
+        ))
 
-    return cards_art + [""] + final_cup
+    return CARDS_ART + [""] + final_cup
 
 
-def show_main_menu(reader: KeyReader, difficulty: str, target: int, speed: str) -> tuple[str, str, int, str]:
-    """Display the main menu and return (choice, difficulty, target, speed)."""
-    curr_diff = difficulty
+def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Seat, str]:
+    """Configure AI difficulty per seat."""
+    sel = 0
+    seats = [Seat.EAST, Seat.NORTH, Seat.WEST]
+    diffs = ["easy", "medium", "hard"]
+    
+    while True:
+        term_w, term_h = shutil.get_terminal_size(fallback=(120, 40))
+        
+        lines = []
+        lines.append(f"{BOLD}{gold_fg()}AI CONFIGURATION{RESET}")
+        lines.append("=" * 16)
+        lines.append("")
+        
+        for i, s in enumerate(seats):
+            prefix = f"{BOLD}{gold_fg()}> " if i == sel else "  "
+            lines.append(f"{prefix}{s.name}: < {current_diffs[s].capitalize()} >{RESET}")
+            
+        lines.append("")
+        lines.append(f"{DIM}↑/↓: Navigate  ←/→: Change  Enter/ESC: Back{RESET}")
+
+        out = clear_screen() + hide_cursor()
+        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
+        sys.stdout.write("".join([out, rendered]))
+        sys.stdout.flush()
+        
+        event = reader.read()
+        match event.key:
+            case Key.QUIT | Key.ESC:
+                return current_diffs
+            case Key.UP:
+                sel = (sel - 1) % len(seats)
+            case Key.DOWN:
+                sel = (sel + 1) % len(seats)
+            case Key.LEFT | Key.RIGHT:
+                delta = 1 if event.key == Key.RIGHT else -1
+                s = seats[sel]
+                # Ensure we have a valid index
+                try:
+                    curr_idx = diffs.index(current_diffs[s])
+                    new_idx = (curr_idx + delta) % len(diffs)
+                    current_diffs[s] = diffs[new_idx]
+                except ValueError:
+                    current_diffs[s] = "medium"
+            case Key.ENTER:
+                return current_diffs
+
+
+def show_main_menu(reader: KeyReader, diffs_map: dict[Seat, str], target: int, speed: str, mode: str) -> tuple[str, dict[Seat, str], int, str, str]:
+    """Display the main menu and return (choice, diffs_map, target, speed, mode)."""
     curr_target = target
     curr_speed = speed
+    curr_mode = mode
+    curr_diffs = diffs_map
     
     sel = 0
-    diffs = ["easy", "medium", "hard"]
     targs = [500, 1000, 1500, 2000]
     spds = ["slow", "normal", "fast", "instant"]
+    modes = ["Single Player", "Hotseat (2P)"]
     frame = 0
 
     while True:
+        # Determine display difficulty
+        unique_diffs = set(curr_diffs.values())
+        if len(unique_diffs) == 1:
+            diff_display = next(iter(unique_diffs)).capitalize()
+        else:
+            diff_display = "Mixed"
+
         options_labels = [
             "Start Game",
-            f"Difficulty:   < {curr_diff.capitalize()} >",
+            f"Mode:         < {curr_mode} >",
+            f"AI Config:     < {diff_display} >",
             f"Target Score: < {curr_target} >",
             f"Speed:        < {curr_speed.capitalize()} >",
             "Rules & History",
+            "Statistics",
             "Quit"
         ]
         
@@ -743,14 +821,13 @@ def show_main_menu(reader: KeyReader, difficulty: str, target: int, speed: str) 
         
         # Center the entire block vertically and horizontally
         v_pad = max(0, (term_h - len(all_lines) - 2) // 2)
-        h_pad = "" # Horizontal centering handled by ansi_center within _render
         
         lines = [""] * v_pad
         for line in all_lines:
             lines.append(ansi_center(line, term_w))
         
         lines.append("")
-        lines.append(ansi_center(f"{light_gray_fg()}↑/↓: Navigate  ←/→: Change Settings  Enter: Confirm  Q: Quit{RESET}", term_w))
+        lines.append(ansi_center(f"{light_gray_fg()}↑/↓: Navigate  ←/→: Change Settings  Enter: Confirm/Config  Q: Quit{RESET}", term_w))
         
         sys.stdout.write(out + "\r\n".join(lines))
         sys.stdout.flush()
@@ -762,7 +839,7 @@ def show_main_menu(reader: KeyReader, difficulty: str, target: int, speed: str) 
 
         match event.key:
             case Key.QUIT:
-                return "Quit", curr_diff, curr_target, curr_speed
+                return "Quit", curr_diffs, curr_target, curr_speed, curr_mode
             case Key.UP:
                 sel = (sel - 1) % len(options_labels)
             case Key.DOWN:
@@ -770,32 +847,144 @@ def show_main_menu(reader: KeyReader, difficulty: str, target: int, speed: str) 
             case Key.LEFT | Key.RIGHT:
                 delta = 1 if event.key == Key.RIGHT else -1
                 if sel == 1:
-                    curr_diff = diffs[(diffs.index(curr_diff) + delta) % len(diffs)]
+                    curr_mode = modes[(modes.index(curr_mode) + delta) % len(modes)]
                 elif sel == 2:
-                    curr_target = targs[(targs.index(curr_target) + delta) % len(targs)]
+                    # Change all AI difficulties at once
+                    diffs = ["easy", "medium", "hard"]
+                    # If mixed, start from medium
+                    base_diff = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "medium"
+                    new_idx = (diffs.index(base_diff) + delta) % len(diffs)
+                    new_diff = diffs[new_idx]
+                    for s in [Seat.EAST, Seat.NORTH, Seat.WEST]:
+                        curr_diffs[s] = new_diff
                 elif sel == 3:
+                    curr_target = targs[(targs.index(curr_target) + delta) % len(targs)]
+                elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + delta) % len(spds)]
             case Key.ENTER:
-                choice = ["Start Game", "Difficulty", "Target Score", "Speed", "Rules & History", "Quit"][sel]
-                if choice in ("Start Game", "Quit", "Rules & History"):
-                    return choice, curr_diff, curr_target, curr_speed
+                choice = ["Start Game", "Mode", "AI Config", "Target Score", "Speed", "Rules & History", "Statistics", "Quit"][sel]
+                if choice == "AI Config":
+                    curr_diffs = show_ai_config(reader, curr_diffs)
+                    continue
+                if choice in ("Start Game", "Quit", "Rules & History", "Statistics"):
+                    return choice, curr_diffs, curr_target, curr_speed, curr_mode
                 # For settings, Enter can also toggle forward
                 if sel == 1:
-                    curr_diff = diffs[(diffs.index(curr_diff) + 1) % len(diffs)]
-                elif sel == 2:
-                    curr_target = targs[(targs.index(curr_target) + 1) % len(targs)]
+                    curr_mode = modes[(modes.index(curr_mode) + 1) % len(modes)]
                 elif sel == 3:
+                    curr_target = targs[(targs.index(curr_target) + 1) % len(targs)]
+                elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
+
+
+def show_history(state: GameState, reader: KeyReader) -> None:
+    """Display a scrollable overlay of round-by-round scores."""
+    scroll = 0
+    
+    while True:
+        term_w, term_h = shutil.get_terminal_size(fallback=(120, 40))
+        
+        lines = []
+        lines.append(f"{BOLD}{gold_fg()}GAME HISTORY{RESET}")
+        lines.append("=" * 12)
+        lines.append("")
+        
+        if not state.score_history:
+            lines.append(f"{DIM}No rounds completed yet.{RESET}")
+        else:
+            # Table Header
+            header = f"{'RD':<3} | {'TAKER':<5} | {'NS':^15} | {'EW':^15}"
+            lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
+            lines.append("-" * len(header))
+            
+            for i, rs in enumerate(state.score_history):
+                rd = i + 1
+                taker = "NS" if rs.taker_team == 0 else "EW"
+                
+                # Format: "Card+Decl+Bel"
+                ns_break = f"{rs.ns_card_pts}+{rs.ns_decl_pts}+{rs.ns_belote_pts}"
+                ew_break = f"{rs.ew_card_pts}+{rs.ew_decl_pts}+{rs.ew_belote_pts}"
+                
+                ns_total = f"{BOLD}{rs.ns_total}{RESET}"
+                ew_total = f"{BOLD}{rs.ew_total}{RESET}"
+                
+                row = f"{rd:<3} | {taker:<5} | {ns_total:>3} ({ns_break:<9}) | {ew_total:>3} ({ew_break:<9})"
+                
+                status = ""
+                if rs.is_capot: status = f" {gold_fg()}CAPOT!{RESET}"
+                elif rs.is_failed: status = f" {red_fg()}CHUTE!{RESET}"
+                
+                lines.append(row + status)
+
+        lines.append("")
+        lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
+
+        view_h = term_h - 4
+        scroll = max(0, min(scroll, len(lines) - view_h))
+        visible_lines = lines[scroll : scroll + view_h]
+        
+        out = clear_screen() + hide_cursor()
+        rendered = "\r\n".join(ansi_center(line, term_w) for line in visible_lines)
+        sys.stdout.write("".join([out, rendered]))
+        sys.stdout.flush()
+        
+        event = reader.read()
+        return  # Any key returns
 
 
 def announce(message: str, duration: float = 2.0) -> None:
     """Display a transient announcement banner."""
-    import time
-    sys.stdout.write(f"\n{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}\n")
+    sys.stdout.write(f"\r\n{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}\r\n")
     sys.stdout.flush()
     time.sleep(duration)
 
+def play_sound(kind: str) -> None:
+    """Simple terminal sounds using bell."""
+    # We can use multiple bells or other tricks for different sounds
+    if kind == "trick":
+        sys.stdout.write("\a")
+    elif kind == "belote":
+        sys.stdout.write("\a\a")
+    elif kind == "chute":
+        sys.stdout.write("\a\a\a")
+    elif kind == "capot":
+        sys.stdout.write("\a\a\a\a\a")
+    sys.stdout.flush()
 
+
+from .stats import load_stats
+
+
+def show_stats(reader: KeyReader) -> None:
+    """Display global game statistics."""
+    stats = load_stats()
+    
+    while True:
+        term_w, term_h = shutil.get_terminal_size(fallback=(120, 40))
+        
+        lines = []
+        lines.append(f"{BOLD}{gold_fg()}GLOBAL STATISTICS{RESET}")
+        lines.append("=" * 17)
+        lines.append("")
+        
+        lines.append(f"  Games Played:        {stats.games_played}")
+        lines.append(f"  Games Won:           {stats.games_won}")
+        win_rate = (stats.games_won / stats.games_played * 100) if stats.games_played > 0 else 0
+        lines.append(f"  Win Rate:            {win_rate:.1f}%")
+        lines.append("")
+        lines.append(f"  Total Rounds:        {stats.total_rounds}")
+        lines.append(f"  Avg Pts per Round:   {(stats.total_points_scored / stats.total_rounds if stats.total_rounds > 0 else 0):.1f}")
+        lines.append("")
+        lines.append(f"  Capots Achieved:     {stats.capots_achieved}")
+        lines.append(f"  Max Capot Streak:    {stats.max_capot_streak}")
+        lines.append("")
+        lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
+
+        out = clear_screen() + hide_cursor()
+        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
+        sys.stdout.write("".join([out, rendered]))
+        sys.stdout.flush()
+        
 def show_final_screen(state: GameState) -> None:
     """Display the game-over screen."""
     ns, ew = state.team_scores
@@ -817,7 +1006,6 @@ def show_final_screen(state: GameState) -> None:
         "",
         f"  {BOLD}{gold_fg()}Winner: Team {winner}!{RESET}",
         "",
-        f"  {light_gray_fg()}Press Enter to exit{RESET}",
     ]
 
     sys.stdout.write(clear_screen())

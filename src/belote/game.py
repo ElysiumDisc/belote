@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Final
 
-from .deck import Card, Rank, Suit, trick_rank
+from .deck import Card, Rank, Suit, trick_rank, make_deck, shuffle as shuffle_deck_, deal as deal_cards_, card_points
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -111,6 +111,21 @@ class TrickCard:
 
 
 @dataclass(frozen=True, slots=True)
+class RoundScore:
+    taker_team: int
+    ns_card_pts: int
+    ew_card_pts: int
+    ns_decl_pts: int
+    ew_decl_pts: int
+    ns_belote_pts: int
+    ew_belote_pts: int
+    ns_total: int
+    ew_total: int
+    is_failed: bool
+    is_capot: bool
+
+
+@dataclass(frozen=True, slots=True)
 class GameState:
     hands: tuple[tuple[Card, ...], ...]  # indexed by Seat.value
     trump: Suit | None
@@ -127,6 +142,8 @@ class GameState:
     declarations_resolved: bool
     team_scores: tuple[int, int]  # (NS, EW)
     round_scores: tuple[int, int]  # this round declaration points (NS, EW)
+    current_round_points: tuple[int, int]  # this round card points (NS, EW)
+    score_history: tuple[RoundScore, ...]
     target: int
     up_card: Card | None  # The card turned up during bidding phase
     remaining_cards: tuple[Card, ...]  # The 11 cards to be dealt after bidding
@@ -170,6 +187,8 @@ def new_game(target: int = 1000) -> GameState:
         declarations_resolved=False,
         team_scores=(0, 0),
         round_scores=(0, 0),
+        current_round_points=(0, 0),
+        score_history=(),
         target=target,
         up_card=None,
         remaining_cards=(),
@@ -204,6 +223,7 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
         declarations=(),
         declarations_resolved=False,
         round_scores=(0, 0),
+        current_round_points=(0, 0),
         up_card=up_card,
         remaining_cards=remaining,
         bidder_index=0,
@@ -216,24 +236,11 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
 
 
 def shuffle_deck(rng: random.Random) -> tuple[Card, ...]:
-    from .deck import make_deck, shuffle as shuffle_deck_
     return shuffle_deck_(make_deck(), rng)
 
 
-def deal_cards(deck: tuple[Card, ...]) -> tuple[tuple[Card, ...], ...]:
-    from .deck import deal as deal_cards_
+def deal_cards(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tuple[Card, ...]]:
     return deal_cards_(deck)
-
-
-def bidding_order(dealer: Seat) -> tuple[Seat, ...]:
-    """Return seats in bidding order (counter-clockwise from left of dealer)."""
-    start = dealer.next_seat()
-    return tuple(start.next_seat().next_seat().next_seat() if i == 0 else
-                 (start if i == 0 else
-                  (start.next_seat() if i == 1 else
-                   (start.next_seat().next_seat() if i == 2 else
-                    start.next_seat().next_seat().next_seat())))
-                 for i in range(4))
 
 
 def get_bidder(dealer: Seat, index: int) -> Seat:
@@ -481,10 +488,26 @@ def play_card(state: GameState, card: Card) -> GameState:
         new_completed = state.completed_tricks + (new_trick,)
         tricks_count = len(new_completed)
 
+        # Update current round points
+        trick_pts = sum(card_points(tc.card, state.trump) for tc in new_trick) # type: ignore[arg-type]
+        ns_pts, ew_pts = state.current_round_points
+        if team_of(winner) == 0:
+            ns_pts += trick_pts
+        else:
+            ew_pts += trick_pts
+
+        # Last trick bonus
+        if tricks_count == 8:
+            if team_of(winner) == 0:
+                ns_pts += 10
+            else:
+                ew_pts += 10
+
+        new_round_points = (ns_pts, ew_pts)
+
         # Check if round is complete (8 tricks)
         if tricks_count >= 8:
             # Round over
-            ns_round, ew_round = state.round_scores
             return replace(
                 state,
                 hands=tuple(new_hands),
@@ -497,6 +520,7 @@ def play_card(state: GameState, card: Card) -> GameState:
                 announced=announced,
                 belote_tracker=tuple(belote_tracker),
                 first_trick_done=True,
+                current_round_points=new_round_points,
             )
         else:
             # Next trick led by winner
@@ -513,6 +537,7 @@ def play_card(state: GameState, card: Card) -> GameState:
                 announced=announced,
                 belote_tracker=tuple(belote_tracker),
                 first_trick_done=first_trick_done,
+                current_round_points=new_round_points,
             )
     else:
         # Next player in trick

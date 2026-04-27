@@ -11,6 +11,7 @@ from .game import (
     Carre,
     BeloteDecl,
     Declaration,
+    RoundScore,
     team_of,
     partner,
     trick_winner_seat,
@@ -27,6 +28,8 @@ _RANK_VALUES: dict[Rank, int] = {
     Rank.KING: 7,
     Rank.ACE: 8,
 }
+
+_VALUE_TO_RANK: dict[int, Rank] = {v: r for r, v in _RANK_VALUES.items()}
 
 # Carré point values
 _CARRE_POINTS: dict[Rank, int] = {
@@ -172,9 +175,7 @@ def _sequence_strength(seq: Sequence) -> tuple[int, int, bool]:
 
 def _carre_strength(carre: Carre) -> tuple[int, int]:
     """Comparable tuple for carré priority: (points, rank)."""
-    return (_CARRE_POINTS.get(
-        next(r for r in Rank if _RANK_VALUES[r] == carre.rank), 0
-    ), carre.rank)
+    return (_CARRE_POINTS.get(_VALUE_TO_RANK[carre.rank], 0), carre.rank)
 
 
 def _best_sequence(sequences: list[Sequence]) -> Sequence | None:
@@ -190,8 +191,7 @@ def _best_carre(carres: list[Carre]) -> Carre | None:
 
 
 def _carre_points(carre: Carre) -> int:
-    rank = next(r for r in Rank if _RANK_VALUES[r] == carre.rank)
-    return _CARRE_POINTS[rank]
+    return _CARRE_POINTS[_VALUE_TO_RANK[carre.rank]]
 
 
 def _sequence_points(seq: Sequence) -> int:
@@ -456,6 +456,38 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
 
     new_scores = (ns, ew)
 
+    # Create RoundScore for history
+    if breakdown.taker_team == 0:
+        round_score = RoundScore(
+            taker_team=0,
+            ns_card_pts=breakdown.taker_card_pts,
+            ew_card_pts=breakdown.defender_card_pts,
+            ns_decl_pts=breakdown.taker_declarations,
+            ew_decl_pts=breakdown.defender_declarations,
+            ns_belote_pts=breakdown.taker_belote,
+            ew_belote_pts=breakdown.defender_belote,
+            ns_total=breakdown.taker_total,
+            ew_total=breakdown.defender_total,
+            is_failed=breakdown.is_failed,
+            is_capot=breakdown.is_capot,
+        )
+    else:
+        round_score = RoundScore(
+            taker_team=1,
+            ns_card_pts=breakdown.defender_card_pts,
+            ew_card_pts=breakdown.taker_card_pts,
+            ns_decl_pts=breakdown.defender_declarations,
+            ew_decl_pts=breakdown.taker_declarations,
+            ns_belote_pts=breakdown.defender_belote,
+            ew_belote_pts=breakdown.taker_belote,
+            ns_total=breakdown.defender_total,
+            ew_total=breakdown.taker_total,
+            is_failed=breakdown.is_failed,
+            is_capot=breakdown.is_capot,
+        )
+
+    new_history = state.score_history + (round_score,)
+
     # Determine if game is over
     if ns >= state.target or ew >= state.target:
         from .game import Phase as P
@@ -480,6 +512,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         bidder_index=0,
         bid_suits=(),
         round_scores=(0, 0),
+        current_round_points=(0, 0),
+        score_history=new_history,
         declarations=(),
         declarations_resolved=False,
         announced=None,
