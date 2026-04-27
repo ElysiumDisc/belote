@@ -346,7 +346,10 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     if lead_suit == trump:
         # Trump led: must follow if possible, must overtrump if possible
         if my_suit_cards:
-            highest_in_trick = max(trick_rank(tc.card, trump) for tc in played_cards)
+            highest_in_trick = max(
+                (trick_rank(tc.card, trump) for tc in played_cards),
+                default=-1
+            )
             must_overtrump = any(
                 trick_rank(c, trump) > highest_in_trick for c in my_suit_cards
             )
