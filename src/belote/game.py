@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Final
 
-from .deck import Card, Suit, trick_rank
+from .deck import Card, Rank, Suit, trick_rank
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -454,8 +454,8 @@ def play_card(state: GameState, card: Card) -> GameState:
     announced = state.announced
     belote_tracker = list(state.belote_tracker)
     if state.trump:
-        king_trump = Card(state.trump, __import__("deck", fromlist=["Rank"]).Rank.KING)
-        queen_trump = Card(state.trump, __import__("deck", fromlist=["Rank"]).Rank.QUEEN)
+        king_trump = Card(state.trump, Rank.KING)
+        queen_trump = Card(state.trump, Rank.QUEEN)
         k_in_hand = king_trump in state.hand_of(state.turn)
         q_in_hand = queen_trump in state.hand_of(state.turn)
         played_k = card == king_trump
