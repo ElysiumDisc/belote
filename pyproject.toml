@@ -20,6 +20,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/ElysiumDisc/belote"
+Repository = "https://github.com/ElysiumDisc/belote"
+Issues = "https://github.com/ElysiumDisc/belote/issues"
+
 [project.scripts]
 belote = "belote.main:main"
 
