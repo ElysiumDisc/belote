@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from deck import Card, Suit
-from game import (
+from .deck import Card, Suit
+from .game import (
     GameState,
     Phase,
     Seat,

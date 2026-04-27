@@ -5,13 +5,13 @@ from __future__ import annotations
 import random
 import pytest
 
-from deck import Card, Rank, Suit, make_deck, shuffle, deal, trick_rank, card_points
-from game import (
+from belote.deck import Card, Rank, Suit, make_deck, shuffle, deal, trick_rank, card_points
+from belote.game import (
     GameState, Phase, Seat, TrickCard,
     new_game, start_round, place_bid, play_card,
     legal_cards, trick_winner_seat, team_of, partner,
 )
-from scoring import (
+from belote.scoring import (
     detect_belote, detect_sequences, detect_carres,
     resolve_declarations, score_round,
     BELOTE_POINTS, LAST_TRICK_BONUS, CAPOT_BASE, TOTAL_POINTS,
@@ -377,7 +377,7 @@ class TestCarres:
 class TestDeclarationPriority:
     def test_carre_beats_sequence(self):
         """Carré outranks any sequence."""
-        from scoring import Carre, Sequence
+        from belote.scoring import Carre, Sequence
         trump = Suit.SPADES
         jack_carre = Carre(rank=5, cards=tuple(Card(s, Rank.JACK) for s in Suit))
         seq = Sequence(length=5, top_rank=8, suit=Suit.HEARTS,
@@ -393,7 +393,7 @@ class TestDeclarationPriority:
         assert resolved.scoring_team == 1  # EW has carré
 
     def test_longer_sequence_wins(self):
-        from scoring import Sequence
+        from belote.scoring import Sequence
         trump = Suit.SPADES
         quarte = Sequence(length=4, top_rank=8, suit=Suit.HEARTS,
                           is_trump=False, cards=())
@@ -410,7 +410,7 @@ class TestDeclarationPriority:
         assert resolved.scoring_team == 0  # NS has longer sequence
 
     def test_trump_sequence_beats_equal_nontrump(self):
-        from scoring import Sequence
+        from belote.scoring import Sequence
         trump = Suit.SPADES
         trump_seq = Sequence(length=3, top_rank=6, suit=Suit.SPADES,
                              is_trump=True, cards=())

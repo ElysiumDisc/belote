@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-from deck import Card, Rank, Suit, card_points as card_points_fn
-from game import (
+from .deck import Card, Rank, Suit, card_points as card_points_fn
+from .game import (
     GameState,
     Seat,
     Sequence,
@@ -458,14 +458,14 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
 
     # Determine if game is over
     if ns >= state.target or ew >= state.target:
-        from game import Phase as P
+        from .game import Phase as P
         phase = P.GAME_OVER
     else:
-        from game import Phase as P
+        from .game import Phase as P
         phase = P.DEAL
 
     # Rotate dealer
-    from game import replace as dataclass_replace
+    from .game import replace as dataclass_replace
     return dataclass_replace(
         state,
         team_scores=new_scores,

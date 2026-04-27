@@ -13,21 +13,21 @@ import signal
 import sys
 import time
 
-from ansi import (
+from .ansi import (
     RESET, clear_screen, hide_cursor, show_cursor,
     alt_screen_on, alt_screen_off, BOLD, gold_fg, white_fg,
 )
-from input import KeyReader
-from deck import Suit
-from game import (
+from .input import KeyReader
+from .deck import Suit
+from .game import (
     GameState, Phase, Seat, new_game, start_round,
     play_card, legal_cards, team_of, partner,
     TrickCard, replace,
 )
-from bidding import bidding_turn, process_bid
-from scoring import score_round, apply_round_score
-from ai import AIPlayer, Difficulty
-from ui import (
+from .bidding import bidding_turn, process_bid
+from .scoring import score_round, apply_round_score
+from .ai import AIPlayer, Difficulty
+from .ui import (
     display, prompt_card, prompt_bid, announce, 
     show_final_screen, show_main_menu, animate_score_update,
     show_rules,
@@ -153,7 +153,7 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
         # 3. If this completes a trick, pause longer and show announcements
         if len(display_state.current_trick) == 4:
             if len(current.completed_tricks) == 7: # This was the 8th trick
-                from game import trick_winner_seat, team_of
+                from .game import trick_winner_seat, team_of
                 winner = trick_winner_seat(display_state.current_trick, current.trump)
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"
@@ -314,7 +314,7 @@ def main() -> None:
                     # Check if both teams reached target
                     ns, ew = state.team_scores
                     if ns >= target or ew >= target:
-                        from game import replace
+                        from .game import replace
                         state = replace(state, phase=Phase.GAME_OVER)
 
                 if state.phase == Phase.GAME_OVER:

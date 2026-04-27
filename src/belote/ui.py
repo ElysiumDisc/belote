@@ -4,8 +4,8 @@ import shutil
 import sys
 import time
 
-from deck import Card, Rank, Suit
-from game import (
+from .deck import Card, Rank, Suit
+from .game import (
     GameState,
     Phase,
     Seat,
@@ -14,7 +14,7 @@ from game import (
     team_of,
     partner,
 )
-from ansi import (
+from .ansi import (
     RESET, BOLD, DIM, REVERSE, UNDERLINE,
     fg, clear_screen, hide_cursor, show_cursor,
     felt_bg, red_fg, black_fg, card_face_bg, card_back_bg,
@@ -22,7 +22,7 @@ from ansi import (
     banner_bg, banner_fg, visible_len, ansi_center, ansi_ljust,
     face_card_bg,
 )
-from input import KeyReader, KeyEvent, Key
+from .input import KeyReader, KeyEvent, Key
 
 
 # Card display dimensions — fixed constants only, no terminal queries at module level.
@@ -298,11 +298,11 @@ def _build_hud(state: GameState, term_w: int) -> str:
     ew_round = state.tricks_won_by_team(1)
     
     # Actually calculate card points for better 'live' feel
-    from deck import card_points
+    from .deck import card_points
     ns_pts = 0
     ew_pts = 0
     for trick in state.completed_tricks:
-        from game import trick_winner_seat, team_of
+        from .game import trick_winner_seat, team_of
         winner = trick_winner_seat(trick, state.trump)
         p = sum(card_points(tc.card, state.trump) for tc in trick)
         if winner and team_of(winner) == 0:
@@ -312,7 +312,7 @@ def _build_hud(state: GameState, term_w: int) -> str:
             
     # Include Dix de Der in live score if 8 tricks are done
     if len(state.completed_tricks) == 8:
-        from game import trick_winner_seat, team_of
+        from .game import trick_winner_seat, team_of
         winner = trick_winner_seat(state.completed_tricks[-1], state.trump)
         if winner and team_of(winner) == 0:
             ns_pts += 10
@@ -331,7 +331,7 @@ def _build_hud(state: GameState, term_w: int) -> str:
 def animate_score_update(state: GameState, target_ns: int, target_ew: int, duration: float = 1.0) -> None:
     """Animate the team scores rolling up to their new values."""
     import time
-    from game import replace
+    from .game import replace
     
     start_ns, start_ew = state.team_scores
     steps = 20
@@ -582,7 +582,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
 
 def show_rules(reader: KeyReader) -> None:
     """Display scrollable rules and history in EN/FR."""
-    from rules import RULES_CONTENT
+    from .rules import RULES_CONTENT
     lang = "en"
     scroll = 0
     

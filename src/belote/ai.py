@@ -4,8 +4,8 @@ import random
 from dataclasses import dataclass
 from enum import Enum
 
-from deck import Card, Rank, Suit, trick_rank, card_points as card_points_fn
-from game import (
+from .deck import Card, Rank, Suit, trick_rank, card_points as card_points_fn
+from .game import (
     GameState,
     Seat,
     Phase,
@@ -163,7 +163,7 @@ class AIPlayer:
         p = partner(self.seat)
 
         # Check if partner is winning
-        from game import _current_trick_winner
+        from .game import _current_trick_winner
         current_winner = _current_trick_winner(
             [tc for tc in trick if tc.seat != self.seat], trump, lead_suit
         )
@@ -274,7 +274,7 @@ class AIPlayer:
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
-        from game import _current_trick_winner
+        from .game import _current_trick_winner
         current_winner = _current_trick_winner(
             [tc for tc in trick if tc.seat != self.seat], trump, lead_suit
         )

@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Final
 
-from deck import Card, Suit, trick_rank
+from .deck import Card, Suit, trick_rank
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -216,12 +216,12 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
 
 
 def shuffle_deck(rng: random.Random) -> tuple[Card, ...]:
-    from deck import make_deck, shuffle as shuffle_deck_
+    from .deck import make_deck, shuffle as shuffle_deck_
     return shuffle_deck_(make_deck(), rng)
 
 
 def deal_cards(deck: tuple[Card, ...]) -> tuple[tuple[Card, ...], ...]:
-    from deck import deal as deal_cards_
+    from .deck import deal as deal_cards_
     return deal_cards_(deck)
 
 
