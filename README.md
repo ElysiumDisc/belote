@@ -12,19 +12,14 @@ Complete implementation of the French card game Belote for the terminal, with a 
 ## Quick Start
 
 ```bash
-cd belote
+# Install in editable mode (recommended for development)
+pip install -e .
 
-# Play with default settings (medium difficulty, target 1000)
-python3 main.py
+# Play using the belote command
+belote
 
-# Custom difficulty
-python3 main.py --difficulty hard
-
-# Reproducible game (same seed = same deals)
-python3 main.py --seed 42
-
-# Lower target for quick games
-python3 main.py --target 500
+# Custom settings
+belote --difficulty hard --target 500
 ```
 
 ## Controls
@@ -61,24 +56,28 @@ Three difficulty levels:
 
 ```
 belote/
-├── main.py        # Entry point, game loop, CLI args
-├── deck.py        # Card, Suit, Rank, deck operations, points
-├── game.py        # GameState, phases, pure transitions, legal moves
-├── bidding.py     # Bidding phase state machine
-├── scoring.py     # Declarations, round scoring, capot
-├── ai.py          # Three-tier AI (easy/medium/hard)
-├── ansi.py        # ANSI escape helpers (colors, cursor)
-├── input.py       # Platform-dispatched key reader
-├── ui.py          # Render, prompts, full-screen layout
-└── tests/
-    └── test_belote.py  # 36 pytest tests
+├── src/belote/
+│   ├── main.py        # Entry point, game loop, CLI args
+│   ├── deck.py        # Card, Suit, Rank, deck operations, points
+│   ├── game.py        # GameState, phases, pure transitions, legal moves
+│   ├── bidding.py     # Bidding phase state machine
+│   ├── scoring.py     # Declarations, round scoring, capot
+│   ├── ai.py          # Three-tier AI (easy/medium/hard)
+│   ├── ansi.py        # ANSI escape helpers (colors, cursor)
+│   ├── input.py       # Platform-dispatched key reader
+│   ├── ui.py          # Render, prompts, full-screen layout
+│   └── rules.py       # Game rules content
+├── tests/
+│   └── test_belote.py  # 36 pytest tests
+├── pyproject.toml      # Build system configuration
+├── LICENSE             # MIT License
+└── DEVELOPMENT.md      # Detailed setup and dev guide
 ```
 
 ## Running Tests
 
 ```bash
-cd belote
-python3 -m pytest tests/ -v
+PYTHONPATH=src pytest
 ```
 
 ## Terminal Hygiene
