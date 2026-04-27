@@ -42,13 +42,44 @@ pip install pytest
 
 Run tests:
 ```bash
-pytest
+PYTHONPATH=src pytest
 ```
 
-## Packaging
+## Releasing a New Version
 
-To build the package:
+### Code-only update (push to GitHub without releasing a new PyPI version)
+
+If you're just iterating on code, fixing typos, updating docs, etc., and don't want to cut a new PyPI release yet:
+
 ```bash
-pip install build
-python -m build
+git add <files>
+git commit -m "<what changed>"
+git push origin master
+```
+
+### Releasing a new version (GitHub + PyPI)
+
+1. **Bump the version** in `pyproject.toml`.
+2. **Add a CHANGELOG entry** at the top of `CHANGELOG.md`.
+3. **Clean stale build artifacts:**
+   ```bash
+   rm -rf dist/ build/ *.egg-info/
+   ```
+4. **Build, validate, upload:**
+   ```bash
+   pipx run build --sdist --wheel
+   pipx run twine check dist/*
+   pipx run twine upload dist/*
+   ```
+5. **Verify the new version installs:**
+   ```bash
+   pipx upgrade belote
+   belote
+   ```
+6. **Commit and tag in git:**
+   ```bash
+   git add pyproject.toml CHANGELOG.md
+   git commit -m "Release vX.Y.Z"
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin master --tags
 ```
