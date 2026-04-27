@@ -57,7 +57,7 @@ git commit -m "<what changed>"
 git push origin master
 ```
 
-### Releasing a new version (GitHub + PyPI)
+## Releasing a New Version (Manual)
 
 1. **Bump the version** in `pyproject.toml`.
 2. **Add a CHANGELOG entry** at the top of `CHANGELOG.md`.
@@ -65,21 +65,20 @@ git push origin master
    ```bash
    rm -rf dist/ build/ *.egg-info/
    ```
-4. **Build, validate, upload:**
+4. **Build, validate, and upload:**
    ```bash
    pipx run build --sdist --wheel
    pipx run twine check dist/*
    pipx run twine upload dist/*
    ```
-5. **Verify the new version installs:**
-   ```bash
-   pipx upgrade belote
-   belote
-   ```
-6. **Commit and tag in git:**
+
+   *Note: `twine upload` will prompt for your PyPI credentials or use your `~/.pypirc` file.*
+
+5. **Commit and tag in git:**
    ```bash
    git add pyproject.toml CHANGELOG.md
    git commit -m "Release vX.Y.Z"
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin master --tags
+   ```
 ```
