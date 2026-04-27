@@ -65,6 +65,9 @@ Complete implementation of the French card game Belote for the terminal, with a 
 # Install in editable mode (recommended for development)
 pip install -e .
 
+# Or install from PyPI (once uploaded)
+pip install belote-cli
+
 # Play using the belote command
 belote
 
