@@ -332,20 +332,11 @@ def score_round(state: GameState) -> ScoringBreakdown:
         else:
             defender_card_pts += LAST_TRICK_BONUS
 
-    # --- Detect declarations from reconstructed initial hands ---
-    # Reconstruct each player's initial hand from all cards they played
-    hands_by_seat: dict[Seat, list[Card]] = {s: [] for s in Seat}
-    for trick in state.completed_tricks:
-        for tc in trick:
-            hands_by_seat[tc.seat].append(tc.card)
-    for tc in state.current_trick:
-        hands_by_seat[tc.seat].append(tc.card)
-    initial_hands = {s: tuple(cards) for s, cards in hands_by_seat.items()}
-
+    # --- Detect declarations from stored initial hands ---
     # Detect sequences, carres, and belote for each seat
     decls_per_seat: dict[Seat, dict[str, object]] = {}
     for seat in Seat:
-        hand = initial_hands[seat]
+        hand = state.hand_of(seat) if not state.completed_tricks else state.initial_hands[seat.value]
         seqs = detect_sequences(hand)
         carres = detect_carres(hand)
         has_belote = detect_belote(hand, trump)
@@ -520,3 +511,54 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         belote_tracker=(False, False),
         first_trick_done=False,
     )
+
+
+def get_declarations(state: GameState) -> tuple[Declaration, ...]:
+    """Pre-calculate all declarations from initial hands."""
+    if state.trump is None:
+        return ()
+
+    decls_per_seat: dict[Seat, dict[str, object]] = {}
+    for seat in Seat:
+        # If we have initial_hands, use them; otherwise use current hand (during bidding)
+        hand = state.initial_hands[seat.value] if any(state.initial_hands) else state.hand_of(seat)
+        if not hand:
+            continue
+            
+        seqs = detect_sequences(hand)
+        carres = detect_carres(hand)
+        has_belote = detect_belote(hand, state.trump)
+        decls_per_seat[seat] = {
+            "sequences": seqs,
+            "carres": carres,
+            "belote": has_belote,
+        }
+
+    resolved = resolve_declarations(decls_per_seat, state.trump)
+    scoring_team = resolved.scoring_team
+
+    all_decls: list[Declaration] = []
+    
+    # We only care about sequences and carres if they actually score
+    if scoring_team is not None:
+        for seat in Seat:
+            if team_of(seat) == scoring_team:
+                decls = decls_per_seat[seat]
+                for seq in decls.get("sequences", []): # type: ignore[attr-defined]
+                    all_decls.append(Declaration(seat, "sequence", seq))
+                for carre in decls.get("carres", []): # type: ignore[attr-defined]
+                    all_decls.append(Declaration(seat, "carre", carre))
+
+    # Belote is separate from sequence scoring
+    if resolved.ns_belote:
+        # Find which NS seat has it
+        for s in (Seat.SOUTH, Seat.NORTH):
+            if decls_per_seat[s].get("belote"):
+                all_decls.append(Declaration(s, "belote"))
+                
+    if resolved.ew_belote:
+        for s in (Seat.EAST, Seat.WEST):
+            if decls_per_seat[s].get("belote"):
+                all_decls.append(Declaration(s, "belote"))
+
+    return tuple(all_decls)

@@ -42,7 +42,7 @@ def test_statistics_persistence(tmp_path, monkeypatch):
     stats = load_stats()
     assert stats.games_played == 0
     
-    update_stats_game(won=True)
+    update_stats_game(won=True, num_rounds=10, difficulty="medium")
     stats = load_stats()
     assert stats.games_played == 1
     assert stats.games_won == 1

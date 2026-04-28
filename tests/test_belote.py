@@ -471,8 +471,16 @@ class TestCapot:
             assert w is not None and team_of(w) == 0, \
                 f"Trick {i+1}: Expected NS to win, got {w}"
 
+        # Reconstruct hands for scoring to work
+        hands_by_seat = [[] for _ in range(4)]
+        for trick in tricks:
+            for tc in trick:
+                hands_by_seat[tc.seat.value].append(tc.card)
+        initial_hands = tuple(tuple(h) for h in hands_by_seat)
+
         state = GameState(
             hands=(() for _ in range(4)),
+            initial_hands=initial_hands,
             trump=trump,
             dealer=Seat.SOUTH,
             leader=Seat.SOUTH,
@@ -496,6 +504,7 @@ class TestCapot:
             bidding_round=1,
             bid_suits=(),
             announced=None,
+            belote_holders={trump: Seat.SOUTH},
             belote_tracker=(False, False),
             first_trick_done=True,
         )

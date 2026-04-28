@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import sys
+from .render import get_term_size
+from ..game import Seat, GameState
+from ..ansi import (
+    RESET, BOLD, DIM, REVERSE,
+    gold_fg, white_fg, light_gray_fg,
+    ansi_center, clear_screen, hide_cursor,
+)
+from ..input import KeyReader, Key
+from .prompts import show_help, show_rules
+from .announce import toggle_mute, show_stats
+
+CARDS_ART = [
+    f"      {white_fg()}⢠⣴⣶⣶⣶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⣿⣿⣿⣿⣿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"     {white_fg()}⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"     {white_fg()}⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀⠀⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆⠀⠀⠀⠀{RESET}",
+    f"    {white_fg()}⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀⠀⠀⠀{RESET}",
+    f"      {white_fg()}⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀{RESET}",
+    f"      {white_fg()}⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿{RESET}",
+    f"       {white_fg()}⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟{RESET}",
+    f"         {white_fg()}⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁⠀{RESET}",
+]
+
+CUP_TEMPLATE = [
+    "                       {steam0}",
+    "                        {steam1}",
+    "                 {gold}___...(-------)-....___{reset}",
+    "             {gold}.-''       )    (          ''-.{reset}",
+    "       {gold}.-'``'|-._             )         _.-|{reset}",
+    "      {gold}/  .--.|   `''---...........---''`   |{reset}",
+    "     {gold}/  /    |  {opt0}                |{reset}",
+    "     {gold}|  |    |  {opt1}                |{reset}",
+    "      {gold}\\  \\   |  {opt2}                |{reset}",
+    "       {gold}`\\ `\\ |  {opt3}                |{reset}",
+    "         {gold}`\\ `|  {opt4}                |{reset}",
+    "         {gold}_/ /\\  {opt5}                /{reset}",
+    "        {gold}(__/  \\                           /{reset}",
+    "     {gold}_..---''` \\                         /`''---.._{reset}",
+    "  {gold}.-'           \\                       /          '-.{reset}",
+    " {gold}:               `-.__             __.-'              :{reset}",
+    " {gold}:                  ) ''---...---'' (                 :{reset}",
+    "  {gold}'._               `''...___...--''`              _.'{reset}",
+    " {gold}jgs \\''--..__                              __..--''/{reset}",
+    "     {gold}'._     '''----.....______.....----'''     _.'{reset}",
+    "        {gold}`''--..,,_____            _____,,..--''`{reset}",
+    "                      {gold}`'''----'''`{reset}",
+]
+
+STEAMS = [
+    ("      (      ", "       )     (", "      (      "),
+    ("       )     ", "      (      )", "       )     "),
+    ("      (      ", "       )     (", "      (      "),
+    ("     (       ", "      )     (", "     (       ")
+]
+
+def _render_main_menu_art(sel: int, options: list[str], frame: int) -> list[str]:
+    """Render the full main menu art with cards logo and chalice container."""
+    f = frame % 4
+    st = STEAMS[f]
+    
+    # Process placeholders
+    opts = {}
+    for i in range(6):
+        label = options[i] if i < len(options) else ""
+        if i == sel:
+            text = f"{REVERSE} > {label} < {RESET}"
+        else:
+            text = f"  {label}  "
+        opts[f"opt{i}"] = ansi_center(text, 29)
+
+    final_cup = []
+    for line in CUP_TEMPLATE:
+        final_cup.append(line.format(
+            steam0=f"{white_fg()}{st[0]}{RESET}",
+            steam1=f"{white_fg()}{st[1]}{RESET}",
+            gold=gold_fg(),
+            reset=RESET,
+            **opts
+        ))
+
+    return CARDS_ART + [""] + final_cup
+
+
+def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Seat, str]:
+    """Configure AI difficulty per seat."""
+    sel = 0
+    seats = [Seat.EAST, Seat.NORTH, Seat.WEST]
+    diffs = ["easy", "medium", "hard"]
+    
+    while True:
+        term_w, term_h = get_term_size()
+        
+        lines = []
+        lines.append(f"{BOLD}{gold_fg()}AI CONFIGURATION{RESET}")
+        lines.append("=" * 16)
+        lines.append("")
+        
+        for i, s in enumerate(seats):
+            prefix = f"{BOLD}{gold_fg()}> " if i == sel else "  "
+            lines.append(f"{prefix}{s.name}: < {current_diffs[s].capitalize()} >{RESET}")
+            
+        lines.append("")
+        lines.append(f"{DIM}↑/↓: Navigate  ←/→: Change  Enter/ESC: Back{RESET}")
+
+        out = clear_screen() + hide_cursor()
+        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
+        sys.stdout.write("".join([out, rendered]))
+        sys.stdout.flush()
+        
+        event = reader.read()
+        match event.key:
+            case Key.QUIT | Key.ESC:
+                return current_diffs
+            case Key.HELP:
+                show_help(reader)
+            case Key.MUTE:
+                toggle_mute()
+            case Key.UP:
+                sel = (sel - 1) % len(seats)
+            case Key.DOWN:
+                sel = (sel + 1) % len(seats)
+            case Key.LEFT | Key.RIGHT:
+                delta = 1 if event.key == Key.RIGHT else -1
+                s = seats[sel]
+                # Ensure we have a valid index
+                try:
+                    curr_idx = diffs.index(current_diffs[s])
+                    new_idx = (curr_idx + delta) % len(diffs)
+                    current_diffs[s] = diffs[new_idx]
+                except ValueError:
+                    current_diffs[s] = "medium"
+            case Key.ENTER:
+                return current_diffs
+
+
+def show_main_menu(reader: KeyReader, diffs_map: dict[Seat, str], target: int, speed: str, mode: str) -> tuple[str, dict[Seat, str], int, str, str]:
+    """Display the main menu and return (choice, diffs_map, target, speed, mode)."""
+    curr_target = target
+    curr_speed = speed
+    curr_mode = mode
+    curr_diffs = diffs_map
+    
+    sel = 0
+    targs = [500, 1000, 1500, 2000]
+    spds = ["slow", "normal", "fast", "instant"]
+    modes = ["Single Player", "Hotseat (2P)"]
+    frame = 0
+
+    while True:
+        # Determine display difficulty
+        unique_diffs = set(curr_diffs.values())
+        if len(unique_diffs) == 1:
+            diff_display = next(iter(unique_diffs)).capitalize()
+        else:
+            diff_display = "Mixed"
+
+        options_labels = [
+            "Start Game",
+            f"Mode:         < {curr_mode} >",
+            f"AI Config:     < {diff_display} >",
+            f"Target Score: < {curr_target} >",
+            f"Speed:        < {curr_speed.capitalize()} >",
+            "Rules & History",
+            "Statistics",
+            "Quit"
+        ]
+        
+        term_w, term_h = get_term_size()
+        out = clear_screen() + hide_cursor()
+        
+        # Build the art containing the menu
+        all_lines = _render_main_menu_art(sel, options_labels, frame)
+        
+        # Center the entire block vertically and horizontally
+        v_pad = max(0, (term_h - len(all_lines) - 2) // 2)
+        
+        lines = [""] * v_pad
+        for line in all_lines:
+            lines.append(ansi_center(line, term_w))
+        
+        lines.append("")
+        lines.append(ansi_center(f"{light_gray_fg()}↑/↓: Navigate  ←/→: Change Settings  Enter: Confirm/Config  Q: Quit{RESET}", term_w))
+        
+        sys.stdout.write(out + "\r\n".join(lines))
+        sys.stdout.flush()
+        
+        event = reader.read_timeout(0.3)
+        if event is None:
+            frame += 1
+            continue
+
+        match event.key:
+            case Key.QUIT:
+                return "Quit", curr_diffs, curr_target, curr_speed, curr_mode
+            case Key.HELP:
+                show_help(reader)
+            case Key.MUTE:
+                toggle_mute()
+            case Key.UP:
+                sel = (sel - 1) % len(options_labels)
+            case Key.DOWN:
+                sel = (sel + 1) % len(options_labels)
+            case Key.LEFT | Key.RIGHT:
+                delta = 1 if event.key == Key.RIGHT else -1
+                if sel == 1:
+                    curr_mode = modes[(modes.index(curr_mode) + delta) % len(modes)]
+                elif sel == 2:
+                    # Change all AI difficulties at once
+                    diffs = ["easy", "medium", "hard"]
+                    # If mixed, start from medium
+                    base_diff = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "medium"
+                    new_idx = (diffs.index(base_diff) + delta) % len(diffs)
+                    new_diff = diffs[new_idx]
+                    for s in [Seat.EAST, Seat.NORTH, Seat.WEST]:
+                        curr_diffs[s] = new_diff
+                elif sel == 3:
+                    curr_target = targs[(targs.index(curr_target) + delta) % len(targs)]
+                elif sel == 4:
+                    curr_speed = spds[(spds.index(curr_speed) + delta) % len(spds)]
+            case Key.ENTER:
+                choice = ["Start Game", "Mode", "AI Config", "Target Score", "Speed", "Rules & History", "Statistics", "Quit"][sel]
+                if choice == "AI Config":
+                    curr_diffs = show_ai_config(reader, curr_diffs)
+                    continue
+                if choice in ("Start Game", "Quit", "Rules & History", "Statistics"):
+                    return choice, curr_diffs, curr_target, curr_speed, curr_mode
+                # For settings, Enter can also toggle forward
+                if sel == 1:
+                    curr_mode = modes[(modes.index(curr_mode) + 1) % len(modes)]
+                elif sel == 3:
+                    curr_target = targs[(targs.index(curr_target) + 1) % len(targs)]
+                elif sel == 4:
+                    curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
+
+def show_final_screen(state: GameState) -> None:
+    """Display the game-over screen."""
+    ns, ew = state.team_scores
+    if ns >= state.target and ew >= state.target:
+        winner = "NS" if ns > ew else "EW"
+    elif ns >= state.target:
+        winner = "NS"
+    else:
+        winner = "EW"
+
+    lines = [
+        "",
+        f"{BOLD}{gold_fg()}{'=' * 50}{RESET}",
+        f"{BOLD}{gold_fg()}  GAME OVER{RESET}",
+        f"{BOLD}{gold_fg()}{'=' * 50}{RESET}",
+        "",
+        f"  {white_fg()}Team NS: {ns} points{RESET}",
+        f"  {white_fg()}Team EW: {ew} points{RESET}",
+        "",
+        f"  {BOLD}{gold_fg()}Winner: Team {winner}!{RESET}",
+        "",
+    ]
+
+    sys.stdout.write(clear_screen())
+    sys.stdout.write("\n".join(lines))
+    sys.stdout.flush()

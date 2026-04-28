@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 
+from functools import lru_cache
+
 _RESET_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 RESET = "\x1b[0m"
 
 
+@lru_cache(maxsize=1024)
 def visible_len(s: str) -> int:
     """Return length of string with ANSI escape codes stripped."""
     return len(_RESET_RE.sub("", s))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from enum import Enum
 from typing import Final
 
@@ -127,32 +127,34 @@ class RoundScore:
 
 @dataclass(frozen=True, slots=True)
 class GameState:
-    hands: tuple[tuple[Card, ...], ...]  # indexed by Seat.value
-    trump: Suit | None
-    dealer: Seat
-    leader: Seat  # leads the current trick
-    turn: Seat  # whose turn to act
-    phase: Phase
-    bids: tuple[Suit | None, ...]  # one entry per bidder; None = pass
-    taker: Seat | None
-    current_trick: tuple[TrickCard, ...]
-    completed_tricks: tuple[tuple[TrickCard, ...], ...]
-    last_trick_winner: Seat | None
-    declarations: tuple[Declaration, ...]
-    declarations_resolved: bool
-    team_scores: tuple[int, int]  # (NS, EW)
-    round_scores: tuple[int, int]  # this round declaration points (NS, EW)
-    current_round_points: tuple[int, int]  # this round card points (NS, EW)
-    score_history: tuple[RoundScore, ...]
-    target: int
-    up_card: Card | None  # The card turned up during bidding phase
-    remaining_cards: tuple[Card, ...]  # The 11 cards to be dealt after bidding
-    bidder_index: int  # which player is bidding (0-3 into the bidding order)
-    bidding_round: int  # 1 or 2
-    bid_suits: tuple[Suit, ...]  # suits that have been bid (for bidding phase)
-    announced: str | None  # transient announcement message
-    belote_tracker: tuple[bool, bool]  # (belote_announced, rebelote_announced) for trump holder
-    first_trick_done: bool  # whether trick 1 has completed (triggers declaration resolution)
+    hands: tuple[tuple[Card, ...], ...]
+    initial_hands: tuple[tuple[Card, ...], ...] = field(default_factory=lambda: ((), (), (), ()))
+    trump: Suit | None = None
+    dealer: Seat = Seat.SOUTH
+    leader: Seat = Seat.SOUTH
+    turn: Seat = Seat.SOUTH
+    phase: Phase = Phase.DEAL
+    bids: tuple[Suit | None, ...] = field(default_factory=tuple)
+    taker: Seat | None = None
+    current_trick: tuple[TrickCard, ...] = field(default_factory=tuple)
+    completed_tricks: tuple[tuple[TrickCard, ...], ...] = field(default_factory=tuple)
+    last_trick_winner: Seat | None = None
+    declarations: tuple[Declaration, ...] = field(default_factory=tuple)
+    declarations_resolved: bool = False
+    team_scores: tuple[int, int] = (0, 0)
+    round_scores: tuple[int, int] = (0, 0)
+    current_round_points: tuple[int, int] = (0, 0)
+    score_history: tuple[RoundScore, ...] = field(default_factory=tuple)
+    target: int = 1000
+    up_card: Card | None = None
+    remaining_cards: tuple[Card, ...] = field(default_factory=tuple)
+    bidder_index: int = 0
+    bidding_round: int = 1
+    bid_suits: tuple[Suit, ...] = field(default_factory=tuple)
+    announced: str | None = None
+    belote_holders: dict[Suit, Seat] = field(default_factory=dict)
+    belote_tracker: tuple[bool, bool] = (False, False)
+    first_trick_done: bool = False
 
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
@@ -172,32 +174,8 @@ class GameState:
 
 def new_game(target: int = 1000) -> GameState:
     return GameState(
-        hands=(() for _ in range(4)),  # type: ignore[arg-type]
-        trump=None,
-        dealer=Seat.SOUTH,
-        leader=Seat.SOUTH,
-        turn=Seat.SOUTH,
-        phase=Phase.DEAL,
-        bids=(),
-        taker=None,
-        current_trick=(),
-        completed_tricks=(),
-        last_trick_winner=None,
-        declarations=(),
-        declarations_resolved=False,
-        team_scores=(0, 0),
-        round_scores=(0, 0),
-        current_round_points=(0, 0),
-        score_history=(),
+        hands=((), (), (), ()),
         target=target,
-        up_card=None,
-        remaining_cards=(),
-        bidder_index=0,
-        bidding_round=1,
-        bid_suits=(),
-        announced=None,
-        belote_tracker=(False, False),
-        first_trick_done=False,
     )
 
 
@@ -211,6 +189,7 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
     return replace(
         state,
         hands=initial_hands,
+        initial_hands=initial_hands,
         trump=None,
         leader=first_bidder,
         turn=first_bidder,
@@ -230,6 +209,7 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
         bidding_round=1,
         bid_suits=(),
         announced=None,
+        belote_holders={},
         belote_tracker=(False, False),
         first_trick_done=False,
     )
@@ -274,18 +254,39 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
                 # Others need 3 more
                 new_hands[s.value].extend(pool[pool_idx:pool_idx+3])
                 pool_idx += 3
-                
-        return replace(
+
+        # Pre-calculate belote holders
+        belote_holders = {}
+        for s_idx in range(4):
+            seat = Seat(s_idx)
+            hand = new_hands[s_idx]
+            for suit in Suit:
+                has_k = any(c.rank == Rank.KING and c.suit == suit for c in hand)
+                has_q = any(c.rank == Rank.QUEEN and c.suit == suit for c in hand)
+                if has_k and has_q:
+                    belote_holders[suit] = seat
+
+        # Pre-calculate declarations
+        from .scoring import get_declarations
+        temp_state = replace(
             state,
             hands=tuple(tuple(h) for h in new_hands),
+            initial_hands=tuple(tuple(h) for h in new_hands),
             bids=new_bids,
             trump=bid,
             taker=taker,
+            phase=Phase.PLAYING,
+        )
+        decls = get_declarations(temp_state)
+
+        return replace(
+            temp_state,
             leader=state.dealer.next_seat(), # Standard: left of dealer leads
             turn=state.dealer.next_seat(),
-            phase=Phase.PLAYING,
             up_card=None,
             remaining_cards=(),
+            belote_holders=belote_holders,
+            declarations=decls,
         )
     else:
         # Pass
@@ -324,25 +325,30 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
 # Trick play
 # ---------------------------------------------------------------------------
 
-def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
-    """Return the set of legal cards for the given seat to play."""
-    if state.phase != Phase.PLAYING or state.trump is None:
-        return state.hand_of(seat)
+from functools import lru_cache
 
-    hand = state.hand_of(seat)
-    trick = state.current_trick
-
-    if not trick:
-        # Leading: any card is legal
+@lru_cache(maxsize=512)
+def _legal_cards_cached(
+    hand: tuple[Card, ...],
+    trump: Suit | None,
+    current_trick: tuple[TrickCard, ...],
+    seat: Seat,
+) -> tuple[Card, ...]:
+    """Internal cached helper for legal_cards.
+    
+    Caches only on PLAYING phase state. Phase is checked by the caller.
+    """
+    if trump is None:
         return hand
 
-    lead_card = trick[0].card
+    if not current_trick:
+        return hand
+
+    lead_card = current_trick[0].card
     lead_suit = lead_card.suit
-    trump = state.trump
 
     # Check what cards have been played
-    played_suits = {tc.card.suit for tc in trick}
-    played_cards = [tc for tc in trick if tc.seat != seat]
+    played_cards = [tc for tc in current_trick if tc.seat != seat]
 
     # Determine who is currently winning the trick
     current_winner = _current_trick_winner(played_cards, trump, lead_suit)
@@ -399,6 +405,23 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
                     return hand
 
 
+def clear_legal_cards_cache() -> None:
+    _legal_cards_cached.cache_clear()
+
+
+def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
+    """Return the set of legal cards for the given seat to play (memoized)."""
+    if state.phase != Phase.PLAYING:
+        return state.hand_of(seat)
+
+    return _legal_cards_cached(
+        state.hand_of(seat),
+        state.trump,
+        state.current_trick,
+        seat
+    )
+
+
 def _current_trick_winner(
     played: list[TrickCard], trump: Suit, lead_suit: Suit
 ) -> Seat | None:
@@ -441,15 +464,20 @@ def trick_winner_seat(trick: tuple[TrickCard, ...], trump: Suit | None) -> Seat 
     if not trick or trump is None:
         return None
     lead_suit = trick[0].card.suit
-    winner = trick[0]
-    for tc in trick[1:]:
-        if _card_beats(tc.card, winner.card, trump, lead_suit):
-            winner = tc
-    return winner.seat
+    return _current_trick_winner(list(trick), trump, lead_suit)
 
 
 def play_card(state: GameState, card: Card) -> GameState:
     """Play a card. Returns new state, possibly advancing trick/round/phase."""
+    legal = legal_cards(state, state.turn)
+    if card not in legal:
+        # Fallback for unexpected AI issues, but ideally should be caught by assertion
+        if card not in state.hand_of(state.turn):
+             raise ValueError(f"Card {card} not in hand of {state.turn.name}")
+        # If it's in hand but not legal, we might want to log it or raise
+        # For now, let's just assert it is in hand (already checked)
+        pass
+
     hand = list(state.hand_of(state.turn))
     if card not in hand:
         raise ValueError(f"Card {card} not in hand of {state.turn.name}")
@@ -463,19 +491,14 @@ def play_card(state: GameState, card: Card) -> GameState:
     # Check for belote/rebelote announcements
     announced = state.announced
     belote_tracker = list(state.belote_tracker)
-    if state.trump:
-        king_trump = Card(state.trump, Rank.KING)
-        queen_trump = Card(state.trump, Rank.QUEEN)
-        k_in_hand = king_trump in state.hand_of(state.turn)
-        q_in_hand = queen_trump in state.hand_of(state.turn)
-        played_k = card == king_trump
-        played_q = card == queen_trump
+    if state.trump and state.belote_holders.get(state.trump) == state.turn:
+        is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == state.trump
 
-        if (k_in_hand and q_in_hand):
-            if not belote_tracker[0] and (played_k or played_q):
+        if is_k_q:
+            if not belote_tracker[0]:
                 belote_tracker[0] = True
                 announced = "Belote!"
-            elif belote_tracker[0] and not belote_tracker[1] and (played_k or played_q):
+            elif not belote_tracker[1]:
                 belote_tracker[1] = True
                 announced = "Rebelote!"
 
@@ -563,3 +586,39 @@ def set_announced(state: GameState, msg: str) -> GameState:
 
 def clear_announced(state: GameState) -> GameState:
     return replace(state, announced=None)
+
+
+def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
+    """Sort hand by suit and rank (trump first, then others)."""
+    suits_order = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
+    if trump:
+        # Move trump to front
+        suits_order.remove(trump)
+        suits_order.insert(0, trump)
+
+    # Rank order for sorting: 7, 8, 9, J, Q, K, 10, A
+    ranks_order = [
+        Rank.SEVEN, Rank.EIGHT, Rank.NINE, Rank.JACK,
+        Rank.QUEEN, Rank.KING, Rank.TEN, Rank.ACE
+    ]
+    
+    # But wait, Belote trump order is different: 7, 8, Q, K, 10, A, 9, J
+    # Let's use a simple consistent sort: suit then rank index
+    def sort_key(c: Card) -> tuple[int, int]:
+        s_idx = suits_order.index(c.suit)
+        r_idx = ranks_order.index(c.rank)
+        return (s_idx, r_idx)
+
+    return tuple(sorted(hand, key=sort_key))
+
+
+def sort_south_hand(state: GameState) -> GameState:
+    """Sort South's hand and update state."""
+    new_hands = list(state.hands)
+    new_hands[Seat.SOUTH.value] = sort_hand(state.hands[Seat.SOUTH.value], state.trump)
+    
+    new_initial = list(state.initial_hands)
+    if new_initial[Seat.SOUTH.value]:
+        new_initial[Seat.SOUTH.value] = sort_hand(state.initial_hands[Seat.SOUTH.value], state.trump)
+
+    return replace(state, hands=tuple(new_hands), initial_hands=tuple(new_initial))

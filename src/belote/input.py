@@ -16,8 +16,12 @@ class Key(Enum):
     DOWN = "DOWN"
     ENTER = "ENTER"
     ESC = "ESC"
+    SPACE = "SPACE"
     CHAR = "CHAR"
     QUIT = "QUIT"
+    HELP = "HELP"
+    SORT = "SORT"
+    MUTE = "MUTE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,11 +113,23 @@ class KeyReader:
         if byte == 0x09:
             return KeyEvent(Key.ENTER)
 
+        # Space
+        if byte == 0x20:
+            return KeyEvent(Key.SPACE)
+
         # Printable character
         try:
             ch = buf.decode("utf-8", errors="replace")
             if ch.lower() == 'q':
                 return KeyEvent(Key.QUIT)
+            if ch == '?':
+                return KeyEvent(Key.HELP)
+            if ch.lower() == 'h':
+                return KeyEvent(Key.HELP)
+            if ch.lower() == 'o':
+                return KeyEvent(Key.SORT)
+            if ch.lower() == 'm':
+                return KeyEvent(Key.MUTE)
             return KeyEvent(Key.CHAR, ch)
         except Exception:
             return KeyEvent(Key.CHAR, chr(byte))
@@ -148,4 +164,6 @@ if sys.platform == "win32":
                 return KeyEvent(Key.ENTER)
             if ch == "\x1b":
                 return KeyEvent(Key.ESC)
+            if ch == " ":
+                return KeyEvent(Key.SPACE)
             return KeyEvent(Key.CHAR, ch)
