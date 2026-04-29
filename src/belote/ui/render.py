@@ -1,79 +1,85 @@
 from __future__ import annotations
 
-import shutil
 import signal
 import sys
 from functools import lru_cache
 
-from ..deck import Card, Rank, card_points
+from ..ansi import (
+    BOLD,
+    DIM,
+    RESET,
+    UNDERLINE,
+    ansi_center,
+    ansi_ljust,
+    black_fg,
+    card_back_bg,
+    card_face_bg,
+    clear_to_eol,
+    face_card_bg,
+    felt_bg,
+    felt_placeholder_fg,
+    gold_fg,
+    hide_cursor,
+    highlight_bg,
+    light_gray_fg,
+    move,
+    red_fg,
+    show_cursor,
+    visible_len,
+    white_fg,
+)
+from ..config import GLOBAL_CONFIG
+from ..context import TERMINAL
+from ..deck import Card, Rank
+from ..themes import theme_manager
 from ..game import (
     GameState,
     Phase,
     Seat,
     legal_cards,
-    replace,
-)
-from ..ansi import (
-    RESET, BOLD, DIM,
-    fg, hide_cursor, show_cursor, move, clear_to_eol,
-    felt_bg, red_fg, black_fg, card_face_bg, card_back_bg,
-    highlight_bg, gold_fg, white_fg, light_gray_fg,
-    visible_len, ansi_center, ansi_ljust,
-    face_card_bg,
 )
 
-# Card display dimensions — optimized for "Supreme Quality" 9x7 layout.
-CARD_W = 9
-CARD_H = 7
-CARD_GAP = 1
+# Card display dimensions — from GLOBAL_CONFIG
+CARD_W = GLOBAL_CONFIG.CARD_W
+CARD_H = GLOBAL_CONFIG.CARD_H
+CARD_GAP = GLOBAL_CONFIG.CARD_GAP
 
 # Fixed visible width for the WEST and EAST side columns in the middle section.
 SIDE_COL_W = 22
 
-_TERM_SIZE_CACHE: tuple[int, int] | None = None
-
 
 def get_term_size() -> tuple[int, int]:
     """Get terminal size, using cached value if available."""
-    global _TERM_SIZE_CACHE
-    if _TERM_SIZE_CACHE is None:
-        _TERM_SIZE_CACHE = shutil.get_terminal_size(fallback=(120, 40))
-    return _TERM_SIZE_CACHE
+    return TERMINAL.get_size()
 
 
 def _handle_sigwinch(_signum: int, _frame: object) -> None:
     """Invalidate terminal size cache on resize."""
-    global _TERM_SIZE_CACHE
-    _TERM_SIZE_CACHE = None
-
-
+    TERMINAL.clear_cache()
 if hasattr(signal, "SIGWINCH"):
     signal.signal(signal.SIGWINCH, _handle_sigwinch)
 
 
-import sys
-
-_HAS_UTF8 = sys.stdout.encoding and sys.stdout.encoding.lower() in ("utf-8", "utf8")
-
 def _card_symbol(card: Card) -> str:
-    suit_str = card.suit.symbol if _HAS_UTF8 else card.suit.name[0]
+
+    suit_str = card.suit.symbol if TERMINAL.has_utf8 else card.suit.name[0]
     return f"{card.rank.value}{suit_str}"
 
 
-@lru_cache(maxsize=128)
-def _card_face(card: Card, selected: bool = False, legal: bool = True) -> list[str]:
+@lru_cache(maxsize=1024)
+def _card_face_internal(card: Card, selected: bool, legal: bool, theme_name: str, has_utf8: bool) -> list[str]:
     """Render a card as CARD_H lines of width CARD_W with Art Nouveau styling (cached)."""
     rank_str = card.rank.value
-    suit_sym = card.suit.symbol if _HAS_UTF8 else card.suit.name[0]
-    
+    suit_sym = card.suit.symbol if has_utf8 else card.suit.name[0]
+
     # Top-left and bottom-right rank displays
     tl_rank = rank_str.ljust(2)
     br_rank = rank_str.rjust(2)
 
     is_face = card.rank in (Rank.JACK, Rank.QUEEN, Rank.KING)
-    
+
     color = red_fg() if card.suit.is_red else black_fg()
-    
+
     if selected:
         bg_code = highlight_bg()
     elif is_face:
@@ -83,35 +89,35 @@ def _card_face(card: Card, selected: bool = False, legal: bool = True) -> list[s
 
     prefix = "" if legal else DIM
     inner_w = CARD_W - 2
-    
+
     # Ornate Art Nouveau-inspired elements
     art_top = " " * inner_w
     art_mid = " " * inner_w
     art_bot = " " * inner_w
 
     if card.rank == Rank.JACK:
-        art_top = "  ▄▆▄  " if _HAS_UTF8 else "  ***  "
+        art_top = "  ▄▆▄  " if has_utf8 else "  ***  "
         art_mid = f"  {suit_sym}V{suit_sym}  "
-        art_bot = "  ▀▆▀  " if _HAS_UTF8 else "  ***  "
+        art_bot = "  ▀▆▀  " if has_utf8 else "  ***  "
     elif card.rank == Rank.QUEEN:
-        art_top = "  ╭▼╮  " if _HAS_UTF8 else "  ( )  "
+        art_top = "  ╭▼╮  " if has_utf8 else "  ( )  "
         art_mid = f"  {suit_sym}Q{suit_sym}  "
-        art_bot = "  ╰─╯  " if _HAS_UTF8 else "  ---  "
+        art_bot = "  ╰─╯  " if has_utf8 else "  ---  "
     elif card.rank == Rank.KING:
-        art_top = "  ╔█╗  " if _HAS_UTF8 else "  [#]  "
+        art_top = "  ╔█╗  " if has_utf8 else "  [#]  "
         art_mid = f"  {suit_sym}K{suit_sym}  "
-        art_bot = "  ╚═╝  " if _HAS_UTF8 else "  [=]  "
+        art_bot = "  ╚═╝  " if has_utf8 else "  [=]  "
     elif card.rank == Rank.ACE:
-        art_top = "   ▲   " if _HAS_UTF8 else "   ^   "
+        art_top = "   ▲   " if has_utf8 else "   ^   "
         art_mid = f"  {suit_sym}A{suit_sym}  "
-        art_bot = "   ▼   " if _HAS_UTF8 else "   v   "
+        art_bot = "   ▼   " if has_utf8 else "   v   "
     else:
         # Pips for numbered cards - simplified but elegant
         art_mid = f"   {suit_sym}   "
 
     # Use ornate border characters
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if _HAS_UTF8 else ("+", "+", "+", "+", "-", "|")
-    
+    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+
     return [
         f"{prefix}{bg_code}{color}{b_tl}{b_h * inner_w}{b_tr}{RESET}",
         f"{prefix}{bg_code}{color}{b_v}{tl_rank}{' ' * (inner_w-2)}{b_v}{RESET}",
@@ -123,20 +129,35 @@ def _card_face(card: Card, selected: bool = False, legal: bool = True) -> list[s
     ]
 
 
-def _card_back() -> list[str]:
+def _get_card_face(card: Card, selected: bool = False, legal: bool = True) -> list[str]:
+    """Helper to call cached _card_face with current global state."""
+    return _card_face_internal(
+        card, selected, legal,
+        theme_manager._current_theme_name,
+        TERMINAL.has_utf8
+    )
+
+
+def clear_card_cache() -> None:
+    """Clear the card face render cache. Call after changing the active theme."""
+    _card_face_internal.cache_clear()
+
+
+@lru_cache(maxsize=128)
+def _card_back(theme_name: str, has_utf8: bool) -> list[str]:
     """Render a face-down card with an ornate pattern."""
     inner_w = CARD_W - 2
     # Decorative lattice pattern for the back
     pattern = [
-        " ░▒▓▒░ " if _HAS_UTF8 else " XXXXX ",
-        " ░▒▓▒░ " if _HAS_UTF8 else " XXXXX ",
-        " ░▒▓▒░ " if _HAS_UTF8 else " XXXXX ",
-        " ░▒▓▒░ " if _HAS_UTF8 else " XXXXX ",
-        " ░▒▓▒░ " if _HAS_UTF8 else " XXXXX ",
+        " ░▒▓▒░ " if has_utf8 else " XXXXX ",
+        " ░▒▓▒░ " if has_utf8 else " XXXXX ",
+        " ░▒▓▒░ " if has_utf8 else " XXXXX ",
+        " ░▒▓▒░ " if has_utf8 else " XXXXX ",
+        " ░▒▓▒░ " if has_utf8 else " XXXXX ",
     ]
-    
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if _HAS_UTF8 else ("+", "+", "+", "+", "-", "|")
-    
+
+    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+
     res = [f"{card_back_bg()}{b_tl}{b_h * inner_w}{b_tr}{RESET}"]
     for line in pattern:
         res.append(f"{card_back_bg()}{b_v}{line}{b_v}{RESET}")
@@ -144,14 +165,23 @@ def _card_back() -> list[str]:
     return res
 
 
+def _get_card_back() -> list[str]:
+    return _card_back(theme_manager._current_theme_name, TERMINAL.has_utf8)
+
+
 def _card_back_small() -> str:
     """Single-line face-down card for opponent hand display."""
-    char = "▓▓" if _HAS_UTF8 else "[]"
+    char = "▓▓" if TERMINAL.has_utf8 else "[]"
     return f"{card_back_bg()}{char}{RESET}"
 
 
-def _felt_blank(width: int) -> str:
+@lru_cache(maxsize=32)
+def _felt_blank_internal(width: int, theme_name: str) -> str:
     return felt_bg() + " " * width + RESET
+
+
+def _get_felt_blank(width: int) -> str:
+    return _felt_blank_internal(width, theme_manager._current_theme_name)
 
 
 def _felt_pad(content: str, width: int) -> str:
@@ -166,7 +196,7 @@ def _felt_pad(content: str, width: int) -> str:
 def _felt_placeholder() -> list[str]:
     """Card-sized dashed outline on the felt — shown for an empty trick slot."""
     inner_w = CARD_W - 2
-    dim = fg(35, 130, 70)
+    dim = felt_placeholder_fg()
     top    = felt_bg() + dim + "┌" + "─" * inner_w + "┐" + RESET
     mid    = felt_bg() + dim + "│" + " " * inner_w + "│" + RESET
     bottom = felt_bg() + dim + "└" + "─" * inner_w + "┘" + RESET
@@ -176,7 +206,7 @@ def _felt_placeholder() -> list[str]:
 def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
     """21-row green felt mat with full card graphics at compass positions."""
     def slot(seat: Seat) -> list[str]:
-        return _card_face(seat_map[seat]) if seat in seat_map else _felt_placeholder()
+        return _get_card_face(seat_map[seat]) if seat in seat_map else _felt_placeholder()
 
     n_card = slot(Seat.NORTH)
     w_card = slot(Seat.WEST)
@@ -194,11 +224,11 @@ def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
 
     rows: list[str] = []
 
-    rows.append(_felt_blank(center_w))                       # top padding
+    rows.append(_get_felt_blank(center_w))                       # top padding
     rows.append(n_label)                                     # N label
     for line in n_card:                                      # North card (7 rows)
         rows.append(_felt_pad(line, center_w))
-    rows.append(_felt_blank(center_w))                       # gap
+    rows.append(_get_felt_blank(center_w))                       # gap
     for i in range(CARD_H):                                  # West + East (7 rows)
         rows.append(
             felt_bg() + " " * w_start + RESET +
@@ -207,11 +237,11 @@ def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
             e_card[i] +
             felt_bg() + " " * r_pad + RESET
         )
-    rows.append(_felt_blank(center_w))                       # gap
+    rows.append(_get_felt_blank(center_w))                       # gap
     for line in s_card:                                      # South card (7 rows)
         rows.append(_felt_pad(line, center_w))
     rows.append(s_label)                                     # S label
-    rows.append(_felt_blank(center_w))                       # bottom padding
+    rows.append(_get_felt_blank(center_w))                       # bottom padding
 
     return rows  # 27 rows total
 
@@ -231,8 +261,9 @@ def _render_hand_horizontal(
         return [""]
 
     # Build each card's CARD_H lines
+    legal_set = set(legal)
     card_line_groups: list[list[str]] = [
-        _card_face(c, selected=(i == selection), legal=(c in legal))
+        _get_card_face(c, selected=(i == selection), legal=(c in legal_set))
         for i, c in enumerate(cards)
     ]
 
@@ -276,7 +307,7 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
     center_rows = []
     if state.phase == Phase.BIDDING and state.up_card:
         # Show the up-card in the center
-        up_face = _card_face(state.up_card)
+        up_face = _get_card_face(state.up_card)
         center_rows = [
             ansi_center(f"{light_gray_fg()}UP CARD{RESET}", 20),
             "",
@@ -317,7 +348,7 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
     right_rows[mid - 3] = e_label
     right_rows[mid - 2] = e_cards
     right_rows[mid - 1] = e_count
-    
+
     # Last Trick Panel
     if state.completed_tricks:
         last = state.completed_tricks[-1]
@@ -331,12 +362,10 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
 
     # ── Combine columns ───────────────────────────────────────────────────────
     result: list[str] = []
-    for l, c, r in zip(left_rows, center_rows, right_rows):
-        result.append(ansi_ljust(l, SIDE_COL_W) + c + ansi_ljust(r, SIDE_COL_W))
+    for left, c, r in zip(left_rows, center_rows, right_rows, strict=False):
+        result.append(ansi_ljust(left, SIDE_COL_W) + c + ansi_ljust(r, SIDE_COL_W))
 
     return result
-
-from ..ansi import UNDERLINE # Ensure it's imported for _render_middle_section
 
 def _build_hud(state: GameState, term_w: int) -> str:
     """Build the top HUD bar, padded to term_w visible chars."""
@@ -349,13 +378,20 @@ def _build_hud(state: GameState, term_w: int) -> str:
     ns_pts, ew_pts = state.current_round_points
 
     left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
+    theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
     mid  = (f"{white_fg()}Trump: {trump_sym}   "
             f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
             f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
             f"Trick {trick_num}/8   Taker: {taker_name}   "
-            f"{DIM}[T]History [Z]Undo{RESET}")
+            f"{DIM}[T]History [Z]Undo [S-T]Theme{RESET}")
     bar  = left + "   " + mid
-    return ansi_ljust(bar, term_w)
+
+    # Right-align theme name
+    vlen_bar = visible_len(bar)
+    vlen_theme = visible_len(theme_label)
+    pad = max(0, term_w - vlen_bar - vlen_theme - 1)
+
+    return bar + " " * pad + theme_label
 
 
 def render(state: GameState, selection: int | None = None) -> str:
@@ -364,7 +400,7 @@ def render(state: GameState, selection: int | None = None) -> str:
     Terminal width is queried fresh on every call so resizing works correctly.
     """
     # Query terminal size HERE, not at module level.
-    term_w, _ = get_term_size()
+    term_w, term_h = get_term_size()
 
     out   = move(1, 1) + hide_cursor()
     legal : tuple[Card, ...] = ()
@@ -382,18 +418,21 @@ def render(state: GameState, selection: int | None = None) -> str:
     north_cards = f"{_card_back_small()} " * min(len(north_hand), 4)
     north_label = _seat_label(Seat.NORTH, state)
     north_count = f"{light_gray_fg()}({len(north_hand)} cards){RESET}"
-    lines.append("")
+    if term_h > 40:
+        lines.append("")
     lines.append(ansi_center(
         f"{north_label}  {north_cards}  {north_count}", term_w
     ))
 
     # ── WEST | trick area | EAST  (3-column, same rows) ──────────────────────
-    lines.append("")
+    if term_h > 38:
+        lines.append("")
     for row in _render_middle_section(state, term_w):
         lines.append(row)
 
     # ── DIVIDER ───────────────────────────────────────────────────────────────
-    lines.append("")
+    if term_h > 42:
+        lines.append("")
     lines.append("─" * term_w)
 
     # ── PHASE INFO ────────────────────────────────────────────────────────────
@@ -411,13 +450,17 @@ def render(state: GameState, selection: int | None = None) -> str:
     elif state.phase == Phase.SCORING:
         phase_info = f"{BOLD}{gold_fg()}Round complete!{RESET}"
 
-    if state.announced:
-        # Use banner colors
+    # Show persistent belote/rebelote badge derived from tracker (not the one-shot announced field)
+    if state.belote_tracker[1]:
         from ..ansi import banner_bg, banner_fg
-        phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} {state.announced} {RESET}"
+        phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Rebelote! {RESET}"
+    elif state.belote_tracker[0]:
+        from ..ansi import banner_bg, banner_fg
+        phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Belote! {RESET}"
 
     lines.append(ansi_center(phase_info, term_w))
-    lines.append("")
+    if term_h > 44:
+        lines.append("")
 
     # ── SOUTH hand ────────────────────────────────────────────────────────────
     south_hand  = state.hand_of(Seat.SOUTH)
@@ -437,17 +480,25 @@ def render(state: GameState, selection: int | None = None) -> str:
 
     # ── BIDDING PROMPT ────────────────────────────────────────────────────────
     if state.phase == Phase.BIDDING and state.turn == Seat.SOUTH:
-        lines.append("")
+        if term_h > 40:
+            lines.append("")
         prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
         lines.append(ansi_center(prompt, term_w))
 
-    # Pad to minimum height to prevent screen flickering
-    while len(lines) < 45:
+    # Pad to terminal height to prevent screen flickering
+    while len(lines) < term_h - 1:
         lines.append("")
 
     # CRITICAL: use \r\n not \n.
-    rendered_lines = [line + clear_to_eol() for line in lines]
+    rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
+
+
+def display_hud(state: GameState) -> None:
+    """Targeted update of only the top HUD bar."""
+    term_w, _ = get_term_size()
+    sys.stdout.write(move(1, 1) + _build_hud(state, term_w))
+    sys.stdout.flush()
 
 
 def display(state: GameState, selection: int | None = None) -> None:
@@ -457,13 +508,19 @@ def display(state: GameState, selection: int | None = None) -> None:
 
 def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     """Incrementally render a single card on the trick mat."""
-    term_w, _ = get_term_size()
+    term_w, term_h = get_term_size()
     center_w = max(0, term_w - SIDE_COL_W * 2)
-    
+
     # Coordinates (1-indexed for terminal)
-    # Middle section starts at row 7
-    base_row = 7
-    
+    # Calculate base_row dynamically to match render() logic
+    base_row = 4  # HUD (1) + Divider (1) + North (1) + 1 (alignment)
+    if term_h > 40:
+        base_row += 1
+    if term_h > 38:
+        base_row += 1
+    # Middle section starts at row (base_row - 1) if we count from 1.
+    # Actually, base_row + row_offsets[seat] should give the correct terminal row.
+
     # Vertical offsets from _render_trick_mat
     row_offsets = {
         Seat.NORTH: 2,
@@ -471,26 +528,26 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
         Seat.EAST: 10,
         Seat.SOUTH: 18,
     }
-    
+
     # Horizontal offsets
     w_start = max(0, center_w // 4 - CARD_W // 2)
     e_start = max(0, 3 * center_w // 4 - CARD_W // 2)
     n_s_start = (center_w - CARD_W) // 2
-    
+
     col_offsets = {
         Seat.NORTH: n_s_start,
         Seat.WEST: w_start,
         Seat.EAST: e_start,
         Seat.SOUTH: n_s_start,
     }
-    
+
     row = base_row + row_offsets[seat]
     col = SIDE_COL_W + col_offsets[seat] + 1
-    
-    face = _card_face(card)
+
+    face = _get_card_face(card)
     for i, line in enumerate(face):
         sys.stdout.write(move(row + i, col) + line)
-    
+
     # Also update HUD if points changed
     sys.stdout.write(move(1, 1) + _build_hud(state, term_w))
     sys.stdout.flush()

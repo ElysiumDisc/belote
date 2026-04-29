@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import random
-from belote.game import (
-    GameState, Seat, Phase, start_round, new_game
-)
-from belote.scoring import apply_round_score, ScoringBreakdown
-from belote.deck import Card, Suit, Rank
+
+from belote.game import GameState, Phase, Seat, new_game, start_round
+from belote.scoring import ScoringBreakdown, apply_round_score
+
 
 def test_apply_round_score():
     state = GameState(
@@ -24,6 +23,8 @@ def test_apply_round_score():
         defender_declarations=0,
         taker_belote=20,
         defender_belote=0,
+        taker_rebelote=False,
+        defender_rebelote=False,
         taker_total=120,
         defender_total=72,
         is_failed=False,
@@ -38,25 +39,25 @@ def test_apply_round_score():
 def test_dealer_rotation_full_cycle():
     state = new_game()
     assert state.dealer == Seat.SOUTH
-    
+
     rng = random.Random(42)
-    # Mocking round end
-    score = ScoringBreakdown(0,0,0,0,0,0,0,0,0,0,0,0,False,False,())
+    # Mocking round end (17 arguments)
+    score = ScoringBreakdown(0,0,0,0,0,0,0,0,0,0,False,False,0,0,False,False,())
     # 1st round
     state = start_round(state, rng)
     state = apply_round_score(state, score)
     assert state.dealer == Seat.EAST
-    
+
     # 2nd round
     state = start_round(state, rng)
     state = apply_round_score(state, score)
     assert state.dealer == Seat.NORTH
-    
+
     # 3rd round
     state = start_round(state, rng)
     state = apply_round_score(state, score)
     assert state.dealer == Seat.WEST
-    
+
     # 4th round
     state = start_round(state, rng)
     state = apply_round_score(state, score)
@@ -66,17 +67,17 @@ def test_start_round_integrity():
     state = new_game()
     rng = random.Random(42)
     state = start_round(state, rng)
-    
+
     # Check all 32 cards are present
     all_cards = list(state.remaining_cards) + [state.up_card]
     for h in state.hands:
         all_cards.extend(h)
-        
+
     assert len(all_cards) == 32
     assert len(set(all_cards)) == 32
-    
+
     # Initial hands should be 5 cards each
     for h in state.hands:
         assert len(h) == 5
-    
+
     assert state.phase == Phase.BIDDING

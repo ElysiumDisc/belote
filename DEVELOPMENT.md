@@ -45,6 +45,33 @@ Run tests:
 PYTHONPATH=src pytest
 ```
 
+## Code Quality
+
+The project maintains zero lint and type-check violations. Run all checks with:
+
+```bash
+# Type checking (0 errors expected)
+PYTHONPATH=src .venv/bin/mypy src/belote
+
+# Linting (0 violations expected)
+PYTHONPATH=src .venv/bin/ruff check src/ tests/
+
+# Full test suite (67 tests expected)
+PYTHONPATH=src pytest
+```
+
+Current baseline (v0.9.9):
+- **mypy**: 0 errors (strict mode, `check_untyped_defs`, `disallow_untyped_defs`)
+- **ruff**: 0 violations (rules: E, F, W, I, N, UP, B, A, C4, RET, SIM, PTH)
+- **pytest**: 63 tests, 0 failures
+
+## Benchmarking
+
+A benchmarking script is provided to measure rendering and AI performance:
+```bash
+PYTHONPATH=src python scripts/benchmark.py
+```
+
 ## Releasing a New Version
 
 ### Code-only update (push to GitHub without releasing a new PyPI version)

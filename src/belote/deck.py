@@ -54,7 +54,7 @@ def shuffle(deck: tuple[Card, ...], rng: random.Random) -> tuple[Card, ...]:
     return tuple(lst)
 
 
-def deal(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tuple[tuple[Card, ...], ...]]:
+def deal(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tuple[Card, ...]]:
     """Deal for Belote:
     1. Initial deal: 5 cards each (3 then 2).
     2. Up-card: the 21st card.
@@ -62,8 +62,7 @@ def deal(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tu
     Returns (initial_hands, up_card, remaining_cards).
     """
     initial: list[list[Card]] = [[], [], [], []]
-    remaining: list[list[Card]] = [[], [], [], []]
-    
+
     idx = 0
     # First 3
     for _ in range(3):
@@ -75,11 +74,11 @@ def deal(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tu
         for h in initial:
             h.append(deck[idx])
             idx += 1
-            
+
     # Up-card
     up_card = deck[idx]
     idx += 1
-    
+
     # Remaining 11 cards
     # We'll just return them as a flat tuple and distribute in game.py
     remaining_pool = deck[idx:]
@@ -140,6 +139,8 @@ def card_points(card: Card, trump: Suit) -> int:
                 return 3
             case Rank.EIGHT | Rank.SEVEN:
                 return 0
+            case _:
+                return 0
     else:
         match card.rank:
             case Rank.JACK:
@@ -154,3 +155,5 @@ def card_points(card: Card, trump: Suit) -> int:
                 return 4
             case Rank.QUEEN:
                 return 3
+            case _:
+                return 0

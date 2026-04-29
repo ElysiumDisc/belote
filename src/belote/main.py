@@ -1,32 +1,48 @@
-from __future__ import annotations
-
 """Belote – 4-player terminal card game.
 
 Usage:
     python -m belote.main [--target 1000] [--difficulty easy|medium|hard] [--seed 42]
 """
 
+from __future__ import annotations
+
 import argparse
 import atexit
 import random
+import shutil
 import signal
 import sys
+from dataclasses import replace
 
-from .ansi import (
-    RESET, clear_screen, hide_cursor, show_cursor,
-    alt_screen_on, alt_screen_off, BOLD, gold_fg, white_fg,
-)
-from .input import KeyReader, Key
-from .game import (
-    Phase, Seat, new_game, replace,
-)
-from .ui import (
-    show_final_screen, show_main_menu,
-    show_rules, show_history, show_stats,
-)
-from .stats import update_stats_game, flush_stats
-from .gameflow import SPEED_TIMINGS, create_ai_players, run_round
 from . import __version__
+from .ansi import (
+    BOLD,
+    RESET,
+    alt_screen_off,
+    alt_screen_on,
+    clear_screen,
+    gold_fg,
+    hide_cursor,
+    show_cursor,
+    white_fg,
+)
+from .config import GLOBAL_CONFIG
+from .game import (
+    GameState,
+    Phase,
+    Seat,
+    new_game,
+)
+from .gameflow import create_ai_players, run_round
+from .input import Key, KeyReader
+from .stats import flush_stats, update_stats_game
+from .ui import (
+    show_final_screen,
+    show_history,
+    show_main_menu,
+    show_rules,
+    show_stats,
+)
 
 
 class TerminalGuard:
@@ -46,10 +62,9 @@ class TerminalGuard:
         sys.stdout.write(alt_screen_off() + show_cursor() + RESET)
         sys.stdout.flush()
         if self._reader and not self._reader._restored:
-            try:
+            import contextlib
+            with contextlib.suppress(Exception):
                 self._reader.restore()
-            except Exception:
-                pass
 
 
 def positive_int(value: str) -> int:
@@ -58,20 +73,20 @@ def positive_int(value: str) -> int:
         if ivalue <= 0:
             raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
         return ivalue
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"{value} is not an integer")
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"{value} is not an integer") from e
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Belote – 4-player terminal card game")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--target", type=positive_int, default=1000, help="Target score to win (default: 1000)")
+    parser.add_argument("--target", type=positive_int, default=GLOBAL_CONFIG.TARGET_SCORE, help=f"Target score to win (default: {GLOBAL_CONFIG.TARGET_SCORE})")
     parser.add_argument("--difficulty", choices=["easy", "medium", "hard"], default="medium",
                         help="AI difficulty (default: medium)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument(
-        "--speed", choices=["slow", "normal", "fast", "instant"], default="normal",
-        help="Game pace: slow (1.5s), normal (0.7s), fast (0.25s), instant (0s). Default: normal",
+        "--speed", choices=list(GLOBAL_CONFIG.SPEED_TIMINGS.keys()), default="normal",
+        help="Game pace. Default: normal",
     )
     return parser.parse_args()
 
@@ -79,7 +94,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    from .themes import theme_manager
+    theme_manager.load_selection()
+
     # Setup terminal
+    cols, rows = shutil.get_terminal_size()
+    if cols < GLOBAL_CONFIG.MIN_TERM_W or rows < GLOBAL_CONFIG.MIN_TERM_H:
+        print(f"Error: Terminal too small ({cols}x{rows}).")
+        print(f"Minimum required: {GLOBAL_CONFIG.MIN_TERM_W}x{GLOBAL_CONFIG.MIN_TERM_H}")
+        sys.exit(1)
+
     guard = TerminalGuard()
 
     def _sig_handler(_signum: int, _frame: object) -> None:
@@ -92,7 +116,7 @@ def main() -> None:
 
     try:
         with KeyReader() as reader:
-            guard.enter(reader)  # type: ignore[arg-type]
+            guard.enter(reader)
 
             target = args.target
             speed = args.speed
@@ -103,25 +127,25 @@ def main() -> None:
             while True:
                 if not rematch:
                     choice, diffs_map, target, speed, mode = show_main_menu(reader, diffs_map, target, speed, mode)
-                    
+
                     if choice == "Quit":
                         flush_stats()
                         break
-                    
+
                     if choice == "Rules & History":
                         show_rules(reader)
                         continue
-                    
+
                     if choice == "Statistics":
                         show_stats(reader)
                         continue
-                    
+
                     if choice != "Start Game":
                         continue
 
                 # Start Game / Rematch
                 rematch = False
-                ai_delay, trick_pause, round_pause = SPEED_TIMINGS[speed]
+                ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[speed]
                 sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
                 sys.stdout.flush()
 
@@ -129,7 +153,7 @@ def main() -> None:
                 human_seats = {Seat.SOUTH}
                 if mode == "Hotseat (2P)":
                     human_seats.add(Seat.WEST)
-                
+
                 # Create AI players
                 ai_players = create_ai_players(diffs_map, human_seats)
 
@@ -141,10 +165,11 @@ def main() -> None:
                 # Initialize game
                 state = new_game(target=target)
                 history_stack: list[GameState] = []
+                game_rng = random.Random(args.seed) if args.seed is not None else random.Random()
 
                 # Main game loop
                 while state.phase != Phase.GAME_OVER:
-                    res_round = run_round(state, reader, ai_players, ai_delay, trick_pause, round_pause, history_stack, human_seats)
+                    res_round = run_round(state, reader, ai_players, ai_delay, trick_pause, round_pause, history_stack, human_seats, rng=game_rng)
                     if res_round is None: # User quit mid-game
                         break
                     state = res_round
@@ -153,10 +178,10 @@ def main() -> None:
                     ns, ew = state.team_scores
                     if ns >= target or ew >= target:
                         state = replace(state, phase=Phase.GAME_OVER)
-                        
+
                         unique_diffs = set(diffs_map.values())
                         difficulty_str = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"
-                        
+
                         update_stats_game(
                             won=(ns >= target and ns >= ew),
                             num_rounds=len(state.score_history),
@@ -172,7 +197,7 @@ def main() -> None:
                     sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                     sys.stdout.write(f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [T] History{RESET} ")
                     sys.stdout.flush()
-                    
+
                     while True:
                         ev = reader.read()
                         if ev.key == Key.CHAR and ev.char:
@@ -189,10 +214,10 @@ def main() -> None:
                         if ev.key in (Key.ENTER, Key.QUIT):
                             rematch = False
                             break
-                    
+
                     if rematch:
                         continue
-                
+
                 # Back to menu
                 sys.stdout.write(alt_screen_off())
                 sys.stdout.flush()

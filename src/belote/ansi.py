@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import re
-
 from functools import lru_cache
+
+from .themes import theme_manager
 
 _RESET_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 RESET = "\x1b[0m"
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=4096)
 def visible_len(s: str) -> int:
     """Return length of string with ANSI escape codes stripped."""
     return len(_RESET_RE.sub("", s))
@@ -91,54 +92,67 @@ def scroll_region(top: int, bottom: int) -> str:
     return f"\x1b[{top};{bottom}r"
 
 
+
 # Palette constants
 def felt_bg() -> str:
-    return bg(25, 75, 45) # Deeper, more muted green
+    return bg(*theme_manager.get_current().felt_bg)
 
 
 def red_fg() -> str:
-    return fg(190, 45, 45) # Muted crimson
+    return fg(*theme_manager.get_current().red_fg)
 
 
 def black_fg() -> str:
-    return fg(40, 40, 40) # Slightly softer black
+    return fg(*theme_manager.get_current().black_fg)
 
 
 def card_face_bg() -> str:
-    return bg(248, 245, 230) # Richer cream/parchment
+    return bg(*theme_manager.get_current().card_face_bg)
 
 
 def face_card_bg() -> str:
-    return bg(250, 240, 200) # Golden-aged parchment
+    return bg(*theme_manager.get_current().face_card_bg)
 
 
 def card_back_bg() -> str:
-    return bg(110, 35, 35) # Deep burgundy
+    return bg(*theme_manager.get_current().card_back_bg)
 
 
 def highlight_bg() -> str:
-    return bg(230, 190, 70) # Brass/Gold highlight
+    return bg(*theme_manager.get_current().highlight_bg)
 
 
 def gold_fg() -> str:
-    return fg(210, 170, 60) # Antique gold
+    return fg(*theme_manager.get_current().gold_fg)
 
 
 def white_fg() -> str:
-    return fg(235, 235, 230) # Off-white
+    return fg(*theme_manager.get_current().white_fg)
 
 
 def light_gray_fg() -> str:
-    return fg(160, 160, 155) # Muted stone gray
+    return fg(*theme_manager.get_current().light_gray_fg)
 
 
 def green_fg() -> str:
-    return fg(60, 160, 90) # Sage green
+    return fg(*theme_manager.get_current().green_fg)
 
 
 def banner_bg() -> str:
-    return bg(50, 65, 120) # Muted royal blue
+    return bg(*theme_manager.get_current().banner_bg)
 
 
 def banner_fg() -> str:
-    return fg(240, 220, 150) # Pale gold text
+    return fg(*theme_manager.get_current().banner_fg)
+
+
+def felt_placeholder_fg() -> str:
+    return fg(*theme_manager.get_current().felt_placeholder_fg)
+
+
+def menu_art_fg() -> str:
+    return fg(*theme_manager.get_current().menu_art_fg)
+
+
+def menu_border_fg() -> str:
+    return fg(*theme_manager.get_current().menu_border_fg)

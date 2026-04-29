@@ -1,21 +1,35 @@
-from __future__ import annotations
-
 """Belote test suite – covers all 18 required test cases."""
 
-import random
-import pytest
+from __future__ import annotations
 
-from belote.deck import Card, Rank, Suit, make_deck, shuffle, deal, trick_rank, card_points
+import random
+
+from belote.config import GLOBAL_CONFIG
+from belote.deck import Card, Rank, Suit, card_points, make_deck, trick_rank
 from belote.game import (
-    GameState, Phase, Seat, TrickCard,
-    new_game, start_round, place_bid, play_card,
-    legal_cards, trick_winner_seat, team_of, partner,
+    GameState,
+    Phase,
+    Seat,
+    TrickCard,
+    legal_cards,
+    new_game,
+    partner,
+    start_round,
+    team_of,
+    trick_winner_seat,
 )
 from belote.scoring import (
-    detect_belote, detect_sequences, detect_carres,
-    resolve_declarations, score_round,
-    BELOTE_POINTS, LAST_TRICK_BONUS, CAPOT_BASE, TOTAL_POINTS,
+    detect_belote,
+    detect_carres,
+    detect_sequences,
+    resolve_declarations,
+    score_round,
 )
+
+BELOTE_POINTS = GLOBAL_CONFIG.BELOTE_POINTS
+LAST_TRICK_BONUS = GLOBAL_CONFIG.LAST_TRICK_BONUS
+CAPOT_BASE = GLOBAL_CONFIG.CAPOT_BASE
+TOTAL_POINTS = GLOBAL_CONFIG.TOTAL_POINTS
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +48,17 @@ class TestDeckIntegrity:
         ranks = {c.rank for c in deck}
         assert suits == set(Suit)
         assert ranks == set(Rank)
+
+    def test_total_points_consistency(self):
+        """TOTAL_POINTS (152) + LAST_TRICK_BONUS (10) must equal 162."""
+        assert GLOBAL_CONFIG.TOTAL_POINTS == 152
+        assert GLOBAL_CONFIG.LAST_TRICK_BONUS == 10
+
+        # Verify card points sum to TOTAL_POINTS for all trumps
+        for trump in Suit:
+            deck = make_deck()
+            total = sum(card_points(c, trump) for c in deck)
+            assert total == GLOBAL_CONFIG.TOTAL_POINTS
 
     def test_card_points_sum_152(self):
         """Sum of card_points over all 32 cards must equal 152 for any trump suit."""
@@ -128,9 +153,7 @@ def _make_play_state(
         completed_tricks=(),
         last_trick_winner=None,
         declarations=(),
-        declarations_resolved=False,
         team_scores=(0, 0),
-        round_scores=(0, 0),
         current_round_points=(0, 0),
         score_history=(),
         target=1000,
@@ -208,6 +231,25 @@ class TestLegalMoves:
         # Must trump, and must overtrump if possible
         legal = legal_cards(state, Seat.NORTH)
         # Only JACK (overtrumps 9) should be legal, not SEVEN (undertrumps)
+        assert Card(Suit.SPADES, Rank.JACK) in legal
+        assert Card(Suit.SPADES, Rank.SEVEN) not in legal
+
+    def test_must_overtrump_trump_led(self):
+        """Must overtrump when trump is led and someone already played a trump."""
+        trump = Suit.SPADES
+        state = _make_play_state(
+            hands={
+                Seat.SOUTH: [Card(Suit.SPADES, Rank.NINE)],
+                Seat.EAST: [Card(Suit.SPADES, Rank.JACK), Card(Suit.SPADES, Rank.SEVEN)],
+            },
+            trump=trump,
+            current_trick=[
+                (Seat.SOUTH, Card(Suit.SPADES, Rank.NINE)),
+            ],
+        )
+        # NINE of Spades led. East has JACK (higher) and SEVEN (lower).
+        # Must follow suit (both are Spades) AND must overtrump if possible (JACK).
+        legal = legal_cards(state, Seat.EAST)
         assert Card(Suit.SPADES, Rank.JACK) in legal
         assert Card(Suit.SPADES, Rank.SEVEN) not in legal
 
@@ -479,7 +521,7 @@ class TestCapot:
         initial_hands = tuple(tuple(h) for h in hands_by_seat)
 
         state = GameState(
-            hands=(() for _ in range(4)),
+            hands=tuple(() for _ in range(4)),
             initial_hands=initial_hands,
             trump=trump,
             dealer=Seat.SOUTH,
@@ -492,9 +534,7 @@ class TestCapot:
             completed_tricks=tuple(tricks),
             last_trick_winner=Seat.SOUTH,
             declarations=(),
-            declarations_resolved=False,
             team_scores=(0, 0),
-            round_scores=(0, 0),
             current_round_points=(0, 0),
             score_history=(),
             target=1000,
@@ -505,7 +545,7 @@ class TestCapot:
             bid_suits=(),
             announced=None,
             belote_holders={trump: Seat.SOUTH},
-            belote_tracker=(False, False),
+            belote_tracker=(True, False),
             first_trick_done=True,
         )
 
@@ -526,7 +566,7 @@ class TestBidFailure:
         trump = Suit.SPADES
         # Build tricks where defenders win more points
         tricks: list[tuple[TrickCard, ...]] = []
-        for i in range(8):
+        for _i in range(8):
             trick = (
                 TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.SEVEN)),
                 TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.JACK)),  # 20 pts
@@ -536,7 +576,7 @@ class TestBidFailure:
             tricks.append(trick)
 
         state = GameState(
-            hands=(() for _ in range(4)),
+            hands=tuple(() for _ in range(4)),
             trump=trump,
             dealer=Seat.SOUTH,
             leader=Seat.SOUTH,
@@ -548,9 +588,7 @@ class TestBidFailure:
             completed_tricks=tuple(tricks),
             last_trick_winner=Seat.EAST,
             declarations=(),
-            declarations_resolved=False,
             team_scores=(0, 0),
-            round_scores=(10, 0),  # taker has 10 declaration pts
             current_round_points=(0, 0),
             score_history=(),
             target=1000,
@@ -568,8 +606,8 @@ class TestBidFailure:
         assert breakdown.is_failed is True
         # Taker scores 0 (except belote, which they don't have)
         assert breakdown.taker_total == 0
-        # Defenders get 162 + their declarations + taker's declarations
-        assert breakdown.defender_total >= TOTAL_POINTS
+        # Defenders get 162 points; taker's declarations are annulled, not transferred
+        assert breakdown.defender_total == TOTAL_POINTS + LAST_TRICK_BONUS
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +642,7 @@ class TestLastTrickBonus:
             tricks.append(trick)
 
         state = GameState(
-            hands=(() for _ in range(4)),
+            hands=tuple(() for _ in range(4)),
             trump=trump,
             dealer=Seat.SOUTH,
             leader=Seat.SOUTH,
@@ -616,9 +654,7 @@ class TestLastTrickBonus:
             completed_tricks=tuple(tricks),
             last_trick_winner=Seat.SOUTH,
             declarations=(),
-            declarations_resolved=False,
             team_scores=(0, 0),
-            round_scores=(0, 0),
             current_round_points=(0, 0),
             score_history=(),
             target=1000,
@@ -649,7 +685,7 @@ class TestPointConservation:
         # Distribute cards so each team wins some tricks
         tricks: list[tuple[TrickCard, ...]] = []
         card_idx = 0
-        for i in range(8):
+        for _i in range(8):
             trick = tuple(
                 TrickCard(
                     list(Seat)[j],
@@ -667,7 +703,7 @@ class TestPointConservation:
             winners.append(w)
 
         state = GameState(
-            hands=(() for _ in range(4)),
+            hands=tuple(() for _ in range(4)),
             trump=trump,
             dealer=Seat.SOUTH,
             leader=Seat.SOUTH,
@@ -679,9 +715,7 @@ class TestPointConservation:
             completed_tricks=tuple(tricks),
             last_trick_winner=winners[-1] if winners else Seat.SOUTH,
             declarations=(),
-            declarations_resolved=False,
             team_scores=(0, 0),
-            round_scores=(0, 0),
             current_round_points=(0, 0),
             score_history=(),
             target=1000,
@@ -699,7 +733,8 @@ class TestPointConservation:
         if not breakdown.is_capot:
             # Use raw card points (before failed-bid adjustment)
             total = breakdown.raw_taker_card_pts + breakdown.raw_defender_card_pts
-            assert total == TOTAL_POINTS, f"Expected {TOTAL_POINTS}, got {total}"
+            expected = TOTAL_POINTS + LAST_TRICK_BONUS
+            assert total == expected, f"Expected {expected}, got {total}"
 
 
 # ---------------------------------------------------------------------------

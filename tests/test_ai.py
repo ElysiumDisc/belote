@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest.mock
+
 from belote.ai import AIPlayer, Difficulty
-from belote.game import GameState, Seat, Phase, TrickCard
 from belote.deck import Card, Rank, Suit
+from belote.game import GameState, Phase, Seat, TrickCard
+
 
 def test_ai_easy_play():
     player = AIPlayer(Seat.EAST, Difficulty.EASY)

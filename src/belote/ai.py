@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
 from enum import Enum
 
-from .deck import Card, Rank, Suit, trick_rank, card_points as card_points_fn
+from .deck import Card, Rank, Suit, trick_rank
+from .deck import card_points as card_points_fn
+
+# trick_rank(Card(trump, Rank.NINE), trump) == 8 + 6 == 14 for any trump
+_NINE_TRUMP_RANK = 14
 from .game import (
     GameState,
-    Seat,
     Phase,
-    legal_cards,
-    team_of,
-    partner,
+    Seat,
+    TrickCard,
     _current_trick_winner,
+    legal_cards,
+    partner,
 )
 
 
@@ -29,7 +32,6 @@ class AIMemory:
         self.played: set[Card] = set()
         self.known_voids: dict[Seat, set[Suit]] = {}
         self.partner_hand: set[Card] = set()
-        self.last_processed_trick_idx: int = -1
 
 
 class AIPlayer:
@@ -46,7 +48,6 @@ class AIPlayer:
             self.memory.played.clear()
             self.memory.known_voids.clear()
             self.memory.partner_hand.clear()
-            self.memory.last_processed_trick_idx = -1
 
         # Track all cards in completed tricks
         for trick in state.completed_tricks:
@@ -66,6 +67,7 @@ class AIPlayer:
     def decide_bid(self, state: GameState) -> Suit | None:
         """Decide whether to bid and which suit."""
         hand = state.hand_of(self.seat)
+        forbidden = state.up_card.suit if state.up_card else None
 
         if self.difficulty == Difficulty.EASY:
             bid = self._easy_bid(hand)
@@ -74,17 +76,20 @@ class AIPlayer:
         else:
             bid = self._hard_bid(hand, state)
 
-        # Respect bidding round rules
         if state.bidding_round == 1:
             # Round 1: only take the up-card's suit
-            if bid == state.up_card.suit: # type: ignore[union-attr]
+            if forbidden and bid == forbidden:
                 return bid
             return None
-        else:
-            # Round 2: pick any suit except the one from Round 1
-            if bid == state.up_card.suit: # type: ignore[union-attr]
-                return None
-            return bid
+        # Round 2: pick any suit except the forbidden one; try second-best if needed
+        if forbidden and bid == forbidden:
+            if self.difficulty == Difficulty.EASY:
+                return self._easy_bid(hand, exclude=forbidden)
+            elif self.difficulty == Difficulty.MEDIUM:
+                return self._medium_bid(hand, state, exclude=forbidden)
+            else:
+                return self._hard_bid(hand, state, exclude=forbidden)
+        return bid
 
     def decide_card(self, state: GameState) -> Card:
         """Decide which card to play."""
@@ -106,17 +111,18 @@ class AIPlayer:
 
         if self.difficulty == Difficulty.EASY:
             return self._easy_play(state, legal)
-        elif self.difficulty == Difficulty.MEDIUM:
+        if self.difficulty == Difficulty.MEDIUM:
             return self._medium_play(state, legal)
-        else:
-            return self._hard_play(state, legal)
+        return self._hard_play(state, legal)
 
     # ---- Easy AI ----
 
-    def _easy_bid(self, hand: tuple[Card, ...]) -> Suit | None:
+    def _easy_bid(self, hand: tuple[Card, ...], exclude: Suit | None = None) -> Suit | None:
         """Bid if hand has >= 2 trump honors (J, 9, A) in any suit."""
         honors = {Rank.JACK, Rank.NINE, Rank.ACE}
         for suit in Suit:
+            if suit == exclude:
+                continue
             count = sum(1 for c in hand if c.suit == suit and c.rank in honors)
             if count >= 2:
                 return suit
@@ -128,9 +134,9 @@ class AIPlayer:
 
     # ---- Medium AI ----
 
-    def _medium_bid(self, hand: tuple[Card, ...], state: GameState) -> Suit | None:
+    def _medium_bid(self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None) -> Suit | None:
         """Heuristic score per suit with personality variance."""
-        suit_scores: dict[Suit, float] = {s: 0.0 for s in Suit}
+        suit_scores: dict[Suit, float] = dict.fromkeys(Suit, 0.0)
         honor_values = {
             Rank.JACK: 4.0,
             Rank.NINE: 3.0,
@@ -144,15 +150,14 @@ class AIPlayer:
         for card in hand:
             if card.rank in honor_values:
                 suit_scores[card.suit] += honor_values[card.rank]
-            # Count cards in suit
             suit_scores[card.suit] += 0.1
 
-        # Aggression boost if late in bidding
         aggression = 0.0
         if state.bidding_round == 2 and state.bidder_index == 3:
-            aggression = 1.0 # Last chance to bid
+            aggression = 1.0
 
-        best_suit = max(Suit, key=lambda s: suit_scores[s])
+        avail = [s for s in Suit if s != exclude]
+        best_suit = max(avail, key=lambda s: suit_scores[s])
         if suit_scores[best_suit] + personality + aggression >= 4:
             return best_suit
         return None
@@ -160,11 +165,16 @@ class AIPlayer:
     def _medium_play(self, state: GameState, legal: tuple[Card, ...]) -> Card:
         """Strategic play: lead high, cover partner, duck when winning."""
         trump = state.trump
+        if trump is None:
+            return self._easy_play(state, legal)
         trick = state.current_trick
+
+        # Update void inferences
+        self._update_voids(state)
 
         if not trick:
             # Leading
-            return self._medium_lead(legal, trump)
+            return self._medium_lead(legal, trump, state)
 
         lead_card = trick[0].card
         lead_suit = lead_card.suit
@@ -187,9 +197,8 @@ class AIPlayer:
                 if current_winner is not None and current_winner == p:
                     # Partner winning trump, play lowest trump
                     return min(my_trumps, key=lambda c: trick_rank(c, trump))
-                else:
-                    # Try to win if we can afford it
-                    return max(my_trumps, key=lambda c: trick_rank(c, trump))
+                # Try to win if we can afford it
+                return max(my_trumps, key=lambda c: trick_rank(c, trump))
             # No trumps, discard low non-trump
             return min(legal, key=lambda c: card_points_fn(c, trump))
 
@@ -199,8 +208,7 @@ class AIPlayer:
             # Must follow
             if current_winner is not None and current_winner == p:
                 return min(my_suit, key=lambda c: trick_rank(c, trump))
-            else:
-                return max(my_suit, key=lambda c: trick_rank(c, trump))
+            return max(my_suit, key=lambda c: trick_rank(c, trump))
 
         # Void - must trump or discard
         my_trumps = [c for c in legal if c.suit == trump]
@@ -209,10 +217,18 @@ class AIPlayer:
 
         return min(legal, key=lambda c: card_points_fn(c, trump))
 
-    def _medium_lead(self, legal: tuple[Card, ...], trump: Suit | None) -> Card:
-        """Lead strategy: high non-trump A first, then longest suit, then trump pulls."""
+    def _medium_lead(self, legal: tuple[Card, ...], trump: Suit | None, state: GameState) -> Card:
+        """Lead strategy: void forcing, high non-trump A, longest suit, then trump pulls."""
         if not trump:
             return legal[0]
+
+        # 0. Try to lead suit where next opponent is known void (to force trumping/discarding)
+        opp = self.seat.next_seat()
+        if opp in self.memory.known_voids:
+            voids = self.memory.known_voids[opp]
+            for card in legal:
+                if card.suit != trump and card.suit in voids:
+                    return card
 
         # 1. Try to lead Ace of non-trump suit (safe lead)
         for card in legal:
@@ -245,29 +261,24 @@ class AIPlayer:
 
     # ---- Hard AI ----
 
-    def _hard_bid(self, hand: tuple[Card, ...], state: GameState) -> Suit | None:
+    def _hard_bid(self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None) -> Suit | None:
         """Monte-Carlo-lite bidding evaluation with personality."""
-        suit_scores: dict[Suit, float] = {s: 0.0 for s in Suit}
+        suit_scores: dict[Suit, float] = dict.fromkeys(Suit, 0.0)
         personality = self._rng.uniform(-0.8, 0.8)
 
         for suit in Suit:
-            # Count honors and cards in suit
             trump_cards = [c for c in hand if c.suit == suit]
             honor_count = sum(1 for c in trump_cards if c.rank in (Rank.JACK, Rank.NINE, Rank.ACE))
             point_total = sum(card_points_fn(c, suit) for c in trump_cards)
 
-            # Base score from points
             suit_scores[suit] = point_total * 0.5 + honor_count * 3
 
-            # Dealer position bonus
             if state.dealer == self.seat or state.dealer == partner(self.seat):
                 suit_scores[suit] *= 1.1
 
-            # Aggression boost if late in bidding
             if state.bidding_round == 2 and state.bidder_index >= 2:
                 suit_scores[suit] += 1.5
 
-            # Void bonuses
             for other in Suit:
                 if other != suit:
                     other_count = sum(1 for c in hand if c.suit == other)
@@ -276,7 +287,8 @@ class AIPlayer:
                     elif other_count == 1:
                         suit_scores[suit] += 1
 
-        best_suit = max(Suit, key=lambda s: suit_scores[s])
+        avail = [s for s in Suit if s != exclude]
+        best_suit = max(avail, key=lambda s: suit_scores[s])
         if suit_scores[best_suit] + personality >= 6:
             return best_suit
         return None
@@ -305,7 +317,7 @@ class AIPlayer:
 
         # Score each legal card by expected outcome
         best_card = legal[0]
-        best_score = -999
+        best_score: float = -999.0
 
         for card in legal:
             score = self._score_card_play(card, state, trump, trick, partner_winning)
@@ -320,7 +332,7 @@ class AIPlayer:
         card: Card,
         state: GameState,
         trump: Suit,
-        trick: tuple,
+        trick: tuple[TrickCard, ...],
         partner_winning: bool,
     ) -> float:
         """Score a card play decision."""
@@ -356,18 +368,17 @@ class AIPlayer:
         highest_rank = max((trick_rank(tc.card, trump) for tc in trick), default=-1)
         if rank > highest_rank:
             score += 10  # Winning is valuable
-            
+
             # 2-PLY: If we are winning now, will the next player beat us?
             if len(trick) < 3:
                 next_opp = self.seat.next_seat()
-                if next_opp != partner(self.seat):
-                    # If we know next_opp is void in lead suit, they might trump
-                    if lead_suit in self.memory.known_voids.get(next_opp, set()):
-                        if trump not in self.memory.known_voids.get(next_opp, set()):
-                            # They might trump! Subtract value if our card isn't a high trump
-                            if card.suit != trump or rank < 14: # Jack=15, 9=14 in trick_rank?
-                                # Wait, trick_rank(JACK, trump) = 8 + 7 = 15.
-                                score -= 5
+                opp_voids = self.memory.known_voids.get(next_opp, set())
+                # trick_rank(J, trump)=15, trick_rank(9, trump)=14
+                if (next_opp != partner(self.seat)
+                        and lead_suit in opp_voids
+                        and trump not in opp_voids
+                        and (card.suit != trump or rank < _NINE_TRUMP_RANK)):
+                    score -= 5
         elif partner_winning:
             # We aren't winning but partner is. Don't play high unless necessary.
             score -= points * 0.8
@@ -414,23 +425,21 @@ class AIPlayer:
         return legal[0]
 
     def _update_voids(self, state: GameState) -> None:
-        """Infer voids from played cards incrementally."""
+        """Infer voids by scanning all played cards from scratch."""
         for seat in Seat:
-            if seat not in self.memory.known_voids:
-                self.memory.known_voids[seat] = set()
+            self.memory.known_voids[seat] = set()
 
-        num_completed = len(state.completed_tricks)
-        if num_completed <= self.memory.last_processed_trick_idx + 1:
-            return
-
-        for i in range(self.memory.last_processed_trick_idx + 1, num_completed):
-            trick = state.completed_tricks[i]
+        for trick in state.completed_tricks:
             if len(trick) < 2:
                 continue
             lead_suit = trick[0].card.suit
             for tc in trick[1:]:
                 if tc.card.suit != lead_suit:
-                    # This player didn't follow suit - likely void
                     self.memory.known_voids[tc.seat].add(lead_suit)
-        
-        self.memory.last_processed_trick_idx = num_completed - 1
+
+        cur = state.current_trick
+        if len(cur) >= 2:
+            lead_suit = cur[0].card.suit
+            for tc in cur[1:]:
+                if tc.card.suit != lead_suit:
+                    self.memory.known_voids[tc.seat].add(lead_suit)

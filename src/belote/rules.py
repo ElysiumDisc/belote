@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+from typing import TypedDict
+
+
+class RulesSection(TypedDict):
+    header: str
+    text: str
+
+
+class RulesPage(TypedDict):
+    title: str
+    sections: list[RulesSection]
+
+
 # Rules and History of Belote in English and French
 
-RULES_CONTENT = {
+RULES_CONTENT: dict[str, RulesPage] = {
     "en": {
         "title": "BELOTE - RULES & HISTORY",
         "sections": [
@@ -55,7 +68,8 @@ RULES_CONTENT = {
                 "text": (
                     "• Trump Values: J=20, 9=14, A=11, 10=10, K=4, Q=3, 8=0, 7=0.\n"
                     "• Non-Trump Values: A=11, 10=10, K=4, Q=3, J=2, 9=0, 8=0, 7=0.\n"
-                    "• Total card points: 162. 'Dix de Der': +10 points for winning the last trick.\n"
+                    "• Total card points: 152. 'Dix de Der': +10 points for winning the last trick.\n"
+                    "• Total round points (excluding declarations): 162.\n"
                     "• 'Capot/Valat': Winning all 8 tricks awards bonus points.\n"
                     "The Taker's team must score more points than the defenders, or they go 'inside' (Dedans)."
                 )
@@ -114,7 +128,8 @@ RULES_CONTENT = {
                 "text": (
                     "• Valeurs à l'Atout: V=20, 9=14, As=11, 10=10, R=4, D=3, 8=0, 7=0.\n"
                     "• Valeurs sans Atout: As=11, 10=10, R=4, D=3, V=2, 9=0, 8=0, 7=0.\n"
-                    "• Total des points: 162. 'Dix de Der': +10 points pour le dernier pli.\n"
+                    "• Total des points (cartes): 152. 'Dix de Der': +10 points pour le dernier pli.\n"
+                    "• Total des points par manche (hors annonces): 162.\n"
                     "• 'Capot': Remporter les 8 plis donne un bonus.\n"
                     "L'équipe du Preneur doit faire plus de points que la défense (Sinon, elle est 'Dedans')."
                 )

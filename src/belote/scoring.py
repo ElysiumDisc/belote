@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final
+from typing import TypedDict
 
-from .deck import Card, Rank, Suit, card_points as card_points_fn
+from .config import GLOBAL_CONFIG
+from .deck import Card, Rank, Suit
+from .deck import card_points as card_points_fn
 from .game import (
+    Carre,
+    Declaration,
     GameState,
+    Phase,
+    RoundScore,
     Seat,
     Sequence,
-    Carre,
-    BeloteDecl,
-    Declaration,
-    RoundScore,
+    TrickCard,
+    reset_round_fields,
     team_of,
-    partner,
     trick_winner_seat,
 )
 
@@ -50,10 +53,16 @@ _SEQUENCE_POINTS: dict[int, int] = {
     5: 100,
 }
 
-BELOTE_POINTS: Final = 20
-LAST_TRICK_BONUS: Final = 10
-CAPOT_BASE: Final = 250
-TOTAL_POINTS: Final = 162  # 152 card points + 10 last trick
+
+def get_declaration_points(decls: list[Sequence | Carre]) -> int:
+    """Calculate point value for a list of sequences or carres."""
+    pts = 0
+    for d in decls:
+        if isinstance(d, Sequence):
+            pts += _SEQUENCE_POINTS.get(d.length, 0)
+        elif isinstance(d, Carre):
+            pts += _CARRE_POINTS.get(_VALUE_TO_RANK[d.rank], 0)
+    return pts
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +77,8 @@ class ScoringBreakdown:
     defender_declarations: int
     taker_belote: int
     defender_belote: int
+    taker_rebelote: bool
+    defender_rebelote: bool
     taker_total: int
     defender_total: int
     is_capot: bool
@@ -95,7 +106,7 @@ def detect_belote(hand: tuple[Card, ...], trump: Suit) -> bool:
 
 def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
     """Find all maximal sequences (tierce/quarte/quinte) in a hand.
-    
+
     Sequences are based on rank order 7<8<9<10<J<Q<K<A within a single suit.
     Only sequences of length >= 3 count.
     """
@@ -199,16 +210,10 @@ def _sequence_points(seq: Sequence) -> int:
 
 
 def resolve_declarations(
-    decls_per_seat: dict[Seat, dict[str, object]],
+    decls_per_seat: dict[Seat, SeatDeclarations],
     trump: Suit,
 ) -> ResolvedDeclarations:
-    """Resolve declarations per §3.7.
-    
-    decls_per_seat maps each seat to a dict with keys:
-      'sequences': list[Sequence]
-      'carres': list[Carre]
-      'belote': bool
-    """
+    """Resolve declarations per §3.7."""
     ns_seqs: list[Sequence] = []
     ew_seqs: list[Sequence] = []
     ns_carres: list[Carre] = []
@@ -217,15 +222,15 @@ def resolve_declarations(
     ew_belote = False
 
     for seat, decls in decls_per_seat.items():
-        seqs = [s for s in decls.get("sequences", [])]
-        updated_seqs = []
-        for s in seqs:
-            updated_seqs.append(Sequence(
+        updated_seqs = [
+            Sequence(
                 length=s.length, top_rank=s.top_rank, suit=s.suit,
                 is_trump=(s.suit == trump), cards=s.cards,
-            ))
-        carres = list(decls.get("carres", []))
-        has_belote = decls.get("belote", False)
+            )
+            for s in decls["sequences"]
+        ]
+        carres = list(decls["carres"])
+        has_belote = decls["belote"]
 
         if team_of(seat) == 0:
             ns_seqs.extend(updated_seqs)
@@ -290,6 +295,54 @@ def resolve_declarations(
     )
 
 
+def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> bool:
+    """Check if the taker team won all 8 tricks."""
+    if state.taker is None:
+        return False
+    taker_team = team_of(state.taker)
+    all_tricks = tricks if tricks is not None else list(state.completed_tricks)
+    if not all_tricks or len(all_tricks) < 8:
+        return False
+    return all(
+        (w := trick_winner_seat(trick, state.trump)) is not None and
+        team_of(w) == taker_team
+        for trick in all_tricks
+    )
+
+
+class SeatDeclarations(TypedDict):
+    sequences: list[Sequence]
+    carres: list[Carre]
+    belote: bool
+
+
+def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDeclarations]:
+    """Internal helper to find all potential declarations in all hands."""
+    decls_per_seat: dict[Seat, SeatDeclarations] = {}
+    for seat in Seat:
+        # Default empty decls
+        decls_per_seat[seat] = {
+            "sequences": [],
+            "carres": [],
+            "belote": False,
+        }
+
+        # Use initial_hands if in scoring phase, else current hands (bidding phase)
+        hand = state.initial_hands[seat.value] if state.phase == Phase.SCORING else state.hand_of(seat)
+        if not hand:
+            continue
+
+        seqs = detect_sequences(hand)
+        carres = detect_carres(hand)
+        has_belote = detect_belote(hand, trump)
+        decls_per_seat[seat] = {
+            "sequences": seqs,
+            "carres": carres,
+            "belote": has_belote,
+        }
+    return decls_per_seat
+
+
 def score_round(state: GameState) -> ScoringBreakdown:
     """Score the completed round per §3.8."""
     if state.trump is None or state.taker is None:
@@ -300,6 +353,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
             last_trick_team=None,
             taker_declarations=0, defender_declarations=0,
             taker_belote=0, defender_belote=0,
+            taker_rebelote=False, defender_rebelote=False,
             taker_total=0, defender_total=0,
             is_capot=False, is_failed=False,
             messages=(),
@@ -322,43 +376,46 @@ def score_round(state: GameState) -> ScoringBreakdown:
         else:
             defender_card_pts += trick_pts
 
+    # Save pre-bonus values — chute detection uses these (bonus must not affect chute)
+    pre_bonus_taker = taker_card_pts
+    pre_bonus_defender = defender_card_pts
+
     # Last trick bonus
     last_trick_winner = state.last_trick_winner
     last_trick_team: int | None = None
     if last_trick_winner is not None:
         last_trick_team = team_of(last_trick_winner)
         if last_trick_team == taker_team:
-            taker_card_pts += LAST_TRICK_BONUS
+            taker_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
         else:
-            defender_card_pts += LAST_TRICK_BONUS
+            defender_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
 
     # --- Detect declarations from stored initial hands ---
-    # Detect sequences, carres, and belote for each seat
-    decls_per_seat: dict[Seat, dict[str, object]] = {}
-    for seat in Seat:
-        hand = state.hand_of(seat) if not state.completed_tricks else state.initial_hands[seat.value]
-        seqs = detect_sequences(hand)
-        carres = detect_carres(hand)
-        has_belote = detect_belote(hand, trump)
-        decls_per_seat[seat] = {
-            "sequences": seqs,
-            "carres": carres,
-            "belote": has_belote,
-        }
-
+    decls_per_seat = _detect_all_declarations(state, trump)
     resolved = resolve_declarations(decls_per_seat, trump)
 
     # Compute belote points per team
-    taker_has_belote = any(
-        decls_per_seat[s].get("belote", False)
-        for s in Seat if team_of(s) == taker_team
-    )
-    defender_has_belote = any(
-        decls_per_seat[s].get("belote", False)
-        for s in Seat if team_of(s) == defender_team
-    )
-    taker_belote = BELOTE_POINTS if taker_has_belote else 0
-    defender_belote = BELOTE_POINTS if defender_has_belote else 0
+    belote_holder = state.belote_holders.get(trump)
+    taker_belote = 0
+    defender_belote = 0
+    taker_rebelote = False
+    defender_rebelote = False
+
+    if belote_holder is not None:
+        holder_team = team_of(belote_holder)
+        points = 0
+        is_rebelote = state.belote_tracker[1]
+        if is_rebelote:
+            points = GLOBAL_CONFIG.REBELOTE_POINTS
+        elif state.belote_tracker[0]:
+            points = GLOBAL_CONFIG.BELOTE_POINTS
+
+        if holder_team == taker_team:
+            taker_belote = points
+            taker_rebelote = is_rebelote
+        else:
+            defender_belote = points
+            defender_rebelote = is_rebelote
 
     # Compute declaration points (sequences + carres) per team
     scoring_team = resolved.scoring_team
@@ -379,17 +436,13 @@ def score_round(state: GameState) -> ScoringBreakdown:
                 defender_declarations += _carre_points(carre)
 
     # Check capot: taker won all 8 tricks
-    is_capot = all(
-        trick_winner_seat(trick, trump) is not None and
-        team_of(trick_winner_seat(trick, trump)) == taker_team
-        for trick in state.completed_tricks
-    ) if state.completed_tricks else False
+    is_capot_result = is_capot(state)
 
     messages: list[str] = []
 
-    if is_capot:
+    if is_capot_result:
         messages.append("Capot!")
-        taker_total = CAPOT_BASE + taker_declarations + taker_belote
+        taker_total = GLOBAL_CONFIG.CAPOT_BASE + taker_declarations + taker_belote
         defender_total = defender_belote
         return ScoringBreakdown(
             taker_team=taker_team,
@@ -400,19 +453,22 @@ def score_round(state: GameState) -> ScoringBreakdown:
             defender_declarations=defender_declarations,
             taker_belote=taker_belote,
             defender_belote=defender_belote,
+            taker_rebelote=taker_rebelote,
+            defender_rebelote=defender_rebelote,
             taker_total=taker_total,
             defender_total=defender_total,
             is_capot=True, is_failed=False,
             messages=tuple(messages),
         )
 
-    # Check bid failure
-    is_failed = taker_card_pts < defender_card_pts
+    # Check bid failure using pre-bonus card points; the last-trick bonus doesn't affect chute
+    is_failed = pre_bonus_taker < pre_bonus_defender
 
     if is_failed:
         messages.append("Chute! (bid failed)")
         taker_total = taker_belote
-        defender_total = TOTAL_POINTS + defender_declarations + defender_belote + taker_declarations
+        # On chute, taker's declarations are annulled — not transferred to defenders
+        defender_total = GLOBAL_CONFIG.TOTAL_POINTS + GLOBAL_CONFIG.LAST_TRICK_BONUS + defender_declarations + defender_belote
     else:
         taker_total = taker_card_pts + taker_declarations + taker_belote
         defender_total = defender_card_pts + defender_declarations + defender_belote
@@ -428,6 +484,8 @@ def score_round(state: GameState) -> ScoringBreakdown:
         defender_declarations=defender_declarations,
         taker_belote=taker_belote,
         defender_belote=defender_belote,
+        taker_rebelote=taker_rebelote,
+        defender_rebelote=defender_rebelote,
         taker_total=taker_total,
         defender_total=defender_total,
         is_capot=False, is_failed=is_failed,
@@ -457,6 +515,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_decl_pts=breakdown.defender_declarations,
             ns_belote_pts=breakdown.taker_belote,
             ew_belote_pts=breakdown.defender_belote,
+            ns_rebelote=breakdown.taker_rebelote,
+            ew_rebelote=breakdown.defender_rebelote,
             ns_total=breakdown.taker_total,
             ew_total=breakdown.defender_total,
             is_failed=breakdown.is_failed,
@@ -471,6 +531,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_decl_pts=breakdown.taker_declarations,
             ns_belote_pts=breakdown.defender_belote,
             ew_belote_pts=breakdown.taker_belote,
+            ns_rebelote=breakdown.defender_rebelote,
+            ew_rebelote=breakdown.taker_rebelote,
             ns_total=breakdown.defender_total,
             ew_total=breakdown.taker_total,
             is_failed=breakdown.is_failed,
@@ -480,36 +542,15 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
     new_history = state.score_history + (round_score,)
 
     # Determine if game is over
-    if ns >= state.target or ew >= state.target:
-        from .game import Phase as P
-        phase = P.GAME_OVER
-    else:
-        from .game import Phase as P
-        phase = P.DEAL
+    phase = Phase.GAME_OVER if ns >= state.target or ew >= state.target else Phase.DEAL
 
     # Rotate dealer
-    from .game import replace as dataclass_replace
-    return dataclass_replace(
+    return reset_round_fields(
         state,
         team_scores=new_scores,
         dealer=state.dealer.next_seat(),
         phase=phase,
-        trump=None,
-        taker=None,
-        current_trick=(),
-        completed_tricks=(),
-        last_trick_winner=None,
-        bids=(),
-        bidder_index=0,
-        bid_suits=(),
-        round_scores=(0, 0),
-        current_round_points=(0, 0),
         score_history=new_history,
-        declarations=(),
-        declarations_resolved=False,
-        announced=None,
-        belote_tracker=(False, False),
-        first_trick_done=False,
     )
 
 
@@ -518,47 +559,31 @@ def get_declarations(state: GameState) -> tuple[Declaration, ...]:
     if state.trump is None:
         return ()
 
-    decls_per_seat: dict[Seat, dict[str, object]] = {}
-    for seat in Seat:
-        # If we have initial_hands, use them; otherwise use current hand (during bidding)
-        hand = state.initial_hands[seat.value] if any(state.initial_hands) else state.hand_of(seat)
-        if not hand:
-            continue
-            
-        seqs = detect_sequences(hand)
-        carres = detect_carres(hand)
-        has_belote = detect_belote(hand, state.trump)
-        decls_per_seat[seat] = {
-            "sequences": seqs,
-            "carres": carres,
-            "belote": has_belote,
-        }
-
+    decls_per_seat = _detect_all_declarations(state, state.trump)
     resolved = resolve_declarations(decls_per_seat, state.trump)
     scoring_team = resolved.scoring_team
 
     all_decls: list[Declaration] = []
-    
+
     # We only care about sequences and carres if they actually score
     if scoring_team is not None:
         for seat in Seat:
             if team_of(seat) == scoring_team:
                 decls = decls_per_seat[seat]
-                for seq in decls.get("sequences", []): # type: ignore[attr-defined]
+                for seq in decls["sequences"]:
                     all_decls.append(Declaration(seat, "sequence", seq))
-                for carre in decls.get("carres", []): # type: ignore[attr-defined]
+                for carre in decls["carres"]:
                     all_decls.append(Declaration(seat, "carre", carre))
 
     # Belote is separate from sequence scoring
     if resolved.ns_belote:
-        # Find which NS seat has it
         for s in (Seat.SOUTH, Seat.NORTH):
-            if decls_per_seat[s].get("belote"):
+            if decls_per_seat[s]["belote"]:
                 all_decls.append(Declaration(s, "belote"))
-                
+
     if resolved.ew_belote:
         for s in (Seat.EAST, Seat.WEST):
-            if decls_per_seat[s].get("belote"):
+            if decls_per_seat[s]["belote"]:
                 all_decls.append(Declaration(s, "belote"))
 
     return tuple(all_decls)
