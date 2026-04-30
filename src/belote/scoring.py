@@ -68,10 +68,12 @@ def get_declaration_points(decls: list[Sequence | Carre]) -> int:
 @dataclass(frozen=True, slots=True)
 class ScoringBreakdown:
     taker_team: int  # 0 = NS, 1 = EW
-    taker_card_pts: int
-    defender_card_pts: int
-    raw_taker_card_pts: int  # raw card points before failed-bid adjustment
-    raw_defender_card_pts: int  # raw card points before failed-bid adjustment
+    # Points won at the table (including 10 de der)
+    table_taker_pts: int
+    table_defender_pts: int
+    # Points actually credited to the score (after chute/litige logic)
+    credit_taker_pts: int
+    credit_defender_pts: int
     last_trick_team: int | None  # who got the +10
     taker_declarations: int
     defender_declarations: int
@@ -79,11 +81,13 @@ class ScoringBreakdown:
     defender_belote: int
     taker_rebelote: bool
     defender_rebelote: bool
-    taker_total: int
+    taker_total: int  # card_pts + decls + belote + litige
     defender_total: int
     is_capot: bool
     is_failed: bool
-    messages: tuple[str, ...]
+    is_litige: bool = False
+    litige_points_awarded: int = 0
+    messages: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,19 +299,22 @@ def resolve_declarations(
     )
 
 
-def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> bool:
-    """Check if the taker team won all 8 tricks."""
-    if state.taker is None:
-        return False
-    taker_team = team_of(state.taker)
+def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> int | None:
+    """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None."""
     all_tricks = tricks if tricks is not None else list(state.completed_tricks)
     if not all_tricks or len(all_tricks) < 8:
-        return False
-    return all(
-        (w := trick_winner_seat(trick, state.trump)) is not None and
-        team_of(w) == taker_team
-        for trick in all_tricks
-    )
+        return None
+
+    first_winner = trick_winner_seat(all_tricks[0], state.trump)
+    if first_winner is None:
+        return None
+    winning_team = team_of(first_winner)
+
+    for trick in all_tricks[1:]:
+        winner = trick_winner_seat(trick, state.trump)
+        if winner is None or team_of(winner) != winning_team:
+            return None
+    return winning_team
 
 
 class SeatDeclarations(TypedDict):
@@ -344,12 +351,12 @@ def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDe
 
 
 def score_round(state: GameState) -> ScoringBreakdown:
-    """Score the completed round per §3.8."""
+    """Score the completed round per official rules."""
     if state.trump is None or state.taker is None:
         return ScoringBreakdown(
             taker_team=team_of(Seat.SOUTH),
-            taker_card_pts=0, defender_card_pts=0,
-            raw_taker_card_pts=0, raw_defender_card_pts=0,
+            table_taker_pts=0, table_defender_pts=0,
+            credit_taker_pts=0, credit_defender_pts=0,
             last_trick_team=None,
             taker_declarations=0, defender_declarations=0,
             taker_belote=0, defender_belote=0,
@@ -375,10 +382,6 @@ def score_round(state: GameState) -> ScoringBreakdown:
             taker_card_pts += trick_pts
         else:
             defender_card_pts += trick_pts
-
-    # Save pre-bonus values — chute detection uses these (bonus must not affect chute)
-    pre_bonus_taker = taker_card_pts
-    pre_bonus_defender = defender_card_pts
 
     # Last trick bonus
     last_trick_winner = state.last_trick_winner
@@ -435,19 +438,42 @@ def score_round(state: GameState) -> ScoringBreakdown:
             for carre in resolved.ns_carres if defender_team == 0 else resolved.ew_carres:
                 defender_declarations += _carre_points(carre)
 
-    # Check capot: taker won all 8 tricks
-    is_capot_result = is_capot(state)
+    # Check capot: either team won all 8 tricks
+    capot_winner_team = is_capot(state)
 
     messages: list[str] = []
+    is_failed = False
+    is_litige = False
+    litige_points_awarded = 0
+    taker_total = 0
+    defender_total = 0
 
-    if is_capot_result:
+    # --- Comparison Logic for Contract Fulfillment ---
+    # Taker needs STRICTLY MORE points than Defender to win.
+    # Points include: Cards + 10 de der + Declarations (Sequences/Carres).
+    # Belote-Rebelote is excluded from this comparison (it's always scored).
+    comp_taker = taker_card_pts + taker_declarations
+    comp_defender = defender_card_pts + defender_declarations
+
+    # 1. Capot Logic
+    if capot_winner_team is not None:
         messages.append("Capot!")
-        taker_total = GLOBAL_CONFIG.CAPOT_BASE + taker_declarations + taker_belote
-        defender_total = defender_belote
+        if capot_winner_team == taker_team:
+            # Taker achieved capot
+            taker_total = GLOBAL_CONFIG.CAPOT_BASE + taker_declarations + defender_declarations + taker_belote + state.litige_points
+            defender_total = defender_belote
+        else:
+            # Defense achieved capot
+            is_failed = True
+            defender_total = GLOBAL_CONFIG.CAPOT_BASE + defender_declarations + taker_declarations + defender_belote + state.litige_points
+            taker_total = taker_belote
+
         return ScoringBreakdown(
             taker_team=taker_team,
-            taker_card_pts=0, defender_card_pts=0,
-            raw_taker_card_pts=taker_card_pts, raw_defender_card_pts=defender_card_pts,
+            table_taker_pts=taker_card_pts,
+            table_defender_pts=defender_card_pts,
+            credit_taker_pts=taker_card_pts if not is_failed else 0,
+            credit_defender_pts=defender_card_pts if is_failed else 0,
             last_trick_team=last_trick_team,
             taker_declarations=taker_declarations,
             defender_declarations=defender_declarations,
@@ -457,28 +483,39 @@ def score_round(state: GameState) -> ScoringBreakdown:
             defender_rebelote=defender_rebelote,
             taker_total=taker_total,
             defender_total=defender_total,
-            is_capot=True, is_failed=False,
+            is_capot=True,
+            is_failed=is_failed,
             messages=tuple(messages),
         )
 
-    # Check bid failure using pre-bonus card points; the last-trick bonus doesn't affect chute
-    is_failed = pre_bonus_taker < pre_bonus_defender
-
-    if is_failed:
-        messages.append("Chute! (bid failed)")
+    # 2. Litige Logic (Taker == Defense)
+    if comp_taker == comp_defender:
+        is_litige = True
+        messages.append("Litige! (tie)")
+        # Defense scores their points; Taker's points go to escrow
+        defender_total = defender_card_pts + defender_declarations + defender_belote
         taker_total = taker_belote
-        # On chute, taker's declarations are annulled — not transferred to defenders
-        defender_total = GLOBAL_CONFIG.TOTAL_POINTS + GLOBAL_CONFIG.LAST_TRICK_BONUS + defender_declarations + defender_belote
+        litige_points_awarded = taker_card_pts + taker_declarations
+
+    # 3. Chute Logic (Taker < Defense)
+    elif comp_taker < comp_defender:
+        is_failed = True
+        messages.append("Chute! (bid failed)")
+        # Defense scores 162 + all declarations + any previous litige points
+        defender_total = 162 + defender_declarations + taker_declarations + defender_belote + state.litige_points
+        taker_total = taker_belote
+    # 4. Success Logic (Taker > Defense)
     else:
-        taker_total = taker_card_pts + taker_declarations + taker_belote
+        messages.append("Contract fulfilled!")
+        taker_total = taker_card_pts + taker_declarations + taker_belote + state.litige_points
         defender_total = defender_card_pts + defender_declarations + defender_belote
 
     return ScoringBreakdown(
         taker_team=taker_team,
-        taker_card_pts=taker_card_pts if not is_failed else 0,
-        defender_card_pts=defender_card_pts if not is_failed else 0,
-        raw_taker_card_pts=taker_card_pts,
-        raw_defender_card_pts=defender_card_pts,
+        table_taker_pts=taker_card_pts,
+        table_defender_pts=defender_card_pts,
+        credit_taker_pts=taker_card_pts if not (is_failed or is_litige) else 0,
+        credit_defender_pts=defender_card_pts,
         last_trick_team=last_trick_team,
         taker_declarations=taker_declarations,
         defender_declarations=defender_declarations,
@@ -488,7 +525,10 @@ def score_round(state: GameState) -> ScoringBreakdown:
         defender_rebelote=defender_rebelote,
         taker_total=taker_total,
         defender_total=defender_total,
-        is_capot=False, is_failed=is_failed,
+        is_capot=False,
+        is_failed=is_failed,
+        is_litige=is_litige,
+        litige_points_awarded=litige_points_awarded,
         messages=tuple(messages),
     )
 
@@ -509,8 +549,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
     if breakdown.taker_team == 0:
         round_score = RoundScore(
             taker_team=0,
-            ns_card_pts=breakdown.taker_card_pts,
-            ew_card_pts=breakdown.defender_card_pts,
+            ns_card_pts=breakdown.credit_taker_pts,
+            ew_card_pts=breakdown.credit_defender_pts,
             ns_decl_pts=breakdown.taker_declarations,
             ew_decl_pts=breakdown.defender_declarations,
             ns_belote_pts=breakdown.taker_belote,
@@ -521,12 +561,14 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_total=breakdown.defender_total,
             is_failed=breakdown.is_failed,
             is_capot=breakdown.is_capot,
+            is_litige=breakdown.is_litige,
+            litige_points=breakdown.litige_points_awarded,
         )
     else:
         round_score = RoundScore(
             taker_team=1,
-            ns_card_pts=breakdown.defender_card_pts,
-            ew_card_pts=breakdown.taker_card_pts,
+            ns_card_pts=breakdown.credit_defender_pts,
+            ew_card_pts=breakdown.credit_taker_pts,
             ns_decl_pts=breakdown.defender_declarations,
             ew_decl_pts=breakdown.taker_declarations,
             ns_belote_pts=breakdown.defender_belote,
@@ -537,12 +579,23 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_total=breakdown.taker_total,
             is_failed=breakdown.is_failed,
             is_capot=breakdown.is_capot,
+            is_litige=breakdown.is_litige,
+            litige_points=breakdown.litige_points_awarded,
         )
 
     new_history = state.score_history + (round_score,)
 
     # Determine if game is over
-    phase = Phase.GAME_OVER if ns >= state.target or ew >= state.target else Phase.DEAL
+    # Rule: If tie-breaker needed (ns == ew and both >= target), continue playing.
+    if ns >= state.target or ew >= state.target:
+        phase = Phase.DEAL if ns == ew else Phase.GAME_OVER
+    else:
+        phase = Phase.DEAL
+
+    # Update litige pool: if it was a litige, add to it; otherwise reset it.
+    new_litige_pool = 0
+    if breakdown.is_litige:
+        new_litige_pool = state.litige_points + breakdown.litige_points_awarded
 
     # Rotate dealer
     return reset_round_fields(
@@ -551,6 +604,7 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         dealer=state.dealer.next_seat(),
         phase=phase,
         score_history=new_history,
+        litige_points=new_litige_pool,
     )
 
 

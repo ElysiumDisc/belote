@@ -12,7 +12,7 @@ class Config:
     LAST_TRICK_BONUS: int = 10
     BELOTE_POINTS: int = 20
     REBELOTE_POINTS: int = 40
-    CAPOT_BASE: int = 250
+    CAPOT_BASE: int = 252
     TOTAL_POINTS: int = 152
 
     # Timing (ai_move_delay, trick_result_pause, round_result_pause)

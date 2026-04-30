@@ -5,9 +5,6 @@ from enum import Enum
 
 from .deck import Card, Rank, Suit, trick_rank
 from .deck import card_points as card_points_fn
-
-# trick_rank(Card(trump, Rank.NINE), trump) == 8 + 6 == 14 for any trump
-_NINE_TRUMP_RANK = 14
 from .game import (
     GameState,
     Phase,
@@ -17,6 +14,9 @@ from .game import (
     legal_cards,
     partner,
 )
+
+# trick_rank(Card(trump, Rank.NINE), trump) == 8 + 6 == 14 for any trump
+_NINE_TRUMP_RANK = 14
 
 
 class Difficulty(Enum):
@@ -30,8 +30,9 @@ class AIMemory:
 
     def __init__(self) -> None:
         self.played: set[Card] = set()
-        self.known_voids: dict[Seat, set[Suit]] = {}
+        self.known_voids: dict[Seat, set[Suit]] = {s: set() for s in Seat}
         self.partner_hand: set[Card] = set()
+        self.processed_tricks_count: int = 0
 
 
 class AIPlayer:
@@ -46,8 +47,10 @@ class AIPlayer:
         if len(state.completed_tricks) == 0 and len(state.current_trick) == 0:
             # New round - reset memory
             self.memory.played.clear()
-            self.memory.known_voids.clear()
+            for s in Seat:
+                self.memory.known_voids[s].clear()
             self.memory.partner_hand.clear()
+            self.memory.processed_tricks_count = 0
 
         # Track all cards in completed tricks
         for trick in state.completed_tricks:
@@ -85,10 +88,9 @@ class AIPlayer:
         if forbidden and bid == forbidden:
             if self.difficulty == Difficulty.EASY:
                 return self._easy_bid(hand, exclude=forbidden)
-            elif self.difficulty == Difficulty.MEDIUM:
+            if self.difficulty == Difficulty.MEDIUM:
                 return self._medium_bid(hand, state, exclude=forbidden)
-            else:
-                return self._hard_bid(hand, state, exclude=forbidden)
+            return self._hard_bid(hand, state, exclude=forbidden)
         return bid
 
     def decide_card(self, state: GameState) -> Card:
@@ -425,21 +427,21 @@ class AIPlayer:
         return legal[0]
 
     def _update_voids(self, state: GameState) -> None:
-        """Infer voids by scanning all played cards from scratch."""
-        for seat in Seat:
-            self.memory.known_voids[seat] = set()
+        """Infer voids incrementally."""
+        # 1. Process new completed tricks
+        while self.memory.processed_tricks_count < len(state.completed_tricks):
+            trick = state.completed_tricks[self.memory.processed_tricks_count]
+            self._process_trick_voids(trick)
+            self.memory.processed_tricks_count += 1
 
-        for trick in state.completed_tricks:
-            if len(trick) < 2:
-                continue
-            lead_suit = trick[0].card.suit
-            for tc in trick[1:]:
-                if tc.card.suit != lead_suit:
-                    self.memory.known_voids[tc.seat].add(lead_suit)
+        # 2. Process current trick (transient, so we don't increment processed_tricks_count)
+        self._process_trick_voids(state.current_trick)
 
-        cur = state.current_trick
-        if len(cur) >= 2:
-            lead_suit = cur[0].card.suit
-            for tc in cur[1:]:
-                if tc.card.suit != lead_suit:
-                    self.memory.known_voids[tc.seat].add(lead_suit)
+    def _process_trick_voids(self, trick: tuple[TrickCard, ...]) -> None:
+        """Analyze a trick for voids."""
+        if len(trick) < 2:
+            return
+        lead_suit = trick[0].card.suit
+        for tc in trick[1:]:
+            if tc.card.suit != lead_suit:
+                self.memory.known_voids[tc.seat].add(lead_suit)

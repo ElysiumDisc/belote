@@ -101,7 +101,6 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
              ai_delay: float, trick_pause: float, history: list[GameState],
              human_seats: set[Seat]) -> GameState | str | None:
     """Run the play phase (all 8 tricks). Returns None if user quits, 'UNDO' if requested."""
-    clear_legal_cards_cache()
     current = state
     skip_anims = False
 
@@ -150,7 +149,7 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
                     display(display_state, None)
 
                 # Check for Capot while cards are still visible
-                if is_capot(current, tricks=list(current.completed_tricks) + [display_state.current_trick]):
+                if is_capot(current, tricks=list(current.completed_tricks) + [display_state.current_trick]) is not None:
                     play_sound("capot")
                     announce("CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader)
                     display(display_state, None)
@@ -220,6 +219,7 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
     if rng is None:
         rng = random.Random()
     current = start_round(state, rng)
+    stack_base = len(history_stack)  # mark start of this round in the shared stack
 
     # Pre-game hand preview
     show_hand_preview(current, reader)
@@ -230,10 +230,12 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
         if res_bid is None:
             return None
         if res_bid == "UNDO":
-            if len(history_stack) > 1:
+            if len(history_stack) > stack_base:
                 current = history_stack.pop()
                 continue
-            current = state
+            # Nothing left to undo in this round — restart with a fresh deal
+            del history_stack[stack_base:]
+            current = start_round(state, rng)
             continue
         current = res_bid  # type: ignore[assignment]
 
@@ -246,11 +248,13 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
         if res_play is None:
             return None
         if res_play == "UNDO":
-            if len(history_stack) > 1:
+            if len(history_stack) > stack_base:
                 current = history_stack.pop()
                 # If we undo into BIDDING, we continue the outer loop
                 continue
-            current = state # Reset to start of round
+            # Nothing left to undo in this round — restart with a fresh deal
+            del history_stack[stack_base:]
+            current = start_round(state, rng)
             continue
         current = res_play # type: ignore[assignment]
 

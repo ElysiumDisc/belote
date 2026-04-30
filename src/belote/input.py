@@ -197,9 +197,29 @@ if sys.platform == "win32":
             pass
 
         def read(self) -> KeyEvent:
-            ch = msvcrt.getwch()
+            return self.read_timeout(None)  # type: ignore[return-value]
+
+        def read_timeout(self, timeout: float | None = None) -> KeyEvent | None:
+            if timeout is not None:
+                end = time.time() + timeout
+                while time.time() < end:
+                    if msvcrt.kbhit():
+                        break
+                    time.sleep(0.01)
+                else:
+                    return None
+
+            # Blocking read or key is ready
+            try:
+                ch = msvcrt.getwch()
+            except (EOFError, KeyboardInterrupt):
+                return KeyEvent(Key.QUIT)
+
             if ch in ("\x00", "\xe0"):
-                ch2 = msvcrt.getwch()
+                try:
+                    ch2 = msvcrt.getwch()
+                except (EOFError, KeyboardInterrupt):
+                    return KeyEvent(Key.QUIT)
                 match ch2:
                     case "H":
                         return KeyEvent(Key.UP)
@@ -216,6 +236,8 @@ if sys.platform == "win32":
                 return KeyEvent(Key.ESC)
             if ch == " ":
                 return KeyEvent(Key.SPACE)
+            if ch.lower() == 'q':
+                return KeyEvent(Key.QUIT)
             return KeyEvent(Key.CHAR, ch)
 
     KeyReader = _WindowsKeyReader  # type: ignore[misc, assignment]

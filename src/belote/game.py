@@ -133,6 +133,8 @@ class RoundScore:
     ew_total: int
     is_failed: bool
     is_capot: bool
+    is_litige: bool = False
+    litige_points: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +165,7 @@ class GameState:
     belote_holders: dict[Suit, Seat] = field(default_factory=dict)
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
+    litige_points: int = 0
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
 
@@ -247,6 +250,33 @@ def process_bid(state: GameState, bid: Suit | None) -> GameState:
     return place_bid(state, bid)
 
 
+def _distribute_remaining_cards(state: GameState, taker: Seat) -> list[list[Card]]:
+    """Helper to distribute remaining 11 cards after bidding is finished.
+    Taker gets up-card + 2 more. Others get 3 more.
+    """
+    new_hands = [list(h) for h in state.hands]
+    pool = list(state.remaining_cards)
+    pool_idx = 0
+
+    # Ordering: from dealer.next_seat() around the table (same as bidding order)
+    for i in range(4):
+        s = get_bidder(state.dealer, i)
+        if s == taker:
+            new_hands[s.value].append(state.up_card)  # type: ignore[arg-type]
+            # Taker only needs 2 more
+            new_hands[s.value].extend(pool[pool_idx:pool_idx+2])
+            pool_idx += 2
+        else:
+            # Others need 3 more
+            new_hands[s.value].extend(pool[pool_idx:pool_idx+3])
+            pool_idx += 3
+
+    if pool_idx != len(pool):
+        raise ValueError(f"Deal corruption: {pool_idx} cards distributed from {len(pool)} available")
+
+    return new_hands
+
+
 def place_bid(state: GameState, bid: Suit | None) -> GameState:
     """Process a bid from the current bidder."""
     new_bids = state.bids + (bid,)
@@ -256,25 +286,8 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
         taker = get_bidder(state.dealer, state.bidder_index)
 
         # Distribute remaining 11 cards
-        new_hands = [list(h) for h in state.hands]
-        pool = list(state.remaining_cards)
-        pool_idx = 0
+        new_hands = _distribute_remaining_cards(state, taker)
 
-        # Ordering: from dealer.next_seat() around the table
-        for i in range(4):
-            s = get_bidder(state.dealer, i)
-            if s == taker:
-                new_hands[s.value].append(state.up_card) # type: ignore[arg-type]
-                # Taker only needs 2 more
-                new_hands[s.value].extend(pool[pool_idx:pool_idx+2])
-                pool_idx += 2
-            else:
-                # Others need 3 more
-                new_hands[s.value].extend(pool[pool_idx:pool_idx+3])
-                pool_idx += 3
-
-        if pool_idx != len(pool):
-            raise ValueError(f"Deal corruption: {pool_idx} cards distributed from {len(pool)} available")
         if not all(len(h) == 8 for h in new_hands):
             raise ValueError(f"Deal corruption: Hands lengths {[len(h) for h in new_hands]}")
 
@@ -354,33 +367,38 @@ _ID_TO_CARD: Final = {v: k for k, v in _CARD_TO_ID.items()}
 def clear_legal_cards_cache() -> None:
     """Clear the legal cards cache."""
     _calculate_legal_cards_impl.cache_clear()
-    trick_winner_seat.cache_clear()
+    _trick_winner_seat_impl.cache_clear()
 
 
 @lru_cache(maxsize=2048)
 def _calculate_legal_cards_impl(
     hand_ids: tuple[int, ...],
     trump: Suit | None,
-    current_trick: tuple[TrickCard, ...],
-    seat: Seat,
+    current_trick_ids: tuple[tuple[int, int], ...],
+    seat_val: int,
 ) -> tuple[int, ...]:
     """Calculate legal cards using card IDs (memoized)."""
     # Map IDs back to Cards for logic
     hand = tuple(_ID_TO_CARD[i] for i in hand_ids)
+    seat = Seat(seat_val)
 
     if trump is None:
         return hand_ids
 
-    if not current_trick:
+    if not current_trick_ids:
         return hand_ids
 
-    lead_card = current_trick[0].card
+    # Reconstruct TrickCard-like objects for the internal logic if needed,
+    # but we can just use the IDs.
+    lead_card_id = current_trick_ids[0][1]
+    lead_card = _ID_TO_CARD[lead_card_id]
     lead_suit = lead_card.suit
 
-    # Check what cards have been played
-    played_cards = [tc for tc in current_trick if tc.seat != seat]
+    # Who is currently winning the trick?
+    # We need an internal version of _current_trick_winner that works with IDs
+    # or just use the existing one but reconstruct the list.
+    played_cards = [TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in current_trick_ids if s != seat_val]
 
-    # Determine who is currently winning the trick
     current_winner = _current_trick_winner(played_cards, trump, lead_suit)
     partner_winning = current_winner is not None and partner(seat) == current_winner
 
@@ -447,12 +465,13 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
 
     hand = state.hand_of(seat)
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
+    trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
 
     res_ids = _calculate_legal_cards_impl(
         hand_ids,
         state.trump,
-        state.current_trick,
-        seat
+        trick_ids,
+        seat.value
     )
 
     return tuple(_ID_TO_CARD[i] for i in res_ids)
@@ -487,13 +506,29 @@ def _card_beats(card: Card, current_best: Card, trump: Suit, lead_suit: Suit) ->
     return card.suit == lead_suit
 
 
-@lru_cache(maxsize=128)
 def trick_winner_seat(trick: tuple[TrickCard, ...], trump: Suit | None) -> Seat | None:
     """Determine the winner of a completed trick."""
     if not trick or trump is None:
         return None
-    lead_suit = trick[0].card.suit
-    return _current_trick_winner(list(trick), trump, lead_suit)
+
+    # Use a primitive-only key for memoization
+    trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in trick)
+    return _trick_winner_seat_impl(trick_ids, trump)
+
+
+@lru_cache(maxsize=1024)
+def _trick_winner_seat_impl(trick_ids: tuple[tuple[int, int], ...], trump: Suit) -> Seat:
+    """Internal memoized winner detection using primitives."""
+    # Convert back to TrickCard for existing logic or just use IDs
+    # Existing logic uses _current_trick_winner which uses _card_beats
+    played = [TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in trick_ids]
+    lead_suit = played[0].card.suit
+
+    # We can optimize this further by avoiding reconstruction if we rewrite _current_trick_winner
+    # but for now this fixes the cache effectiveness while keeping logic central.
+    res = _current_trick_winner(played, trump, lead_suit)
+    assert res is not None # Should not be None if trick_ids is not empty
+    return res
 
 
 def play_card(state: GameState, card: Card) -> GameState:

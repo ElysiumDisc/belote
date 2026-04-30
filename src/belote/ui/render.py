@@ -3,6 +3,7 @@ from __future__ import annotations
 import signal
 import sys
 from functools import lru_cache
+from typing import Final
 
 from ..ansi import (
     BOLD,
@@ -31,14 +32,15 @@ from ..ansi import (
 from ..config import GLOBAL_CONFIG
 from ..context import TERMINAL
 from ..deck import Card, Rank
-from ..themes import theme_manager
 from ..game import (
     GameState,
     Phase,
     Seat,
     legal_cards,
 )
+from ..themes import theme_manager
 
+# ── UI Constants ─────────────────────────────────────────────────────────────
 # Card display dimensions — from GLOBAL_CONFIG
 CARD_W = GLOBAL_CONFIG.CARD_W
 CARD_H = GLOBAL_CONFIG.CARD_H
@@ -46,6 +48,14 @@ CARD_GAP = GLOBAL_CONFIG.CARD_GAP
 
 # Fixed visible width for the WEST and EAST side columns in the middle section.
 SIDE_COL_W = 22
+
+# Vertical offsets within the trick mat for each seat (relative to mat top)
+_TRICK_ROW_OFFSETS: Final = {
+    Seat.NORTH: 2,
+    Seat.WEST: 10,
+    Seat.EAST: 10,
+    Seat.SOUTH: 18,
+}
 
 
 def get_term_size() -> tuple[int, int]:
@@ -141,6 +151,10 @@ def _get_card_face(card: Card, selected: bool = False, legal: bool = True) -> li
 def clear_card_cache() -> None:
     """Clear the card face render cache. Call after changing the active theme."""
     _card_face_internal.cache_clear()
+
+
+# Register callback to clear cache when theme changes
+theme_manager.register_callback(clear_card_cache)
 
 
 @lru_cache(maxsize=128)
@@ -522,12 +536,7 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     # Actually, base_row + row_offsets[seat] should give the correct terminal row.
 
     # Vertical offsets from _render_trick_mat
-    row_offsets = {
-        Seat.NORTH: 2,
-        Seat.WEST: 10,
-        Seat.EAST: 10,
-        Seat.SOUTH: 18,
-    }
+    row_offsets = _TRICK_ROW_OFFSETS
 
     # Horizontal offsets
     w_start = max(0, center_w // 4 - CARD_W // 2)

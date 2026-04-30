@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,6 +153,15 @@ class ThemeManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
+    def __init__(self) -> None:
+        self._current_theme_name: str = "classic_green"
+        self._on_change_callbacks: list[Callable[[], None]] = []
+        self.load_selection()
+
+    def register_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be executed when the theme changes."""
+        self._on_change_callbacks.append(callback)
+
     def get_current(self) -> Theme:
         return THEMES.get(self._current_theme_name, THEMES["classic_green"])
 
@@ -159,9 +169,9 @@ class ThemeManager:
         if name in THEMES:
             self._current_theme_name = name
             self.save_selection()
-            # Invalidate card face cache so new theme colors are applied immediately
-            from .ui.render import clear_card_cache
-            clear_card_cache()
+            # Execute registered callbacks (e.g., to clear UI caches)
+            for callback in self._on_change_callbacks:
+                callback()
 
     def list_themes(self) -> list[str]:
         return list(THEMES.keys())

@@ -200,17 +200,15 @@ def main() -> None:
 
                     while True:
                         ev = reader.read()
-                        if ev.key == Key.CHAR and ev.char:
-                            if ev.char.lower() == 'r':
-                                rematch = True
-                                break
-                            if ev.char.lower() == 't':
-                                show_history(state, reader)
-                                show_final_screen(state)
-                                sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
-                                sys.stdout.write(f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [T] History{RESET} ")
-                                sys.stdout.flush()
-                                continue
+                        if ev.key == Key.CHAR and ev.char and ev.char.lower() == 'r':
+                            rematch = True
+                            break
+                        if ev.key == Key.HIST:
+                            show_history(state, reader)
+                            show_final_screen(state)
+                            sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
+                            sys.stdout.write(f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [t] History{RESET} ")
+                            sys.stdout.flush()
                         if ev.key in (Key.ENTER, Key.QUIT):
                             rematch = False
                             break

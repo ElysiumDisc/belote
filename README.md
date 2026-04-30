@@ -112,7 +112,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Sound Effects:** Enhanced auditory feedback for trick wins, Belote, and Capot, with a built-in mute toggle.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
-- **High Fidelity:** Full implementation of French Belote rules including a two-round bidding system, "Dix de Der", and "Capot" (250 pts). Total round points sum to 162 (152 from cards + 10 for last trick).
+- **High Fidelity:** Full implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", "Capot" (252 pts), and "Litige" (tie-break). Total round points sum to 162 (152 from cards + 10 for last trick).
 - **Rules & History Viewer:** A scrollable, bilingual (English/French) in-game reference for the game's heritage and mechanics.
 
 ## AI
@@ -145,7 +145,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (67+ tests)
+├── tests/             # Comprehensive test suite (71+ tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License

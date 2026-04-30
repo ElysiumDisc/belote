@@ -14,10 +14,10 @@ def test_apply_round_score():
     )
     score = ScoringBreakdown(
         taker_team=0,
-        taker_card_pts=80,
-        defender_card_pts=72,
-        raw_taker_card_pts=80,
-        raw_defender_card_pts=72,
+        table_taker_pts=80,
+        table_defender_pts=72,
+        credit_taker_pts=80,
+        credit_defender_pts=72,
         last_trick_team=0,
         taker_declarations=20,
         defender_declarations=0,

@@ -68,10 +68,12 @@ RULES_CONTENT: dict[str, RulesPage] = {
                 "text": (
                     "• Trump Values: J=20, 9=14, A=11, 10=10, K=4, Q=3, 8=0, 7=0.\n"
                     "• Non-Trump Values: A=11, 10=10, K=4, Q=3, J=2, 9=0, 8=0, 7=0.\n"
-                    "• Total card points: 152. 'Dix de Der': +10 points for winning the last trick.\n"
-                    "• Total round points (excluding declarations): 162.\n"
-                    "• 'Capot/Valat': Winning all 8 tricks awards bonus points.\n"
-                    "The Taker's team must score more points than the defenders, or they go 'inside' (Dedans)."
+                    "• Total card points: 152. 'Dix de Der': +10 points for the last trick (Total 162).\n"
+                    "• Contract: The Taker must score more than the defenders (points + declarations).\n"
+                    "• Litige (Tie): Defenders score their points; Taker's points are held for the next round's winner.\n"
+                    "• Chute (Failure): Defenders score 162 + all declarations from both teams.\n"
+                    "• Capot (All 8 tricks): Winning team scores 252 + all declarations from both teams.\n"
+                    "• Game End: First team to target score wins. Perfect ties trigger a tie-breaker round."
                 )
             }
         ]
@@ -128,10 +130,12 @@ RULES_CONTENT: dict[str, RulesPage] = {
                 "text": (
                     "• Valeurs à l'Atout: V=20, 9=14, As=11, 10=10, R=4, D=3, 8=0, 7=0.\n"
                     "• Valeurs sans Atout: As=11, 10=10, R=4, D=3, V=2, 9=0, 8=0, 7=0.\n"
-                    "• Total des points (cartes): 152. 'Dix de Der': +10 points pour le dernier pli.\n"
-                    "• Total des points par manche (hors annonces): 162.\n"
-                    "• 'Capot': Remporter les 8 plis donne un bonus.\n"
-                    "L'équipe du Preneur doit faire plus de points que la défense (Sinon, elle est 'Dedans')."
+                    "• Total points: 152. 'Dix de Der': +10 pts pour le dernier pli (Total 162).\n"
+                    "• Contrat: Le Preneur doit réaliser plus de points que la défense (plis + annonces).\n"
+                    "• Litige: En cas d'égalité, la défense marque, les points du preneur sont remis en jeu.\n"
+                    "• Chute: La défense marque 162 points + toutes les annonces des deux camps.\n"
+                    "• Capot (8 plis): Le camp vainqueur marque 252 points + toutes les annonces.\n"
+                    "• Fin de partie: Le premier camp au score cible gagne. En cas d'égalité, on rejoue."
                 )
             }
         ]

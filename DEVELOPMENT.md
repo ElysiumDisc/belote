@@ -56,14 +56,14 @@ PYTHONPATH=src .venv/bin/mypy src/belote
 # Linting (0 violations expected)
 PYTHONPATH=src .venv/bin/ruff check src/ tests/
 
-# Full test suite (67 tests expected)
+# Full test suite (71 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (v0.9.9):
+Current baseline (v1.1.0):
 - **mypy**: 0 errors (strict mode, `check_untyped_defs`, `disallow_untyped_defs`)
 - **ruff**: 0 violations (rules: E, F, W, I, N, UP, B, A, C4, RET, SIM, PTH)
-- **pytest**: 63 tests, 0 failures
+- **pytest**: 71 tests, 0 failures
 
 ## Benchmarking
 

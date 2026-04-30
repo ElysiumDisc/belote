@@ -317,13 +317,7 @@ def show_main_menu(reader: KeyReader, diffs_map: dict[Seat, str], target: int, s
 def show_final_screen(state: GameState) -> None:
     """Display the game-over screen."""
     ns, ew = state.team_scores
-    if ns >= state.target and ew >= state.target:
-        # Both teams hit the target simultaneously; higher score wins (no last-chance round)
-        winner = "NS" if ns > ew else "EW"
-    elif ns >= state.target:
-        winner = "NS"
-    else:
-        winner = "EW"
+    winner = "NS" if ns > ew else "EW"
 
     lines = [
         "",

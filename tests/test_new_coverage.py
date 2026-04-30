@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import pytest
 
-from belote.config import GLOBAL_CONFIG
 from belote.deck import Card, Rank, Suit
 from belote.game import (
     GameState,
@@ -97,10 +96,10 @@ def test_apply_round_score_ew_taker():
     )
     breakdown = ScoringBreakdown(
         taker_team=1, # EW
-        taker_card_pts=100,
-        defender_card_pts=62,
-        raw_taker_card_pts=100,
-        raw_defender_card_pts=62,
+        table_taker_pts=100,
+        table_defender_pts=62,
+        credit_taker_pts=100,
+        credit_defender_pts=62,
         last_trick_team=1,
         taker_declarations=0,
         defender_declarations=0,
@@ -249,8 +248,8 @@ def test_input_multibyte_utf8():
             assert event.char == "♠"
 
 
-def test_failed_bid_taker_declarations_not_transferred():
-    """On chute, taker's declarations are annulled — not added to defender total."""
+def test_failed_bid_taker_declarations_transferred():
+    """On chute, taker's declarations are transferred to the defenders."""
     from belote.scoring import score_round
 
     trump = Suit.SPADES
@@ -265,7 +264,7 @@ def test_failed_bid_taker_declarations_not_transferred():
         )
         tricks.append(trick)
 
-    # Give taker (South) a tierce for declaration detection
+    # Give taker (South) a tierce (J, 10, 9 of Hearts)
     south_hand = (
         Card(Suit.HEARTS, Rank.NINE),
         Card(Suit.HEARTS, Rank.TEN),
@@ -293,11 +292,10 @@ def test_failed_bid_taker_declarations_not_transferred():
 
     breakdown = score_round(state)
     assert breakdown.is_failed is True
-    # Taker's declarations are annulled on failure — not transferred to defenders
-    assert breakdown.taker_declarations == 0 or breakdown.taker_total == breakdown.taker_belote
-    # Defender total must equal exactly 162 + their own declarations + their belote
-    expected = GLOBAL_CONFIG.TOTAL_POINTS + GLOBAL_CONFIG.LAST_TRICK_BONUS + breakdown.defender_declarations + breakdown.defender_belote
-    assert breakdown.defender_total == expected
+    # Taker's declarations (100) are transferred to defenders
+    assert breakdown.taker_declarations == 100
+    # Defenders get Capot (252) + Taker's declarations (100) = 352
+    assert breakdown.defender_total == 252 + 100
 
 
 def test_sort_south_hand_persists_across_plays():

@@ -606,8 +606,8 @@ class TestBidFailure:
         assert breakdown.is_failed is True
         # Taker scores 0 (except belote, which they don't have)
         assert breakdown.taker_total == 0
-        # Defenders get 162 points; taker's declarations are annulled, not transferred
-        assert breakdown.defender_total == TOTAL_POINTS + LAST_TRICK_BONUS
+        # Defenders won all tricks -> Capot (252)
+        assert breakdown.defender_total == GLOBAL_CONFIG.CAPOT_BASE
 
 
 # ---------------------------------------------------------------------------
@@ -731,8 +731,8 @@ class TestPointConservation:
 
         breakdown = score_round(state)
         if not breakdown.is_capot:
-            # Use raw card points (before failed-bid adjustment)
-            total = breakdown.raw_taker_card_pts + breakdown.raw_defender_card_pts
+            # Use table card points
+            total = breakdown.table_taker_pts + breakdown.table_defender_pts
             expected = TOTAL_POINTS + LAST_TRICK_BONUS
             assert total == expected, f"Expected {expected}, got {total}"
 

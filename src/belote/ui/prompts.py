@@ -98,12 +98,12 @@ def prompt_card(state: GameState, reader: KeyReader) -> tuple[Card | Literal["UN
                 new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                 theme_manager.set_current(themes_list[new_idx])
                 continue
+            case Key.HIST:
+                show_history(state, reader)
+                continue
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
-                    if char == 't':
-                        show_history(state, reader)
-                        continue
                     if char == 'z':
                         return "UNDO", state
                     if char.isdigit():
@@ -196,13 +196,12 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                 theme_manager.set_current(themes_list[new_idx])
                 continue
+            case Key.HIST:
+                show_history(state, reader)
+                continue
             case Key.CHAR:
                 if event.char:
-
                     char = event.char.lower()
-                    if char == 't':
-                        show_history(state, reader)
-                        continue
                     if char == 'z':
                         return "UNDO"
                     if char == 'p':
@@ -237,7 +236,7 @@ def show_help(reader: KeyReader) -> None:
         "  [1-8]       Quick card select",
         "  [O]         Sort hand by suit/rank",
         "  [Space]     Skip animations",
-        "  [T]         View Game History",
+        "  [t]         View Game History",
         "  [Z]         Undo last move",
         "",
         f"{white_fg()}Bidding:{RESET}",
@@ -246,7 +245,7 @@ def show_help(reader: KeyReader) -> None:
         "",
         f"{white_fg()}Menus:{RESET}",
         "  [R]         Rematch (Game Over)",
-        "  [T]         View Game History",
+        "  [t]         View Game History",
         "",
         f"{DIM}Press [Any Key] to Return{RESET}"
     ]
@@ -368,10 +367,11 @@ def show_history(state: GameState, reader: KeyReader) -> None:
                 lines.append(row + status)
 
         lines.append("")
-        lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
+        lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
 
         view_h = term_h - 4
-        scroll = max(0, min(scroll, len(lines) - view_h))
+        max_scroll = max(0, len(lines) - view_h)
+        scroll = max(0, min(scroll, max_scroll))
         visible_lines = lines[scroll : scroll + view_h]
 
         out = clear_screen() + hide_cursor()
@@ -379,5 +379,11 @@ def show_history(state: GameState, reader: KeyReader) -> None:
         sys.stdout.write("".join([out, rendered]))
         sys.stdout.flush()
 
-        reader.read()
-        return
+        event = reader.read()
+        match event.key:
+            case Key.UP:
+                scroll = max(0, scroll - 1)
+            case Key.DOWN:
+                scroll = min(max_scroll, scroll + 1)
+            case _:
+                return

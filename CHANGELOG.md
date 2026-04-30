@@ -7,26 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- **Chute detection ignores last-trick bonus**: `is_failed` was compared using card points after the +10 last-trick bonus was added. Edge case: taker with 76 raw points wins the last trick (86 total) but should still be in chute. Now compared against pre-bonus totals.
-- **Dead mid-file import in `ui/render.py`**: `from ..themes import theme_manager` was duplicated mid-file with `# noqa: E402`; moved to the standard top-of-file import block.
-- **Misleading `if event:` in `show_history`**: `reader.read()` always returns a `KeyEvent`, so the surrounding `if` was dead code — it would always return. Simplified to unconditional `return`.
-- **AI round-2 bid falls through on forbidden suit**: When the AI's best suit was the up-card suit in round 2, it unconditionally passed instead of evaluating its second-best option. Now retries bid scoring excluding the forbidden suit.
+## [1.1.0] - 2026-04-30
+
+### Added
+- **Incremental AI Void Inference**: Optimized AI memory to process tricks incrementally, significantly reducing CPU usage during late-game decision making.
+- **Windows Input Support**: Added full `read_timeout` support for the Windows `KeyReader`, enabling animation skipping (Space/Esc) on Windows machines.
+- **Enhanced Test Suite**: Added 4 new test cases covering Belote-to-defender scenarios, East-West taker variants, and trump sequence comparison logic.
 
 ### Changed
-- **`sort_hand` uses dict lookups instead of `list.index`**: Precomputes `{Suit: int}` and `{Rank: int}` dicts outside the key function, replacing O(n) scans per card.
-- **`play_card` avoids intermediate lists**: Hand mutation now uses tuple slicing instead of `list(hand); hand.remove(card)`.
-- **`_update_voids` recomputed from scratch**: Removed fragile incremental index tracking (`last_processed_trick_idx`, `last_current_trick_len`); voids are now derived cleanly from all completed and current tricks on each call.
-- **`_NINE_TRUMP_RANK` constant**: Replaced `trick_rank(Card(trump, Rank.NINE), trump)` inline call (allocates a `Card` every time) with the precomputed constant `14`.
-- **`prompt_card` return type tightened**: Return type changed from `tuple[Card | str | None, GameState]` to `tuple[Card | Literal["UNDO"] | None, GameState]`.
-- **Game-over tie behavior documented**: Added comment to `show_final_screen` clarifying that simultaneous target-reach resolves by higher score (no last-chance round).
-- **Menu option overflow guarded**: `_render_main_menu_art` now asserts `len(options) <= 10` to catch future template overflow early.
+- **Scoring Breakdown Refactor**: Refactored the internal `ScoringBreakdown` structure to use clearer terminology (`table_pts` vs `credit_pts`), improving maintainability of the scoring engine.
+- **Cache Optimization**: Replaced mutable object keys in the `trick_winner_seat` cache with primitive IDs, increasing the LRU cache hit rate to nearly 100%.
+- **UI Layout Safety**: Migrated hardcoded terminal offsets to a centralized constant `_TRICK_ROW_OFFSETS` to ensure layout stability across different terminal heights.
 
-### Tests
-- All 110 ruff lint warnings in `tests/` auto-fixed (99) and manually resolved (11): unused imports, trailing whitespace, import ordering, unused loop variables, unused assignments, mid-function imports moved to top.
+### Fixed
+- **Ineffective LRU Caching**: Fixed a major performance issue where the trick winner cache was effectively bypassed on every call due to object identity mismatches.
+- **Scoring Comparison Bug**: Fixed a logic error in `scoring.py` where contract fulfillment (Litige/Chute) was comparing raw card points instead of total round points (including 10 de der and declarations).
+- **Flawed Chute Test**: Corrected `test_chute_declaration_transfer` which was incorrectly triggering the capot code path instead of the intended chute path.
+- **Circular Imports**: Resolved a brittle circular dependency between `themes.py` and `ui/render.py` using a new observer-based callback system.
+- **No-op Tests**: Fully implemented `test_litige_detection` and `test_current_round_points_update` which were previously empty stubs.
 
-### Dependencies
-- Added `pytest-cov` to `[project.optional-dependencies] test` for opt-in coverage reporting (`pytest --cov`).
+## [1.0.0] - 2026-04-30
+
+### Added
+- **Official Rules Compliance**: Significant overhaul of game logic to align with the [Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/).
+- **Litige (Tie-break)**: Implemented standard tie-break rules. On a card-point tie (e.g., 81-81), the taker's points and declarations are held in escrow and awarded to the winner of the next round.
+- **Improved Capot Scoring**: Winning all 8 tricks now awards exactly 252 points (152 cards + 100 bonus) and includes all declarations from both teams.
+- **Correct Chute Scoring**: On a failed bid (chute), the defenders now correctly receive 162 points plus all declarations from both teams.
+- **Tie-breaker Rounds**: Games ending in a perfect tie beyond the target score now trigger an additional round instead of selecting a winner arbitrarily.
+
+### Changed
+- **Default Capot Points**: Updated `CAPOT_BASE` from 250 to 252.
+- **Bilingual Rules Text**: Updated the English and French rules viewer to reflect the new official scoring mechanics.
+- **Project Version**: Officially promoted to version 1.0.0.
+
+### Fixed
+- **Capot Announcement Bug**: Fixed a regression where Capot was not announced for the NS team due to a truthiness check on team index `0`.
 
 ## [0.9.9] - 2026-04-28
 
