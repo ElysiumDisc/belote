@@ -62,11 +62,12 @@ def drive_round(
     deck_list: list[int] | None = None,
     vouchers: list[Voucher] | None = None,
     acc: ScoreAccumulator | None = None,
-) -> None:
+) -> GameState:
     """
     Drive one complete Belote round through the classic engine.
     All scoring events are emitted to `bus`.
     The UI receives callbacks at each decision point.
+    Returns the final GameState.
     """
     rng = random.Random(seed) if seed is not None else random.Random()
 
@@ -124,7 +125,7 @@ def drive_round(
         state = process_bid(state, bid)
 
     if state.phase == Phase.DEAL:  # All passed
-        return
+        return state
 
     # Play Phase
     while state.phase == Phase.PLAYING:
@@ -217,3 +218,5 @@ def drive_round(
             state
         )
         ui_callbacks.on_round_end(breakdown)
+    
+    return state

@@ -96,7 +96,6 @@ class BelAtroGame:
         acc.deck_id = self.run.deck_id
         acc.carnet_active = self.run.show_north_hand
         acc.attach_jokers(self.run.jokers)
-        bus.subscribe(acc.on_event)
 
         # UI Implementation of callbacks
         from .ui.announce import BelAtroAnnounce
@@ -116,18 +115,16 @@ class BelAtroGame:
             def __init__(self, reader: KeyReader):
                 self.reader = reader
 
-            def _show_overlay(self) -> None:
+            def _show_overlay(self, state: GameState) -> None:
                 from ..ui.render import display
 
-                if last_display_state[0] is not None:
-                    display(last_display_state[0], show_north_hand=show_north)
-                hud.render(acc)
+                display(state, show_north_hand=show_north)
+                hud.render(acc, state)
                 trust_bar.render()
-                BelAtroAnnounce.score_popup(acc.popup_lines, self.reader)
-                if last_display_state[0] is not None:
-                    display(last_display_state[0], show_north_hand=show_north)
-                    hud.render(acc)
-                    trust_bar.render()
+                BelAtroAnnounce.score_popup(acc.get_popup_lines(state), self.reader)
+                display(state, show_north_hand=show_north)
+                hud.render(acc, state)
+                trust_bar.render()
 
             def prompt_bid(self, state: GameState) -> object:
                 from ..ui.prompts import prompt_bid
@@ -135,7 +132,7 @@ class BelAtroGame:
                 while True:
                     res = prompt_bid(state, self.reader)
                     if res == "OVERLAY":
-                        self._show_overlay()
+                        self._show_overlay(state)
                         continue
                     if res == "QUIT":
                         raise KeyboardInterrupt
@@ -149,7 +146,7 @@ class BelAtroGame:
                 while True:
                     card, new_state = prompt_card(state, self.reader, show_north_hand=show_north)
                     if card == "OVERLAY":
-                        self._show_overlay()
+                        self._show_overlay(state)
                         continue
                     if card is None:
                         raise KeyboardInterrupt
@@ -170,11 +167,11 @@ class BelAtroGame:
                     display_state = state
                 last_display_state[0] = display_state
                 display(display_state, show_north_hand=show_north)
-                hud.render(acc)
+                hud.render(acc, display_state)
                 trust_bar.render()
 
             def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None:
-                BelAtroAnnounce.score_popup(acc.popup_lines, self.reader)
+                BelAtroAnnounce.score_popup(acc.get_popup_lines(state), self.reader)
 
             def on_round_end(self, breakdown: object) -> None:
                 pass
@@ -190,22 +187,24 @@ class BelAtroGame:
             boss = boss_cls()
             BelAtroAnnounce.boss_reveal(boss, self.reader)
 
-        drive_round(
+        final_state = drive_round(
             bus=bus,
             partner=self.run.partner,
             boss=boss,
             deck_id=self.run.deck_id,
             ui_callbacks=UICallbacks(self.reader),
+            acc=acc,
         )
 
         # Check win/loss
-        if acc.total < self.run.target_score:
+        total = acc.get_total(final_state)
+        if total < self.run.target_score:
             self.run.run_over = True
             print("RUN OVER - Failed to meet target.")
         else:
-            self.run.economy.process_round_end(acc.total - self.run.target_score)
-            if acc.bonus_money > 0:
-                self.run.economy.add_money(acc.bonus_money)
+            self.run.economy.process_round_end(total - self.run.target_score)
+            if final_state._bonus_money > 0:
+                self.run.economy.add_money(final_state._bonus_money)
 
 
 def main() -> None:
