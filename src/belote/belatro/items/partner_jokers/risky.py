@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from belote.game import Seat
 
 from ...engine.event_bus import RoundEndEvent, TrickWonEvent
@@ -13,21 +15,20 @@ class LAventurier(Joker):
     cost = 9
     is_partner_joker = True
 
-    def __init__(self) -> None:
-        self._south_wins = 0
-        self._north_wins = 0
-
-    def on_round_start(self) -> JokerResult | None:
-        self._south_wins = 0
-        self._north_wins = 0
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_south_wins"] = 0
+        state[f"{self.id}_north_wins"] = 0
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
-            self._south_wins += 1
+            swins = state.get(f"{self.id}_south_wins", 0) + 1
+            state[f"{self.id}_south_wins"] = swins
         elif event.winner == Seat.NORTH:
-            self._north_wins += 1
-        if self._south_wins >= 3 and self._north_wins >= 3:
+            nwins = state.get(f"{self.id}_north_wins", 0) + 1
+            state[f"{self.id}_north_wins"] = nwins
+
+        if state.get(f"{self.id}_south_wins", 0) >= 3 and state.get(f"{self.id}_north_wins", 0) >= 3:
             return JokerResult(times_mult=2.0)
         return None
 
@@ -39,20 +40,18 @@ class LeMartyr(Joker):
     cost = 8
     is_partner_joker = True
 
-    def __init__(self) -> None:
-        self._north_wins = 0
-
-    def on_round_start(self) -> JokerResult | None:
-        self._north_wins = 0
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_north_wins"] = 0
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.NORTH:
-            self._north_wins += 1
+            nwins = state.get(f"{self.id}_north_wins", 0) + 1
+            state[f"{self.id}_north_wins"] = nwins
         return None
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
-        if self._north_wins == 0:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        if state.get(f"{self.id}_north_wins", 0) == 0:
             return JokerResult(times_mult=3.0)
         return None
 
@@ -64,16 +63,14 @@ class LeParasite(Joker):
     cost = 6
     is_partner_joker = True
 
-    def __init__(self) -> None:
-        self._north_wins = 0
-
-    def on_round_start(self) -> JokerResult | None:
-        self._north_wins = 0
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_north_wins"] = 0
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.NORTH:
-            self._north_wins += 1
-            if self._north_wins > 2:
+            nwins = state.get(f"{self.id}_north_wins", 0) + 1
+            state[f"{self.id}_north_wins"] = nwins
+            if nwins > 2:
                 return JokerResult(add_money=1)
         return None

@@ -356,50 +356,72 @@ class AIPlayer:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
         points = card_points_fn(card, trump)
-        rank = trick_rank(card, trump)
-        is_last_trick = len(state.completed_tricks) == 7
-
         # Base: card point value (prefer keeping high value cards if not winning)
         score += points * 0.1
 
         if not trick:
-            # Leading logic
-            if card.suit == trump:
-                # Leading trump is good for pulling if opponents still have them
-                opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
-                my_trumps = sum(1 for c in state.hand_of(self.seat) if c.suit == trump)
-                if opp_trumps > my_trumps:
-                    score += 4
-                else:
-                    score += 1
-            elif card.rank == Rank.ACE:
-                score += 5
-            elif points == 0:
-                # Leading waste card to probe
-                score += 2
-            return score
+            return self._score_leading_strategy(card, state, trump)
 
+        if partner_winning and trick[0].card.suit != trump:
+            return self._score_discarding_strategy(card, state, trump, points)
+
+        return self._score_winning_strategy(card, state, trump, trick, partner_winning, points)
+
+    def _score_leading_strategy(self, card: Card, state: GameState, trump: Suit) -> float:
+        """Heuristics for when we are leading the trick."""
+        score = 0.0
+        if card.suit == trump:
+            # Leading trump is good for pulling if opponents still have them
+            opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
+            my_trumps = sum(1 for c in state.hand_of(self.seat) if c.suit == trump)
+            if opp_trumps > my_trumps:
+                score += 4
+            else:
+                score += 1
+        elif card.rank == Rank.ACE:
+            score += 5
+        elif card_points_fn(card, trump) == 0:
+            # Leading waste card to probe
+            score += 2
+        return score
+
+    def _score_discarding_strategy(
+        self, card: Card, state: GameState, trump: Suit, points: int
+    ) -> float:
+        """Heuristics for when partner is winning and we can discard."""
+        score = 0.0
+        # Partner winning - discard strategy
+        score -= points * 0.7  # Penalize throwing away points
+
+        # Prefer discarding from short suits (to establish voids)
+        my_hand = state.hand_of(self.seat)
+        suit_count = sum(1 for c in my_hand if c.suit == card.suit)
+        if suit_count == 1:
+            score += 3
+
+        # Prefer keeping cards that partner is void in (to trump later)
+        p = partner(self.seat)
+        if card.suit in self.memory.known_voids.get(p, set()):
+            score -= 2
+        return score
+
+    def _score_winning_strategy(
+        self,
+        card: Card,
+        state: GameState,
+        trump: Suit,
+        trick: tuple[TrickCard, ...],
+        partner_winning: bool,
+        points: int,
+    ) -> float:
+        """Heuristics for trying to win the trick or ducking."""
+        score = 0.0
+        rank = trick_rank(card, trump)
+        is_last_trick = len(state.completed_tricks) == 7
+        highest_rank = max((trick_rank(tc.card, trump) for tc in trick), default=-1)
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
-        if partner_winning and lead_suit != trump:
-            # Partner winning - discard strategy
-            score -= points * 0.7  # Penalize throwing away points
-
-            # Prefer discarding from short suits (to establish voids)
-            my_hand = state.hand_of(self.seat)
-            suit_count = sum(1 for c in my_hand if c.suit == card.suit)
-            if suit_count == 1:
-                score += 3
-
-            # Prefer keeping cards that partner is void in (to trump later)
-            if card.suit in self.memory.known_voids.get(p, set()):
-                score -= 2
-
-            return score
-
-        # Try to win the trick
-        highest_rank = max((trick_rank(tc.card, trump) for tc in trick), default=-1)
         if rank > highest_rank:
             win_bonus = 15 if is_last_trick else 10  # Prioritize Dix de Der
             score += win_bonus
@@ -423,12 +445,10 @@ class AIPlayer:
                 score += 2
         else:
             # We are losing and partner is losing.
-            # If we can't win, throw away low cards or probe
             score -= points * 0.4
 
-        # Specific BelAtro awareness: If partner's hand is visible,
-        # don't duplicate their strength.
-        if card in self.memory.partner_hand:  # Should not happen, but for logic
+        # BelAtro awareness: If partner's hand is visible, don't duplicate strength.
+        if card in self.memory.partner_hand:
             score -= 5
 
         return score

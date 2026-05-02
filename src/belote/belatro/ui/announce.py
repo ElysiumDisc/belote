@@ -25,6 +25,12 @@ def toggle_overlay() -> None:
     _overlay_visible = not _overlay_visible
 
 
+def reset_overlay_state() -> None:
+    """Reset overlay state to False. Call between tests to prevent state leakage."""
+    global _overlay_visible
+    _overlay_visible = False
+
+
 class BelAtroAnnounce:
     """Handles announcements and popups."""
 

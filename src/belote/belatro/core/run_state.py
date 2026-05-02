@@ -40,10 +40,14 @@ class BelAtroRun:
     deck_id: str = "classique"
     card_enhancements: dict[str, Any] = field(default_factory=dict)  # card_id → Enhancement
     show_north_hand: bool = False  # set True by LeCarnet voucher
+    contract_levels: dict[str, Any] = field(default_factory=dict)  # contract_id → planet reward dict
 
     def __post_init__(self) -> None:
-        from ..items.registry import registry
+        from ..items.registry import register_all_items, registry
         from ..run.decks import STARTING_DECKS
+
+        if not registry.planets:
+            register_all_items()
 
         deck = next((d for d in STARTING_DECKS if d.id == self.deck_id), None)
         if deck is not None:
@@ -63,10 +67,10 @@ class BelAtroRun:
                     p_id = random.choice(planet_ids)
                     planet_cls = registry.get_planet(p_id)
                     if planet_cls:
-                        # Applying planet effect immediately
                         if self.profile:
                             self.profile.discover(p_id)
-                        pass  # Currently no contract tracking to apply to
+                        planet_instance = planet_cls()
+                        self.contract_levels[planet_instance.contract_id] = planet_instance.level_up_reward()
 
     # ── Current blind target ───────────────────────────────
     @property

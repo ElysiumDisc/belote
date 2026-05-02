@@ -311,35 +311,37 @@ class TestTrustTrack:
 class TestScoreAccumulator:
     def setup_method(self) -> None:
         from belote.belatro.core.scoring import ScoreAccumulator
+        from belote.game import new_game
 
         self.acc = ScoreAccumulator()
+        self.state = new_game()
 
     def test_default_chips_zero(self) -> None:
-        assert self.acc.chips == 0
+        assert self.state._chips == 0
 
     def test_default_mult_one(self) -> None:
-        assert self.acc.mult == 1.0
+        assert self.state._mult == 1.0
 
     def test_total_chips_times_mult(self) -> None:
-        self.acc.chips = 10
-        self.acc.mult = 2.0
-        assert self.acc.total == 20
+        from dataclasses import replace
+        state = replace(self.state, _chips=10, _mult=2.0)
+        assert self.acc.get_total(state) == 20
 
     def test_total_truncates_to_int(self) -> None:
-        self.acc.chips = 10
-        self.acc.mult = 1.5
-        assert self.acc.total == 15
-        assert isinstance(self.acc.total, int)
+        from dataclasses import replace
+        state = replace(self.state, _chips=10, _mult=1.5)
+        assert self.acc.get_total(state) == 15
+        assert isinstance(self.acc.get_total(state), int)
 
     def test_trick_won_event_adds_card_points(self) -> None:
         evt = make_trick_event(card_points=14)
-        self.acc.on_event(evt)
-        assert self.acc.chips == 14
+        state = self.acc.update_state(self.state, evt)
+        assert state._chips == 14
 
     def test_declaration_scored_adds_points(self) -> None:
         evt = make_decl_event(points=20)
-        self.acc.on_event(evt)
-        assert self.acc.chips == 20
+        state = self.acc.update_state(self.state, evt)
+        assert state._chips == 20
 
     def test_attach_jokers_and_on_event_triggers_joker(self) -> None:
         from belote.belatro.items.jokers.trick_timing import LePremierSang
@@ -347,27 +349,27 @@ class TestScoreAccumulator:
         joker = LePremierSang()
         self.acc.attach_jokers([joker])
         evt = make_trick_event(winner=Seat.SOUTH, trick_number=1)
-        self.acc.on_event(evt)
+        state = self.acc.update_state(self.state, evt)
         # LePremierSang gives +2 mult on trick 1
-        assert self.acc.mult == 3.0
+        assert state._mult == 3.0
 
     def test_attach_jokers_none_means_empty(self) -> None:
         self.acc.attach_jokers([])
         evt = make_trick_event(card_points=5)
-        self.acc.on_event(evt)
-        assert self.acc.chips == 5
-        assert self.acc.mult == 1.0
+        state = self.acc.update_state(self.state, evt)
+        assert state._chips == 5
+        assert state._mult == 1.0
 
     def test_popup_lines_contains_summary(self) -> None:
-        self.acc.chips = 20
-        self.acc.mult = 2.0
-        lines = self.acc.popup_lines
+        from dataclasses import replace
+        state = replace(self.state, _chips=20, _mult=2.0)
+        lines = self.acc.get_popup_lines(state)
         assert any("Chips" in ln and "Mult" in ln for ln in lines)
 
     def test_popup_lines_last_line_has_total(self) -> None:
-        self.acc.chips = 10
-        self.acc.mult = 3.0
-        last = self.acc.popup_lines[-1]
+        from dataclasses import replace
+        state = replace(self.state, _chips=10, _mult=3.0)
+        last = self.acc.get_popup_lines(state)[-1]
         assert "30" in last  # 10 * 3.0 = 30
 
     def test_joker_add_chips_applied(self) -> None:
@@ -376,8 +378,8 @@ class TestScoreAccumulator:
         joker = LeMiroir()
         self.acc.attach_jokers([joker])
         evt = make_trick_event(winner=Seat.NORTH)
-        self.acc.on_event(evt)
-        assert self.acc.chips == 5
+        state = self.acc.update_state(self.state, evt)
+        assert state._chips == 5
 
     def test_joker_times_mult_applied(self) -> None:
         from belote.belatro.items.jokers.trick_timing import LeDernierMot
@@ -385,27 +387,27 @@ class TestScoreAccumulator:
         joker = LeDernierMot()
         self.acc.attach_jokers([joker])
         evt = make_trick_event(winner=Seat.SOUTH, is_last=True, card_points=10)
-        self.acc.on_event(evt)
+        state = self.acc.update_state(self.state, evt)
         # card_points=10 added to chips, then joker gives add_chips=-10 and times_mult=2.0
         # chips = 10 + (-10) = 0, mult = 1.0 * 2.0 = 2.0
-        assert self.acc.chips == 0
-        assert self.acc.mult == 2.0
+        assert state._chips == 0
+        assert state._mult == 2.0
 
     def test_carnet_active_adds_mult_on_south_win(self) -> None:
         from belote.belatro.core.scoring import ScoreAccumulator
 
         acc = ScoreAccumulator(carnet_active=True)
         evt = make_trick_event(winner=Seat.SOUTH)
-        acc.on_event(evt)
-        assert acc.mult == 2.0
+        state = acc.update_state(self.state, evt)
+        assert state._mult == 2.0
 
     def test_carnet_does_not_trigger_on_north_win(self) -> None:
         from belote.belatro.core.scoring import ScoreAccumulator
 
         acc = ScoreAccumulator(carnet_active=True)
         evt = make_trick_event(winner=Seat.NORTH)
-        acc.on_event(evt)
-        assert acc.mult == 1.0
+        state = acc.update_state(self.state, evt)
+        assert state._mult == 1.0
 
 
 # ===========================================================================
@@ -559,26 +561,33 @@ class TestLePremierSang:
         from belote.belatro.items.jokers.trick_timing import LePremierSang
 
         self.joker = LePremierSang()
+        self.state: dict[str, Any] = {}
 
     def test_south_wins_trick_one_returns_add_mult(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state
+        )
         assert result is not None
         assert result.add_mult == 2.0
 
     def test_south_wins_trick_two_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state
+        )
         assert result is None
 
     def test_north_wins_trick_one_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
+        )
         assert result is None
 
     def test_on_round_start_resets_active_flag(self) -> None:
         # Fire it, then reset
-        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
-        assert self.joker._active is True
-        self.joker.on_round_start()
-        assert self.joker._active is False
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        assert self.state.get(f"{self.joker.id}_active") is True
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_active") is False
 
 
 class TestLeSergent:
@@ -586,32 +595,33 @@ class TestLeSergent:
         from belote.belatro.items.jokers.trick_timing import LeSergent
 
         self.joker = LeSergent()
+        self.state: dict[str, Any] = {}
 
     def test_south_win_returns_add_mult(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH), self.state)
         assert result is not None
         assert result.add_mult == 0.5
 
     def test_consecutive_south_wins_both_give_mult(self) -> None:
-        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
-        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2))
+        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state)
         assert r1.add_mult == 0.5
         assert r2.add_mult == 0.5
-        assert self.joker._streak == 2
+        assert self.state.get(f"{self.joker.id}_streak") == 2
 
     def test_north_win_resets_streak(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2))
-        assert self.joker._streak == 0
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
+        assert self.state.get(f"{self.joker.id}_streak") == 0
 
     def test_north_win_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
         assert result is None
 
     def test_on_round_start_resets_streak(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
-        self.joker.on_round_start()
-        assert self.joker._streak == 0
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_streak") == 0
 
 
 class TestLeDernierMot:
@@ -619,19 +629,26 @@ class TestLeDernierMot:
         from belote.belatro.items.jokers.trick_timing import LeDernierMot
 
         self.joker = LeDernierMot()
+        self.state: dict[str, Any] = {}
 
     def test_south_last_trick_returns_result(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, is_last=True))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, is_last=True), self.state
+        )
         assert result is not None
         assert result.add_chips == -10
         assert result.times_mult == 2.0
 
     def test_south_non_last_trick_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, is_last=False))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, is_last=False), self.state
+        )
         assert result is None
 
     def test_north_last_trick_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, is_last=True))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, is_last=True), self.state
+        )
         assert result is None
 
 
@@ -640,19 +657,26 @@ class TestLExecuteur:
         from belote.belatro.items.jokers.trick_timing import LExecuteur
 
         self.joker = LExecuteur()
+        self.state: dict[str, Any] = {}
 
     def test_south_last_trick_returns_result(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, is_last=True))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, is_last=True), self.state
+        )
         assert result is not None
         assert result.add_chips == 40
         assert result.times_mult == 1.5
 
     def test_south_non_last_trick_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, is_last=False))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, is_last=False), self.state
+        )
         assert result is None
 
     def test_north_last_trick_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, is_last=True))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, is_last=True), self.state
+        )
         assert result is None
 
 
@@ -666,18 +690,19 @@ class TestLeMiroir:
         from belote.belatro.items.partner_jokers.passive import LeMiroir
 
         self.joker = LeMiroir()
+        self.state: dict[str, Any] = {}
 
     def test_north_wins_gives_chips(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
         assert result is not None
         assert result.add_chips == 5
 
     def test_south_wins_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH), self.state)
         assert result is None
 
     def test_east_wins_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.EAST))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.EAST), self.state)
         assert result is None
 
 
@@ -686,16 +711,17 @@ class TestLaSymbiose:
         from belote.belatro.items.partner_jokers.passive import LaSymbiose
 
         self.joker = LaSymbiose()
+        self.state: dict[str, Any] = {}
 
     def test_north_declaration_gives_times_mult(self) -> None:
         evt = make_decl_event(seat=Seat.NORTH, points=20)
-        result = self.joker.on_declaration(evt)
+        result = self.joker.on_declaration(evt, self.state)
         assert result is not None
         assert result.times_mult == pytest.approx(1.2)
 
     def test_south_declaration_returns_none(self) -> None:
         evt = make_decl_event(seat=Seat.SOUTH, points=20)
-        result = self.joker.on_declaration(evt)
+        result = self.joker.on_declaration(evt, self.state)
         assert result is None
 
 
@@ -704,34 +730,45 @@ class TestLeRelais:
         from belote.belatro.items.partner_jokers.passive import LeRelais
 
         self.joker = LeRelais()
+        self.state: dict[str, Any] = {}
 
     def test_north_wins_trick_one_gives_chips(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
+        )
         assert result is not None
         assert result.add_chips == 15
 
     def test_north_wins_trick_two_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=2), self.state
+        )
         assert result is None
 
     def test_south_wins_trick_one_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state
+        )
         assert result is None
 
     def test_does_not_double_trigger_trick_one(self) -> None:
-        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        r1 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
+        )
         # Simulate another trick_number=1 event (shouldn't happen in real play but guard against it)
-        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        r2 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
+        )
         assert r1 is not None
         assert r2 is None
 
     def test_round_start_resets_triggered(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
-        assert self.joker._triggered is True
-        self.joker.on_round_start()
-        assert self.joker._triggered is False
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1), self.state)
+        assert self.state.get(f"{self.joker.id}_triggered") is True
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_triggered") is False
         # Can trigger again after reset
-        r = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        r = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1), self.state)
         assert r is not None
 
 
@@ -745,36 +782,43 @@ class TestLAventurier:
         from belote.belatro.items.partner_jokers.risky import LAventurier
 
         self.joker = LAventurier()
+        self.state: dict[str, Any] = {}
 
     def _south_win(self, n: int = 1) -> None:
         for i in range(n):
-            self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=i + 1))
+            self.joker.on_trick_won(
+                make_trick_event(winner=Seat.SOUTH, trick_number=i + 1), self.state
+            )
 
     def _north_win(self, n: int = 1, offset: int = 0) -> None:
         for i in range(n):
             self.joker.on_trick_won(
-                make_trick_event(winner=Seat.NORTH, trick_number=i + 1 + offset)
+                make_trick_event(winner=Seat.NORTH, trick_number=i + 1 + offset), self.state
             )
 
     def test_not_triggered_with_few_wins(self) -> None:
         self._south_win(2)
         self._north_win(2)
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=5))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=5), self.state
+        )
         assert result is None
 
     def test_triggered_when_both_reach_three(self) -> None:
         self._south_win(2)
         self._north_win(3, offset=2)
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=6))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=6), self.state
+        )
         assert result is not None
         assert result.times_mult == 2.0
 
     def test_resets_on_round_start(self) -> None:
         self._south_win(3)
         self._north_win(3)
-        self.joker.on_round_start()
-        assert self.joker._south_wins == 0
-        assert self.joker._north_wins == 0
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_south_wins") == 0
+        assert self.state.get(f"{self.joker.id}_north_wins") == 0
 
 
 class TestLeMartyr:
@@ -782,27 +826,28 @@ class TestLeMartyr:
         from belote.belatro.items.partner_jokers.risky import LeMartyr
 
         self.joker = LeMartyr()
+        self.state: dict[str, Any] = {}
 
     def test_north_zero_wins_gives_times_mult_at_round_end(self) -> None:
-        result = self.joker.on_round_end(())
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is not None
         assert result.times_mult == 3.0
 
     def test_north_won_a_trick_gives_none_at_round_end(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
-        result = self.joker.on_round_end(())
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is None
 
     def test_on_trick_won_returns_none_always(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
         assert result is None
 
     def test_resets_on_round_start(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
-        self.joker.on_round_start()
-        assert self.joker._north_wins == 0
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_north_wins") == 0
         # Should give mult again since north wins reset to 0
-        result = self.joker.on_round_end(())
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is not None
 
 
@@ -811,34 +856,45 @@ class TestLeParasite:
         from belote.belatro.items.partner_jokers.risky import LeParasite
 
         self.joker = LeParasite()
+        self.state: dict[str, Any] = {}
 
     def test_first_north_win_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
+        )
         assert result is None
 
     def test_second_north_win_returns_none(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2))
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1), self.state)
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=2), self.state
+        )
         assert result is None
 
     def test_third_north_win_gives_money(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1))
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2))
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=3))
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=1), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=3), self.state
+        )
         assert result is not None
         assert result.add_money == 1
 
     def test_south_wins_do_not_count(self) -> None:
-        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1))
-        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2))
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=3))
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state)
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=3), self.state
+        )
         assert result is None
 
     def test_resets_on_round_start(self) -> None:
         for i in range(3):
-            self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=i + 1))
-        self.joker.on_round_start()
-        assert self.joker._north_wins == 0
+            self.joker.on_trick_won(
+                make_trick_event(winner=Seat.NORTH, trick_number=i + 1), self.state
+            )
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_north_wins") == 0
 
 
 # ===========================================================================
@@ -851,20 +907,21 @@ class TestLeGenereux:
         from belote.belatro.items.partner_jokers.shaper import LeGenereux
 
         self.joker = LeGenereux()
+        self.state: dict[str, Any] = {}
 
     def test_north_wins_gives_three_chips(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
         assert result is not None
         assert result.add_chips == 3
 
     def test_south_wins_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH), self.state)
         assert result is None
 
     def test_multiple_north_wins_each_give_chips(self) -> None:
         for i in range(5):
             result = self.joker.on_trick_won(
-                make_trick_event(winner=Seat.NORTH, trick_number=i + 1)
+                make_trick_event(winner=Seat.NORTH, trick_number=i + 1), self.state
             )
             assert result is not None
             assert result.add_chips == 3
@@ -875,6 +932,7 @@ class TestLaSentinelleP:
         from belote.belatro.items.partner_jokers.shaper import LaSentinelleP
 
         self.joker = LaSentinelleP()
+        self.state: dict[str, Any] = {}
         self.trump = Suit.SPADES
 
     def _make_trump_win(self, trick_number: int = 1) -> TrickWonEvent:
@@ -896,28 +954,28 @@ class TestLaSentinelleP:
         )
 
     def test_round_end_with_no_trump_led_gives_mult(self) -> None:
-        self.joker.on_trick_won(self._make_plain_win())
-        result = self.joker.on_round_end(())
+        self.joker.on_trick_won(self._make_plain_win(), self.state)
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is not None
         assert result.times_mult == pytest.approx(1.5)
 
     def test_round_end_after_trump_led_returns_none(self) -> None:
-        self.joker.on_trick_won(self._make_trump_win())
-        result = self.joker.on_round_end(())
+        self.joker.on_trick_won(self._make_trump_win(), self.state)
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is None
 
     def test_on_round_start_resets_trump_led(self) -> None:
-        self.joker.on_trick_won(self._make_trump_win())
-        assert self.joker._trump_led is True
-        self.joker.on_round_start()
-        assert self.joker._trump_led is False
+        self.joker.on_trick_won(self._make_trump_win(), self.state)
+        assert self.state.get(f"{self.joker.id}_trump_led") is True
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_trump_led") is False
 
     def test_no_tricks_gives_mult(self) -> None:
-        result = self.joker.on_round_end(())
+        result = self.joker.on_round_end(make_round_end_event(), self.state)
         assert result is not None
 
     def test_on_trick_won_returns_none(self) -> None:
-        result = self.joker.on_trick_won(self._make_plain_win())
+        result = self.joker.on_trick_won(self._make_plain_win(), self.state)
         assert result is None
 
 
@@ -926,26 +984,31 @@ class TestLeCalculateur:
         from belote.belatro.items.partner_jokers.shaper import LeCalculateur
 
         self.joker = LeCalculateur()
+        self.state: dict[str, Any] = {}
 
     def test_north_win_gives_add_mult(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
         assert result is not None
         assert result.add_mult == pytest.approx(0.3)
 
     def test_south_win_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH))
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH), self.state)
         assert result is None
 
     def test_accumulates_north_win_count(self) -> None:
         for i in range(4):
-            self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=i + 1))
-        assert self.joker._north_wins == 4
+            self.joker.on_trick_won(
+                make_trick_event(winner=Seat.NORTH, trick_number=i + 1), self.state
+            )
+        assert self.state.get(f"{self.joker.id}_north_wins") == 4
 
     def test_round_start_resets_count(self) -> None:
         for i in range(3):
-            self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=i + 1))
-        self.joker.on_round_start()
-        assert self.joker._north_wins == 0
+            self.joker.on_trick_won(
+                make_trick_event(winner=Seat.NORTH, trick_number=i + 1), self.state
+            )
+        self.joker.on_round_start(self.state)
+        assert self.state.get(f"{self.joker.id}_north_wins") == 0
 
 
 # ===========================================================================
@@ -958,24 +1021,25 @@ class TestLIdeologue:
         from belote.belatro.items.jokers.contract import LIdeologue
 
         self.joker = LIdeologue()
+        self.state: dict[str, Any] = {}
 
     def test_south_wins_sans_atout_with_jack(self) -> None:
         jack_spades = Card(Suit.SPADES, Rank.JACK)
         evt = make_trick_event(winner=Seat.SOUTH, trump=None, cards=(jack_spades,))
-        result = self.joker.on_trick_won(evt)
+        result = self.joker.on_trick_won(evt, self.state)
         assert result is not None
         assert result.add_chips == 18
 
     def test_south_wins_with_trump_returns_none(self) -> None:
         jack_spades = Card(Suit.SPADES, Rank.JACK)
         evt = make_trick_event(winner=Seat.SOUTH, trump=Suit.HEARTS, cards=(jack_spades,))
-        result = self.joker.on_trick_won(evt)
+        result = self.joker.on_trick_won(evt, self.state)
         assert result is None
 
     def test_north_wins_returns_none(self) -> None:
         jack_spades = Card(Suit.SPADES, Rank.JACK)
         evt = make_trick_event(winner=Seat.NORTH, trump=None, cards=(jack_spades,))
-        result = self.joker.on_trick_won(evt)
+        result = self.joker.on_trick_won(evt, self.state)
         assert result is None
 
 
@@ -984,19 +1048,20 @@ class TestLePatriote:
         from belote.belatro.items.jokers.contract import LePatriote
 
         self.joker = LePatriote()
+        self.state: dict[str, Any] = {}
 
     def test_south_wins_with_trump_cards(self) -> None:
         # Jack of trump is 20 pts. 50% extra is 10.
         jack_hearts = Card(Suit.HEARTS, Rank.JACK)
         evt = make_trick_event(winner=Seat.SOUTH, trump=Suit.HEARTS, cards=(jack_hearts,))
-        result = self.joker.on_trick_won(evt)
+        result = self.joker.on_trick_won(evt, self.state)
         assert result is not None
         assert result.add_chips == 10
 
     def test_south_wins_no_trump_returns_none(self) -> None:
         jack_hearts = Card(Suit.HEARTS, Rank.JACK)
         evt = make_trick_event(winner=Seat.SOUTH, trump=None, cards=(jack_hearts,))
-        result = self.joker.on_trick_won(evt)
+        result = self.joker.on_trick_won(evt, self.state)
         assert result is None
 
 
@@ -1005,6 +1070,7 @@ class TestLePuriste:
         from belote.belatro.items.jokers.contract import LePuriste
 
         self.joker = LePuriste()
+        self.state: dict[str, Any] = {}
 
     def test_sans_atout_win_gives_money(self) -> None:
         from belote.scoring import ScoringBreakdown
@@ -1028,7 +1094,7 @@ class TestLePuriste:
             is_failed=False,
         )
         evt = make_round_end_event(breakdown=breakdown, taker_seat=Seat.SOUTH, trump=None)
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is not None
         assert result.add_money == 10
 
@@ -1054,7 +1120,7 @@ class TestLePuriste:
             is_failed=False,
         )
         evt = make_round_end_event(breakdown=breakdown, taker_seat=Seat.SOUTH, trump=Suit.HEARTS)
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is None
 
 
@@ -1063,6 +1129,7 @@ class TestLeBanquier:
         from belote.belatro.items.jokers.economy import LeBanquier
 
         self.joker = LeBanquier()
+        self.state: dict[str, Any] = {}
 
     def test_bonus_money_on_high_score(self) -> None:
         from belote.scoring import ScoringBreakdown
@@ -1087,7 +1154,7 @@ class TestLeBanquier:
             is_failed=False,
         )
         evt = make_round_end_event(breakdown=breakdown, taker_seat=Seat.SOUTH, trump=Suit.HEARTS)
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is not None
         assert result.add_money == 3
 
@@ -1114,7 +1181,7 @@ class TestLeBanquier:
             is_failed=False,
         )
         evt = make_round_end_event(breakdown=breakdown, taker_seat=Seat.SOUTH, trump=Suit.HEARTS)
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is None
 
 
@@ -1123,16 +1190,17 @@ class TestLePasseur:
         from belote.belatro.items.jokers.economy import LePasseur
 
         self.joker = LePasseur()
+        self.state: dict[str, Any] = {}
 
     def test_north_pass_gives_money(self) -> None:
         evt = make_bid_event(seat=Seat.NORTH, trump=None, contract="normal")
-        result = self.joker.on_bid(evt)
+        result = self.joker.on_bid(evt, self.state)
         assert result is not None
         assert result.add_money == 2
 
     def test_north_bid_returns_none(self) -> None:
         evt = make_bid_event(seat=Seat.NORTH, trump=Suit.HEARTS, contract="normal")
-        result = self.joker.on_bid(evt)
+        result = self.joker.on_bid(evt, self.state)
         assert result is None
 
 
@@ -1141,10 +1209,11 @@ class TestLeNotaire:
         from belote.belatro.items.jokers.economy import LeNotaire
 
         self.joker = LeNotaire()
+        self.state: dict[str, Any] = {}
 
     def test_south_belote_gives_money_removes_chips(self) -> None:
         evt = make_belote_event(seat=Seat.SOUTH, is_rebelote=False)
-        result = self.joker.on_belote(evt)
+        result = self.joker.on_belote(evt, self.state)
         assert result is not None
         assert result.add_money == 5
         assert result.add_chips == -20
@@ -1155,13 +1224,14 @@ class TestLaSentinelle:
         from belote.belatro.items.jokers.hand_comp import LaSentinelle
 
         self.joker = LaSentinelle()
+        self.state: dict[str, Any] = {}
 
     def test_trump_jack_in_hand_gives_mult(self) -> None:
         jack_hearts = Card(Suit.HEARTS, Rank.JACK)
         evt = make_round_end_event(
             breakdown=None, taker_seat=Seat.SOUTH, trump=Suit.HEARTS, hand_remainder=(jack_hearts,)
         )
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is not None
         assert result.times_mult == 3.0
 
@@ -1169,7 +1239,7 @@ class TestLaSentinelle:
         evt = make_round_end_event(
             breakdown=None, taker_seat=Seat.SOUTH, trump=Suit.HEARTS, hand_remainder=()
         )
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is None
 
 
@@ -1178,13 +1248,14 @@ class TestLeFantome:
         from belote.belatro.items.jokers.hand_comp import LeFantome
 
         self.joker = LeFantome()
+        self.state: dict[str, Any] = {}
 
     def test_cards_in_hand_give_mult(self) -> None:
         cards = (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT))
         evt = make_round_end_event(
             breakdown=None, taker_seat=Seat.SOUTH, trump=Suit.HEARTS, hand_remainder=cards
         )
-        result = self.joker.on_round_end(evt)
+        result = self.joker.on_round_end(evt, self.state)
         assert result is not None
         assert result.add_mult == 1.0  # 2 cards * 0.5
 

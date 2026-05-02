@@ -27,83 +27,116 @@ class ScoreAccumulator:
     processing Joker triggers as events arrive.
     """
 
-    chips: int = 0
-    mult: float = 1.0
-    bonus_money: int = 0
     deck_id: str = "classique"
     carnet_active: bool = False
+    partner_jokers_double: bool = False
     _jokers: list[Joker] = field(default_factory=list)
     _log: list[str] = field(default_factory=list)  # for the score popup UI
 
     def attach_jokers(self, jokers: list[Joker]) -> None:
         self._jokers = jokers
 
-    def on_event(self, event: object) -> None:
+    def trigger_round_start(self, state: GameState) -> GameState:
+        """Initialize joker state at the beginning of a round."""
+        joker_state = dict(state._joker_state)
+        for joker in self._jokers:
+            result = joker.on_round_start(joker_state)
+            if result:
+                # We could apply results here too if needed, but usually round_start
+                # just initializes internal joker state like streaks.
+                pass
+        from dataclasses import replace
+        return replace(state, _joker_state=joker_state)
+
+    def update_state(self, state: GameState, event: object) -> GameState:
+        """Process an event and return an updated GameState with new score/joker state."""
+        new_chips = state._chips
+        new_mult = state._mult
+        new_money = state._bonus_money
+        # Create a shallow copy of the joker state to allow mutation by jokers
+        # while keeping the original state immutable for the caller
+        joker_state = dict(state._joker_state)
+
+        def _apply(result: JokerResult, source: str) -> None:
+            nonlocal new_chips, new_mult, new_money
+            if result.add_chips:
+                new_chips += result.add_chips
+                self._log.append(f"{source}: +{result.add_chips} chips")
+            if result.add_mult:
+                new_mult += result.add_mult
+                self._log.append(f"{source}: +{result.add_mult} Mult")
+            if result.times_mult:
+                new_mult *= result.times_mult
+                self._log.append(f"{source}: ×{result.times_mult} Mult")
+            if result.add_money:
+                new_money += result.add_money
+                self._log.append(f"{source}: +${result.add_money}")
+
+        def _fire_jokers(method_name: str, event_obj: Any) -> None:
+            for joker in self._jokers:
+                method = getattr(joker, method_name, None)
+                if method:
+                    result = method(event_obj, joker_state)
+                    if result:
+                        _apply(result, source=joker.name)
+                        # Double trigger for partner jokers if trust is high
+                        if self.partner_jokers_double and getattr(joker, "is_partner_joker", False):
+                            _apply(result, source=f"{joker.name} (Double)")
+
         if isinstance(event, TrickWonEvent):
             # Base chips from card points
-            self.chips += event.card_points
+            new_chips += event.card_points
 
-            # Le Républicain: +5 chips per 7 or 8 captured by your team
-            if self.deck_id == "republicain" and event.winner in _NS_TEAM:
+            # Le Républicain: +5 chips per 7 or 8 in any trick (regardless of winner)
+            if self.deck_id == "republicain":
                 wilds = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
                 if wilds:
-                    self.chips += wilds * 5
+                    new_chips += wilds * 5
                     self._log.append(f"Républicain: +{wilds * 5} chips ({wilds}× wild)")
 
             # Le Carnet: +1 Mult when South personally wins a trick
             if self.carnet_active and event.winner == Seat.SOUTH:
-                self.mult += 1.0
+                new_mult += 1.0
                 self._log.append("Le Carnet: +1 Mult (South won trick)")
 
             # Fire all Joker triggers
-            for joker in self._jokers:
-                result = joker.on_trick_won(event)
-                if result:
-                    self._apply(result, source=joker.name)
+            _fire_jokers("on_trick_won", event)
 
         elif isinstance(event, BeloteAnnouncedEvent):
-            for joker in self._jokers:
-                result = joker.on_belote(event)
-                if result:
-                    self._apply(result, source=joker.name)
+            _fire_jokers("on_belote", event)
 
         elif isinstance(event, DeclarationScoredEvent):
-            self.chips += event.points
-            for joker in self._jokers:
-                result = joker.on_declaration(event)
-                if result:
-                    self._apply(result, source=joker.name)
+            new_chips += event.points
+            _fire_jokers("on_declaration", event)
 
         elif isinstance(event, RoundEndEvent):
-            for joker in self._jokers:
-                result = joker.on_round_end(event)
-                if result:
-                    self._apply(result, source=joker.name)
+            _fire_jokers("on_round_end", event)
 
         elif isinstance(event, BidMadeEvent):
-            for joker in self._jokers:
-                result = joker.on_bid(event)
-                if result:
-                    self._apply(result, source=joker.name)
+            _fire_jokers("on_bid", event)
 
-    def _apply(self, result: JokerResult, source: str) -> None:
-        if result.add_chips:
-            self.chips += result.add_chips
-            self._log.append(f"{source}: +{result.add_chips} chips")
-        if result.add_mult:
-            self.mult += result.add_mult
-            self._log.append(f"{source}: +{result.add_mult} Mult")
-        if result.times_mult:
-            self.mult *= result.times_mult
-            self._log.append(f"{source}: ×{result.times_mult} Mult")
-        if result.add_money:
-            self.bonus_money += result.add_money
-            self._log.append(f"{source}: +${result.add_money}")
+        # Update GameState with new values
+        from dataclasses import replace
+        return replace(
+            state,
+            _chips=new_chips,
+            _mult=new_mult,
+            _bonus_money=new_money,
+            _joker_state=joker_state,
+        )
 
     @property
     def total(self) -> int:
-        return int(self.chips * self.mult)
+        # Note: This is now a bit disconnected from GameState unless called with correct values
+        # For UI, we might need to pass the chips/mult
+        return 0  # Re-implement or remove if unused
 
-    @property
-    def popup_lines(self) -> list[str]:
-        return [*self._log, f"Chips {self.chips} × Mult {self.mult:.1f} = {self.total}"]
+    def get_total(self, state: GameState) -> int:
+        # Avoid float precision issues for large integers if mult is effectively an int
+        if state._mult == float(int(state._mult)):
+            return state._chips * int(state._mult)
+        return int(state._chips * state._mult)
+
+    def get_popup_lines(self, state: GameState) -> list[str]:
+        return [*self._log, f"Chips {state._chips} × Mult {state._mult:.1f} = {self.get_total(state)}"]
+

@@ -31,22 +31,22 @@ class Joker(ABC):
     is_partner_joker: bool = False
     is_corrupted: bool = False
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_belote(self, event: BeloteAnnouncedEvent) -> JokerResult | None:
+    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_declaration(self, event: DeclarationScoredEvent) -> JokerResult | None:
+    def on_declaration(self, event: DeclarationScoredEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_round_start(self) -> JokerResult | None:
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_bid(self, event: BidMadeEvent) -> JokerResult | None:
+    def on_bid(self, event: BidMadeEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
 

@@ -367,6 +367,101 @@ def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDe
     return decls_per_seat
 
 
+def _calculate_base_points(state: GameState, trump: Suit) -> tuple[int, int]:
+    """Calculate raw card points per team, considering boss modifiers."""
+    taker_team = team_of(state.taker) if state.taker is not None else 0
+    taker_pts = 0
+    defender_pts = 0
+
+    kings_zero = getattr(state, "_kings_zero", False)
+    tens_zero = getattr(state, "_tens_zero", False)
+    ban_clubs = getattr(state, "_ban_clubs", False)
+
+    def get_points(card: Card, t: Suit) -> int:
+        if kings_zero and card.rank == Rank.KING:
+            return 0
+        if tens_zero and card.rank == Rank.TEN:
+            return 0
+        if ban_clubs and card.suit == Suit.CLUBS:
+            return 0
+        return card_points_fn(card, t)
+
+    for trick in state.completed_tricks:
+        winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+        if winner is None:
+            continue
+
+        if ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
+            trick_pts = 0
+        else:
+            trick_pts = sum(get_points(tc.card, trump) for tc in trick)
+
+        if team_of(winner) == taker_team:
+            taker_pts += trick_pts
+        else:
+            defender_pts += trick_pts
+
+    return taker_pts, defender_pts
+
+
+def _apply_scoring_modifiers(
+    state: GameState, taker_pts: int, defender_pts: int
+) -> tuple[int, int, list[str]]:
+    """Apply complex boss scoring modifiers (Compétition, Reine Noire)."""
+    messages: list[str] = []
+    trump = state.trump
+    taker_team = team_of(state.taker) if state.taker is not None else 0
+
+    # Boss: La Competition (Separate scoring)
+    if getattr(state, "_separate_scoring", False) and trump is not None:
+        scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
+        kings_zero = getattr(state, "_kings_zero", False)
+        tens_zero = getattr(state, "_tens_zero", False)
+        ban_clubs = getattr(state, "_ban_clubs", False)
+
+        def get_p(card: Card, t: Suit) -> int:
+            if kings_zero and card.rank == Rank.KING:
+                return 0
+            if tens_zero and card.rank == Rank.TEN:
+                return 0
+            if ban_clubs and card.suit == Suit.CLUBS:
+                return 0
+            return card_points_fn(card, t)
+
+        for trick in state.completed_tricks:
+            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            if winner is None:
+                continue
+            tp = 0 if (ban_clubs and trick[0].card.suit == Suit.CLUBS) else sum(get_p(tc.card, trump) for tc in trick)
+            scores[winner] += tp
+
+        # Add 10 de der to individual winner
+        if state.last_trick_winner in scores:
+            scores[state.last_trick_winner] += 10
+
+        if taker_team == 0:
+            taker_pts = max(scores[Seat.SOUTH], scores[Seat.NORTH])
+            defender_pts = max(scores[Seat.EAST], scores[Seat.WEST])
+        else:
+            taker_pts = max(scores[Seat.EAST], scores[Seat.WEST])
+            defender_pts = max(scores[Seat.SOUTH], scores[Seat.NORTH])
+        messages.append("Compétition: Higher individual score used!")
+
+    # Boss: La Reine Noire (Queen of Spades penalty)
+    if getattr(state, "_queen_spades_penalty", False):
+        qs = Card(Suit.SPADES, Rank.QUEEN)
+        for trick in state.completed_tricks:
+            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            if winner is not None and any(tc.card == qs for tc in trick):
+                if team_of(winner) == taker_team:
+                    taker_pts -= 25
+                else:
+                    defender_pts -= 25
+        messages.append("Reine Noire: -25 points for capture!")
+
+    return taker_pts, defender_pts, messages
+
+
 def score_round(state: GameState) -> ScoringBreakdown:
     """Score the completed round per official rules."""
     if state.trump is None or state.taker is None:
@@ -393,43 +488,11 @@ def score_round(state: GameState) -> ScoringBreakdown:
     trump = state.trump
     taker_team = team_of(state.taker)
     defender_team = 1 - taker_team
-    messages: list[str] = []
+    
+    # 1. Base Card Points
+    taker_card_pts, defender_card_pts = _calculate_base_points(state, trump)
 
-    # Calculate card points per team from completed tricks
-    taker_card_pts = 0
-    defender_card_pts = 0
-
-    # Boss: Les Clubs Bannis / Le Deluge / Le Roi Mort / Les Dix Maudits
-    kings_zero = getattr(state, "_kings_zero", False)
-    tens_zero = getattr(state, "_tens_zero", False)
-    ban_clubs = getattr(state, "_ban_clubs", False)
-
-    def get_points(card: Card, t: Suit) -> int:
-        if kings_zero and card.rank == Rank.KING:
-            return 0
-        if tens_zero and card.rank == Rank.TEN:
-            return 0
-        if ban_clubs and card.suit == Suit.CLUBS:
-            return 0
-        return card_points_fn(card, t)
-
-    for trick in state.completed_tricks:
-        winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
-        if winner is None:
-            continue
-
-        # Boss: Les Clubs Bannis (Club tricks score 0)
-        if ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
-            trick_pts = 0
-        else:
-            trick_pts = sum(get_points(tc.card, trump) for tc in trick)
-
-        if team_of(winner) == taker_team:
-            taker_card_pts += trick_pts
-        else:
-            defender_card_pts += trick_pts
-
-    # Last trick bonus
+    # 2. Last trick bonus
     last_trick_winner = state.last_trick_winner
     last_trick_team: int | None = None
     if last_trick_winner is not None and not getattr(state, "_no_dix_de_der", False):
@@ -439,18 +502,22 @@ def score_round(state: GameState) -> ScoringBreakdown:
         else:
             defender_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
 
-    # --- Detect declarations from stored initial hands ---
+    # 3. Apply complex scoring modifiers
+    taker_card_pts, defender_card_pts, messages = _apply_scoring_modifiers(
+        state, taker_card_pts, defender_card_pts
+    )
+
+    # 4. Detect declarations from stored initial hands
     decls_per_seat = _detect_all_declarations(state, trump)
     resolved = resolve_declarations(decls_per_seat, trump)
 
-    # Compute belote points per team
+    # 5. Compute belote points
     belote_holder = state.belote_holders.get(trump)
     taker_belote = 0
     defender_belote = 0
     taker_rebelote = False
     defender_rebelote = False
 
-    # Boss: La Grande Muette (Belote removed)
     if belote_holder is not None and not getattr(state, "_no_belote", False):
         holder_team = team_of(belote_holder)
         points = 0
@@ -467,13 +534,12 @@ def score_round(state: GameState) -> ScoringBreakdown:
             defender_belote = points
             defender_rebelote = is_rebelote
 
-    # Compute declaration points (sequences + carres) per team
+    # 6. Compute declaration points
     scoring_team = resolved.scoring_team
     taker_declarations = 0
     defender_declarations = 0
 
     if scoring_team is not None:
-        # Only the winning team scores their sequences and carres
         if scoring_team == taker_team:
             for seq in resolved.ns_sequences if taker_team == 0 else resolved.ew_sequences:
                 taker_declarations += _sequence_points(seq)
@@ -485,58 +551,12 @@ def score_round(state: GameState) -> ScoringBreakdown:
             for carre in resolved.ns_carres if defender_team == 0 else resolved.ew_carres:
                 defender_declarations += _carre_points(carre)
 
-    # Boss: La Competition (Separate scoring)
-    if getattr(state, "_separate_scoring", False):
-        s_pts = 0
-        n_pts = 0
-        e_pts = 0
-        w_pts = 0
-        for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
-            if winner is None:
-                continue
-            tp = sum(get_points(tc.card, trump) for tc in trick)
-            if winner == Seat.SOUTH:
-                s_pts += tp
-            elif winner == Seat.NORTH:
-                n_pts += tp
-            elif winner == Seat.EAST:
-                e_pts += tp
-            elif winner == Seat.WEST:
-                w_pts += tp
-
-        # Add 10 de der
-        if state.last_trick_winner == Seat.SOUTH:
-            s_pts += 10
-        elif state.last_trick_winner == Seat.NORTH:
-            n_pts += 10
-        elif state.last_trick_winner == Seat.EAST:
-            e_pts += 10
-        elif state.last_trick_winner == Seat.WEST:
-            w_pts += 10
-
-        if taker_team == 0:
-            taker_card_pts = max(s_pts, n_pts)
-            defender_card_pts = max(e_pts, w_pts)
-        else:
-            taker_card_pts = max(e_pts, w_pts)
-            defender_card_pts = max(s_pts, n_pts)
-        messages.append("Compétition: Higher individual score used!")
-
-    # Boss: La Reine Noire (Queen of Spades penalty)
-    if getattr(state, "_queen_spades_penalty", False):
-        qs = Card(Suit.SPADES, Rank.QUEEN)
-        for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
-            if winner is not None and any(tc.card == qs for tc in trick):
-                if team_of(winner) == taker_team:
-                    taker_card_pts -= 25
-                else:
-                    defender_card_pts -= 25
-        messages.append("Reine Noire: -25 points for capture!")
-
-    # Check capot: either team won all 8 tricks
+    # Check capot
     capot_winner_team = is_capot(state)
+
+    # Comparison Logic
+    comp_taker = taker_card_pts + taker_declarations
+    comp_defender = defender_card_pts + defender_declarations
 
     is_failed = False
     is_litige = False
@@ -544,18 +564,9 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_total = 0
     defender_total = 0
 
-    # --- Comparison Logic for Contract Fulfillment ---
-    # Taker needs STRICTLY MORE points than Defender to win.
-    # Points include: Cards + 10 de der + Declarations (Sequences/Carres).
-    # Belote-Rebelote is excluded from this comparison (it's always scored).
-    comp_taker = taker_card_pts + taker_declarations
-    comp_defender = defender_card_pts + defender_declarations
-
-    # 1. Capot Logic
     if capot_winner_team is not None:
         messages.append("Capot!")
         if capot_winner_team == taker_team:
-            # Taker achieved capot
             taker_total = (
                 GLOBAL_CONFIG.CAPOT_BASE
                 + taker_declarations
@@ -565,7 +576,6 @@ def score_round(state: GameState) -> ScoringBreakdown:
             )
             defender_total = defender_belote
         else:
-            # Defense achieved capot
             is_failed = True
             defender_total = (
                 GLOBAL_CONFIG.CAPOT_BASE
@@ -596,31 +606,25 @@ def score_round(state: GameState) -> ScoringBreakdown:
             messages=tuple(messages),
         )
 
-    # 2. Litige Logic (Taker == Defense)
     if comp_taker == comp_defender:
         is_litige = True
         messages.append("Litige! (tie)")
-        # Defense scores their points; Taker's points go to escrow
         defender_total = defender_card_pts + defender_declarations + defender_belote
         taker_total = taker_belote
         litige_points_awarded = taker_card_pts + taker_declarations
-
-    # 3. Chute Logic (Taker < Defense)
     elif comp_taker < comp_defender:
         is_failed = True
         messages.append("Chute! (bid failed)")
-        # Defense scores 162 + all declarations + any previous litige points
         defender_total = (
             162 + defender_declarations + taker_declarations + defender_belote + state.litige_points
         )
         taker_total = taker_belote
-    # 4. Success Logic (Taker > Defense)
     else:
         messages.append("Contract fulfilled!")
         taker_total = taker_card_pts + taker_declarations + taker_belote + state.litige_points
         defender_total = defender_card_pts + defender_declarations + defender_belote
 
-    # Boss: La Malediction (Invert scoring: team with more tricks gets 0)
+    # Boss: La Malediction (Invert scoring)
     if getattr(state, "_invert_scoring", False):
         t_tricks = 0
         for trick in state.completed_tricks:

@@ -177,7 +177,8 @@ def interruptible_sleep(duration: float, reader: KeyReader) -> bool:
         if event:
             if event.key in (Key.SPACE, Key.ESC):
                 return True
-            # For other keys, we continue sleeping if there's time left
+            # Non-interrupt key: stop sleeping so further input is not consumed
+            break
         else:
             # Timeout reached
             break

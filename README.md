@@ -214,14 +214,16 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **276 tests** passing with 100% coverage on core logic.
+Currently **302 tests** passing with 100% coverage on core logic.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 276/276 passed
+- **pytest**: 302/302 passed
+- **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
+- **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 
 ## Statistics & Progression
 

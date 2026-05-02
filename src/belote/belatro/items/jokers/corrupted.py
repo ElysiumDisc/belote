@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from belote.game import Seat
 
 from ...engine.event_bus import TrickWonEvent
@@ -15,7 +17,7 @@ class LeTraitre(Joker):
     cost = 6
     is_corrupted = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=2.5)
         return None
@@ -28,7 +30,7 @@ class LeDemon(Joker):
     cost = 8
     is_corrupted = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=3.0)
         return None
@@ -41,7 +43,7 @@ class LEgoiste(Joker):
     cost = 10
     is_corrupted = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             return JokerResult(times_mult=2.0)
         if event.winner == Seat.NORTH:
@@ -57,7 +59,7 @@ class LAgentDouble(Joker):
     cost = 9
     is_corrupted = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=4.0)
         return None

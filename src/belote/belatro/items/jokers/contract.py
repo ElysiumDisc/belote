@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from belote.deck import Rank, Suit, card_points
 from belote.game import Seat
 
@@ -14,7 +16,7 @@ class LIdeologue(Joker):
     cost = 8
     is_unlockable = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         # Sans Atout has event.trump as None
         if event.winner == Seat.SOUTH and event.trump is None:
             jacks = sum(1 for c in event.cards if c.rank == Rank.JACK)
@@ -31,18 +33,16 @@ class LeFanatique(Joker):
     cost = 8
     is_unlockable = True
 
-    def __init__(self) -> None:
-        self._wins = 0
-
-    def on_round_start(self) -> JokerResult | None:
-        self._wins = 0
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_wins"] = 0
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         # DEFERRED: Needs contract check (Tout Atout)
         if event.winner == Seat.SOUTH:
-            self._wins += 1
-            if self._wins > 4:
+            wins = state.get(f"{self.id}_wins", 0) + 1
+            state[f"{self.id}_wins"] = wins
+            if wins > 4:
                 return JokerResult(times_mult=1.5)
         return None
 
@@ -55,7 +55,7 @@ class LeDiplomate(Joker):
     )
     cost = 7
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             suits: dict[Suit, set[Rank]] = {}
             for c in event.cards:
@@ -74,7 +74,7 @@ class LePatriote(Joker):
     description = "All Trump cards score +50% extra points when they win a trick."
     cost = 6
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH and event.trump:
             trump_pts = sum(
                 card_points(c, event.trump) for c in event.cards if c.suit == event.trump
@@ -90,7 +90,7 @@ class LeRebelle(Joker):
     description = "The Belote/Rebelote declaration gives ×3 Mult instead of a flat 20 points."
     cost = 8
 
-    def on_belote(self, event: BeloteAnnouncedEvent) -> JokerResult | None:
+    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.seat == Seat.SOUTH:
             return JokerResult(add_chips=-20, times_mult=3.0)
         return None
@@ -102,7 +102,7 @@ class LePuriste(Joker):
     description = "If you win a round playing Sans Atout, double your cash payout."
     cost = 7
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         # Sans Atout means trump is None.
         if (
             event.trump is None
@@ -123,7 +123,7 @@ class LIllusionniste(Joker):
     )
     cost = 9
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH and event.trump:
             extra_pts = sum(
                 18 for c in event.cards if c.rank == Rank.JACK and c.suit != event.trump

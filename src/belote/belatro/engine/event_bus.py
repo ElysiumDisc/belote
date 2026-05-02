@@ -68,5 +68,5 @@ class EventBus:
         self._handlers.remove(handler)
 
     def emit(self, event: AnyEvent) -> None:
-        for h in self._handlers:
+        for h in list(self._handlers):
             h(event)

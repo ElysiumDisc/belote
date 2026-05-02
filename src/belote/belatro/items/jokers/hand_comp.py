@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from belote.deck import Rank
 from belote.game import Seat
 
@@ -13,7 +15,7 @@ class LAvare(Joker):
     description = "For each 7 or 8 still in your hand at round end, gain +$1 and +3 chips."
     cost = 5
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         count = sum(1 for c in event.hand_remainder if c.rank in (Rank.SEVEN, Rank.EIGHT))
         if count > 0:
             return JokerResult(add_chips=count * 3, add_money=count)
@@ -28,7 +30,7 @@ class LaSentinelle(Joker):
     )
     cost = 9
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         trump = event.trump
         if not trump:
             return None
@@ -44,7 +46,7 @@ class LeFantome(Joker):
     description = "Any card left unplayed in your hand at round end contributes +0.5 Mult per card."
     cost = 7
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         count = len(event.hand_remainder)
         if count > 0:
             return JokerResult(add_mult=0.5 * count)
@@ -57,20 +59,19 @@ class LAccumulateur(Joker):
     description = "For every 7 or 8 you win in a trick, gain +5 chips at round end."
     cost = 6
 
-    def __init__(self) -> None:
-        self._stored_chips = 0
-
-    def on_round_start(self) -> JokerResult | None:
-        self._stored_chips = 0
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_stored_chips"] = 0
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.SOUTH:
             count = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
-            self._stored_chips += count * 5
+            stored = state.get(f"{self.id}_stored_chips", 0)
+            state[f"{self.id}_stored_chips"] = stored + (count * 5)
         return None
 
-    def on_round_end(self, event: RoundEndEvent) -> JokerResult | None:
-        if self._stored_chips > 0:
-            return JokerResult(add_chips=self._stored_chips)
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        stored = state.get(f"{self.id}_stored_chips", 0)
+        if stored > 0:
+            return JokerResult(add_chips=stored)
         return None

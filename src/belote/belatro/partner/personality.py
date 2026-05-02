@@ -33,20 +33,9 @@ class LeCourageux(PartnerPersonality):
     description = "Bids on 2+ honors. Sometimes overbids."
 
     def should_bid(self, state: GameState) -> bool:
-        hand = state.hand_of(Seat.NORTH)
-        honors = sum(
-            1
-            for c in hand
-            if c.rank
-            in (
-                getattr(type(c.rank), "ACE", None),
-                getattr(type(c.rank), "KING", None),
-                getattr(type(c.rank), "JACK", None),
-            )
-            if c.rank is not None
-        )
         from belote.deck import Rank
 
+        hand = state.hand_of(Seat.NORTH)
         honors = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.KING, Rank.JACK))
         return honors >= 2
 

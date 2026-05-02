@@ -171,6 +171,29 @@ class GameState:
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
     litige_points: int = 0
+    # Boss-modifier flags injected by drive_round when a boss blind is active.
+    # All default to False so the classic game is unaffected.
+    _no_belote: bool = False
+    _dynamic_trump: bool = False
+    _no_consecutive_team_wins: bool = False
+    _seven_eight_trump: bool = False
+    _invert_scoring: bool = False
+    _kings_zero: bool = False
+    _auto_coinche: bool = False
+    _queen_spades_penalty: bool = False
+    _hide_hud: bool = False
+    _ban_clubs: bool = False
+    _no_dix_de_der: bool = False
+    _tens_zero: bool = False
+    _hide_partner_hand: bool = False
+    _agent_double_active: bool = False
+    _partner_forced_pass: bool = False
+    _lock_trust_zero: bool = False
+    _separate_scoring: bool = False
+    _joker_state: dict[str, object] = field(default_factory=dict)
+    _chips: int = 0
+    _mult: float = 1.0
+    _bonus_money: int = 0
 
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
@@ -603,7 +626,7 @@ def play_card(state: GameState, card: Card) -> GameState:
     announced = None
     trump = state.trump  # always set during PLAYING phase
     belote_tracker = list(state.belote_tracker)
-    if trump and state.belote_holders.get(trump) == state.turn:
+    if trump and state.belote_holders.get(trump) == state.turn and not state._no_belote:
         is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
 
         if is_k_q:
@@ -650,14 +673,26 @@ def play_card(state: GameState, card: Card) -> GameState:
             if trump is not None
             else 0
         )
+        # Boss: Les Clubs Bannis – club-led tricks score 0
+        if state._ban_clubs and new_trick and new_trick[0].card.suit == Suit.CLUBS:
+            trick_pts = 0
+        # Boss: Le Roi Mort / Les Dix Maudits – Kings/10s worth 0
+        if state._kings_zero or state._tens_zero:
+            trick_pts = sum(
+                0
+                if (state._kings_zero and tc.card.rank == Rank.KING)
+                or (state._tens_zero and tc.card.rank == Rank.TEN)
+                else card_points(tc.card, trump, se_trump)
+                for tc in new_trick
+            ) if trump is not None else 0
         ns_pts, ew_pts = state.current_round_points
         if team_of(winner) == 0:
             ns_pts += trick_pts
         else:
             ew_pts += trick_pts
 
-        # Last trick bonus
-        if tricks_count == 8:
+        # Last trick bonus (suppressed by Le Zéro Final boss)
+        if tricks_count == 8 and not state._no_dix_de_der:
             if team_of(winner) == 0:
                 ns_pts += 10
             else:

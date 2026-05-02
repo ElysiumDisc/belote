@@ -71,15 +71,15 @@ def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
     from belote.belatro.engine.event_bus import EventBus, TrickWonEvent
     from belote.belatro.items.jokers.contract import LeDiplomate
     from belote.deck import Card, Rank
+    from belote.game import GameState
 
-    print(f"Benchmarking BelAtro Bus ({num_jokers} Jokers) over {iterations} iterations...")
+    print(f"Benchmarking BelAtro State Update ({num_jokers} Jokers) over {iterations} iterations...")
 
-    bus = EventBus()
     jokers = [LeDiplomate() for _ in range(num_jokers)]
     acc = ScoreAccumulator()
     acc.attach_jokers(jokers)
-    bus.subscribe(acc.on_event)
-
+    
+    state = new_game()
     event = TrickWonEvent(
         winner=Seat.SOUTH,
         cards=tuple(Card(Suit.SPADES, r) for r in (Rank.JACK, Rank.NINE, Rank.ACE, Rank.TEN)),
@@ -92,12 +92,78 @@ def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
-        bus.emit(event)
+        _ = acc.update_state(state, event)
         times.append(time.perf_counter() - start)
 
     avg = statistics.mean(times) * 1000
     std = statistics.stdev(times) * 1000 if len(times) > 1 else 0
-    print(f"  Bus Emission Time: {avg:.3f}ms (±{std:.3f}ms)")
+    print(f"  State Update Time: {avg:.3f}ms (±{std:.3f}ms)")
+    return avg
+
+
+def benchmark_scoring(iterations: int = 1000) -> float:
+    from belote.scoring import score_round
+    from belote.deck import Card, Rank
+    from belote.game import TrickCard, Phase, replace
+    
+    print(f"Benchmarking score_round() over {iterations} iterations...")
+    
+    state = new_game()
+    state = replace(
+        state, 
+        phase=Phase.SCORING, 
+        trump=Suit.SPADES, 
+        taker=Seat.SOUTH,
+        completed_tricks=tuple([(TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),) * 4] * 8),
+        last_trick_winner=Seat.SOUTH
+    )
+    
+    times = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        _ = score_round(state)
+        times.append(time.perf_counter() - start)
+        
+    avg = statistics.mean(times) * 1000
+    print(f"  Scoring Time: {avg:.3f}ms")
+    return avg
+
+
+def benchmark_deal(iterations: int = 1000) -> float:
+    from belote.game import start_round
+    print(f"Benchmarking start_round() (deal) over {iterations} iterations...")
+    
+    state = new_game()
+    rng = random.Random(42)
+    
+    times = []
+    for _ in range(iterations):
+        start = time.perf_counter()
+        _ = start_round(state, rng)
+        times.append(time.perf_counter() - start)
+        
+    avg = statistics.mean(times) * 1000
+    print(f"  Deal Time: {avg:.3f}ms")
+    return avg
+
+
+def benchmark_legal_cards(iterations: int = 1000) -> float:
+    from belote.game import legal_cards, clear_legal_cards_cache, replace
+    print(f"Benchmarking legal_cards() over {iterations} iterations...")
+    
+    state = new_game()
+    state = start_round(state, random.Random(42))
+    state = replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, turn=Seat.SOUTH)
+    
+    times = []
+    for _ in range(iterations):
+        clear_legal_cards_cache()
+        start = time.perf_counter()
+        _ = legal_cards(state, Seat.SOUTH)
+        times.append(time.perf_counter() - start)
+        
+    avg = statistics.mean(times) * 1000
+    print(f"  Legal Cards Time: {avg:.3f}ms")
     return avg
 
 
@@ -110,7 +176,12 @@ def run_benchmarks() -> None:
     benchmark_ai(Difficulty.HARD)
     print()
     benchmark_belatro_bus()
+    print()
+    benchmark_scoring()
+    benchmark_deal()
+    benchmark_legal_cards()
     print("========================================")
+
 
 
 if __name__ == "__main__":

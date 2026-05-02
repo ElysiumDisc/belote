@@ -156,6 +156,9 @@ class ThemeManager:
         return cls._instance
 
     def __init__(self) -> None:
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
         self._current_theme_name: str = "classic_green"
         self._on_change_callbacks: list[Callable[[], None]] = []
         self.load_selection()

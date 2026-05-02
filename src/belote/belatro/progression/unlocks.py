@@ -51,15 +51,9 @@ class UnlockTracker:
             if self.profile.unlock("l_ideologue"):
                 print("\n[!] UNLOCKED: L'Idéologue Joker (Won a Sans Atout round)")
 
-        # Check for Le Fanatique (Win on Tout Atout) - Simplified condition for now
-        # "Win a round on Tout Atout without using a trump in the first 3 tricks"
-        # We need more state to track the "without using a trump" part.
-        # For now, let's just do "Won a Tout Atout round" as a base.
-        if event.trump and event.trump.name == "TOUT":  # Assuming a convention for Tout Atout
-            self.profile.stats["tout_atout_wins"] += 1
-            dirty = True
-            if self.profile.unlock("l_fanatique"):
-                print("\n[!] UNLOCKED: Le Fanatique Joker (Won a Tout Atout round)")
+        # TODO: Unlock Le Fanatique when Tout Atout is added as a contract type.
+        # Suit enum has no TOUT value, so event.trump.name == "TOUT" can never be True.
+        # Skipped until tout_atout is implemented in the game engine.
 
         return dirty
 

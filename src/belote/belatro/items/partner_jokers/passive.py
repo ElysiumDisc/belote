@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from belote.game import Seat
 
 from ...engine.event_bus import DeclarationScoredEvent, TrickWonEvent
@@ -13,7 +15,7 @@ class LeMiroir(Joker):
     cost = 6
     is_partner_joker = True
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.NORTH:
             return JokerResult(add_chips=5)
         return None
@@ -26,7 +28,7 @@ class LaSymbiose(Joker):
     cost = 7
     is_partner_joker = True
 
-    def on_declaration(self, event: DeclarationScoredEvent) -> JokerResult | None:
+    def on_declaration(self, event: DeclarationScoredEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.seat == Seat.NORTH:
             return JokerResult(times_mult=1.2)
         return None
@@ -39,15 +41,16 @@ class LeRelais(Joker):
     cost = 7
     is_partner_joker = True
 
-    def __init__(self) -> None:
-        self._triggered = False
-
-    def on_round_start(self) -> JokerResult | None:
-        self._triggered = False
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        state[f"{self.id}_triggered"] = False
         return None
 
-    def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
-        if event.trick_number == 1 and event.winner == Seat.NORTH and not self._triggered:
-            self._triggered = True
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        if (
+            event.trick_number == 1
+            and event.winner == Seat.NORTH
+            and not state.get(f"{self.id}_triggered", False)
+        ):
+            state[f"{self.id}_triggered"] = True
             return JokerResult(add_chips=15)
         return None

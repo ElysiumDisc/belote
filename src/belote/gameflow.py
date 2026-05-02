@@ -68,6 +68,7 @@ def run_bidding(
         bidder = bidding_turn(current)
 
         if bidder == Seat.SOUTH:
+            skip_anims = False  # M6: Reset skip flag when it's the human's turn
             display(current, None)
             res = prompt_bid(current, reader)
             if res == "QUIT":
@@ -113,8 +114,8 @@ def run_play(
 
     while current.phase == Phase.PLAYING:
         player = current.turn
-
         if player == Seat.SOUTH:
+            skip_anims = False  # M6: Reset skip flag when it's the human's turn
             display(current, None)
             card, current = prompt_card(current, reader)
             if card is None:
