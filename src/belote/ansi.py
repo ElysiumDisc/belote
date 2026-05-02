@@ -92,7 +92,6 @@ def scroll_region(top: int, bottom: int) -> str:
     return f"\x1b[{top};{bottom}r"
 
 
-
 # Palette constants
 def felt_bg() -> str:
     return bg(*theme_manager.get_current().felt_bg)

@@ -54,8 +54,14 @@ def create_ai_players(diffs_map: dict[Seat, str], human_seats: set[Seat]) -> dic
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
 
 
-def run_bidding(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlayer],
-                ai_delay: float, history: list[GameState], human_seats: set[Seat]) -> GameState | str | None:
+def run_bidding(
+    state: GameState,
+    reader: KeyReader,
+    ai_players: dict[Seat, AIPlayer],
+    ai_delay: float,
+    history: list[GameState],
+    human_seats: set[Seat],
+) -> GameState | str | None:
     """Run the bidding phase. Returns None if user quits, 'UNDO' if requested."""
     current = state
     skip_anims = False
@@ -97,9 +103,15 @@ def run_bidding(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPl
     return current
 
 
-def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlayer],
-             ai_delay: float, trick_pause: float, history: list[GameState],
-             human_seats: set[Seat]) -> GameState | str | None:
+def run_play(
+    state: GameState,
+    reader: KeyReader,
+    ai_players: dict[Seat, AIPlayer],
+    ai_delay: float,
+    trick_pause: float,
+    history: list[GameState],
+    human_seats: set[Seat],
+) -> GameState | str | None:
     """Run the play phase (all 8 tricks). Returns None if user quits, 'UNDO' if requested."""
     current = state
     skip_anims = False
@@ -125,7 +137,9 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
             card = ai.decide_card(current)
 
         # 1. Show the card on the mat IMMEDIATELY
-        display_state = replace(current, current_trick=current.current_trick + (TrickCard(player, card),))
+        display_state = replace(
+            current, current_trick=current.current_trick + (TrickCard(player, card),)
+        )
         if len(display_state.current_trick) == 1:
             display(display_state, None)
         else:
@@ -135,23 +149,39 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
         if player != Seat.SOUTH:
             sys.stdout.write(f"\r\n  {player.name} plays {card}\r\n")
             sys.stdout.flush()
-            if len(display_state.current_trick) < 4 and not skip_anims and interruptible_sleep(ai_delay, reader):
+            if (
+                len(display_state.current_trick) < 4
+                and not skip_anims
+                and interruptible_sleep(ai_delay, reader)
+            ):
                 skip_anims = True
 
         # 3. If this completes a trick, pause longer and show announcements
         if len(display_state.current_trick) == 4:
             play_sound("trick")
-            if len(current.completed_tricks) == 7: # This was the 8th trick
+            if len(current.completed_tricks) == 7:  # This was the 8th trick
                 winner = trick_winner_seat(display_state.current_trick, current.trump)
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"
-                    announce(f"Dix de Der (Team {team})", duration=trick_pause * 0.8 if not skip_anims else 0, reader=reader)
+                    announce(
+                        f"Dix de Der (Team {team})",
+                        duration=trick_pause * 0.8 if not skip_anims else 0,
+                        reader=reader,
+                    )
                     display(display_state, None)
 
                 # Check for Capot while cards are still visible
-                if is_capot(current, tricks=list(current.completed_tricks) + [display_state.current_trick]) is not None:
+                if (
+                    is_capot(
+                        current,
+                        tricks=list(current.completed_tricks) + [display_state.current_trick],
+                    )
+                    is not None
+                ):
                     play_sound("capot")
-                    announce("CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader)
+                    announce(
+                        "CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader
+                    )
                     display(display_state, None)
 
             if not skip_anims and interruptible_sleep(trick_pause, reader):
@@ -173,7 +203,9 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
                         name = seq_names.get(length, "Sequence")
                         msg = f"{decl.seat.name}: {name}"
 
-                    announce(msg, duration=trick_pause * 0.8 if not skip_anims else 0, reader=reader)
+                    announce(
+                        msg, duration=trick_pause * 0.8 if not skip_anims else 0, reader=reader
+                    )
                     display(display_state, None)
 
         # 4. Transition to next state
@@ -183,7 +215,11 @@ def run_play(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlaye
         if current.announced:
             if "Belote" in current.announced:
                 play_sound("belote")
-            announce(current.announced, duration=max(0.5, trick_pause * 0.6) if not skip_anims else 0, reader=reader)
+            announce(
+                current.announced,
+                duration=max(0.5, trick_pause * 0.6) if not skip_anims else 0,
+                reader=reader,
+            )
             current = clear_announced(current)
             display(current, None)
 
@@ -210,10 +246,17 @@ def show_hand_preview(state: GameState, reader: KeyReader) -> None:
         announce("Bidding Phase Starts", duration=1.0, reader=reader)
 
 
-def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlayer],
-              ai_delay: float, trick_pause: float, round_pause: float,
-              history_stack: list[GameState], human_seats: set[Seat],
-              rng: random.Random | None = None) -> GameState | None:
+def run_round(
+    state: GameState,
+    reader: KeyReader,
+    ai_players: dict[Seat, AIPlayer],
+    ai_delay: float,
+    trick_pause: float,
+    round_pause: float,
+    history_stack: list[GameState],
+    human_seats: set[Seat],
+    rng: random.Random | None = None,
+) -> GameState | None:
     """Run a complete round: deal, bid, play, score. Returns None if user quits."""
     clear_legal_cards_cache()
     if rng is None:
@@ -244,7 +287,9 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
             return current
 
         # Play Phase
-        res_play = run_play(current, reader, ai_players, ai_delay, trick_pause, history_stack, human_seats)
+        res_play = run_play(
+            current, reader, ai_players, ai_delay, trick_pause, history_stack, human_seats
+        )
         if res_play is None:
             return None
         if res_play == "UNDO":
@@ -256,7 +301,7 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
             del history_stack[stack_base:]
             current = start_round(state, rng)
             continue
-        current = res_play # type: ignore[assignment]
+        current = res_play  # type: ignore[assignment]
 
         # Scoring Phase
         if current.phase == Phase.SCORING:
@@ -264,18 +309,22 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
             if breakdown.is_failed:
                 play_sound("chute")
             display(current, None)
-            sys.stdout.write(f"\r\n{'='*50}\r\n")
+            sys.stdout.write(f"\r\n{'=' * 50}\r\n")
             sys.stdout.write("  Round Results:\r\n")
             taker_name = current.taker.name if current.taker else "?"
-            team_label = 'NS' if current.taker is not None and team_of(current.taker) == 0 else 'EW'
+            team_label = "NS" if current.taker is not None and team_of(current.taker) == 0 else "EW"
             sys.stdout.write(f"  Taker: {taker_name} (Team {team_label})\r\n")
             for msg in breakdown.messages:
                 sys.stdout.write(f"  {BOLD}{gold_fg()}{msg}{RESET}\r\n")
-            ns_pts = breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total
-            ew_pts = breakdown.defender_total if breakdown.taker_team == 0 else breakdown.taker_total
+            ns_pts = (
+                breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total
+            )
+            ew_pts = (
+                breakdown.defender_total if breakdown.taker_team == 0 else breakdown.taker_total
+            )
             sys.stdout.write(f"  Team NS: {ns_pts} points\r\n")
             sys.stdout.write(f"  Team EW: {ew_pts} points\r\n")
-            sys.stdout.write(f"{'='*50}\r\n\r\n")
+            sys.stdout.write(f"{'=' * 50}\r\n\r\n")
             sys.stdout.flush()
 
             skip_round_pause = interruptible_sleep(round_pause, reader)
@@ -294,6 +343,10 @@ def run_round(state: GameState, reader: KeyReader, ai_players: dict[Seat, AIPlay
 
             # Update global stats
             trump_sym = current.trump.symbol if current.trump else None
-            update_stats_round(breakdown.is_capot, breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total, trump_sym)
+            update_stats_round(
+                breakdown.is_capot,
+                breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total,
+                trump_sym,
+            )
 
             return apply_round_score(current, breakdown)

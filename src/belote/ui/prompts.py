@@ -32,14 +32,16 @@ from .announce import is_muted, toggle_mute  # Need to implement these or import
 from .render import display, get_term_size
 
 
-def prompt_card(state: GameState, reader: KeyReader) -> tuple[Card | Literal["UNDO"] | None, GameState]:
+def prompt_card(
+    state: GameState, reader: KeyReader, show_north_hand: bool = False
+) -> tuple[Card | Literal["UNDO", "OVERLAY"] | None, GameState]:
     """Interactive card selection with arrow keys.
 
     Returns (card, state) where state may differ from the input if the hand was
     sorted during selection. Callers should propagate the returned state.
     Returns (None, state) if QUIT is pressed.
     """
-    hand  = state.hand_of(Seat.SOUTH)
+    hand = state.hand_of(Seat.SOUTH)
     legal = legal_cards(state, Seat.SOUTH)
 
     if not hand:
@@ -51,7 +53,7 @@ def prompt_card(state: GameState, reader: KeyReader) -> tuple[Card | Literal["UN
     sel = next((i for i, c in enumerate(hand) if c in legal), 0)
 
     while True:
-        display(state, sel)
+        display(state, sel, show_north_hand=show_north_hand)
         event = reader.read()
 
         match event.key:
@@ -101,10 +103,12 @@ def prompt_card(state: GameState, reader: KeyReader) -> tuple[Card | Literal["UN
             case Key.HIST:
                 show_history(state, reader)
                 continue
+            case Key.OVERLAY:
+                return "OVERLAY", state
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
-                    if char == 'z':
+                    if char == "z":
                         return "UNDO", state
                     if char.isdigit():
                         idx = int(char) - 1
@@ -112,16 +116,17 @@ def prompt_card(state: GameState, reader: KeyReader) -> tuple[Card | Literal["UN
                             return hand[idx], state
     return None, state
 
+
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
     """Interactive bid selection. Returns 'QUIT' if QUIT is pressed."""
     if state.bidding_round == 1:
         # Round 1: Take (up_card suit) or Pass
-        options = [state.up_card.suit, None] # type: ignore[union-attr]
-        labels  = [f"Take {state.up_card.suit.symbol}", "Pass"] # type: ignore[union-attr]
+        options = [state.up_card.suit, None]  # type: ignore[union-attr]
+        labels = [f"Take {state.up_card.suit.symbol}", "Pass"]  # type: ignore[union-attr]
     else:
         # Round 2: Any suit except up_card suit, or Pass
         all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
-        other_suits = [s for s in all_suits if s != state.up_card.suit] # type: ignore[union-attr]
+        other_suits = [s for s in all_suits if s != state.up_card.suit]  # type: ignore[union-attr]
         options = other_suits + [None]
         labels = [s.symbol for s in other_suits] + ["Pass"]
 
@@ -152,7 +157,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 if isinstance(opt, Suit):
                     color = red_fg() if opt.is_red else black_fg()
 
-                entry = f"{prefix}({i+1}) {color}{lbl}{RESET}{prefix}"
+                entry = f"{prefix}({i + 1}) {color}{lbl}{RESET}{prefix}"
                 entry = f"{REVERSE} {entry} {RESET}" if i == sel else f" {entry} "
                 opt_str += entry + "  "
 
@@ -166,7 +171,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
         else:
             # Round 1 simple prompt
             parts = [
-                f"{BOLD}{gold_fg()}({i+1}){lbl}{RESET}" if i == sel else f"({i+1}){lbl}"
+                f"{BOLD}{gold_fg()}({i + 1}){lbl}{RESET}" if i == sel else f"({i + 1}){lbl}"
                 for i, lbl in enumerate(labels)
             ]
             prompt = f"{BOLD}{white_fg()}Round {state.bidding_round} Bid: {'  '.join(parts)}{RESET}"
@@ -199,12 +204,14 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
             case Key.HIST:
                 show_history(state, reader)
                 continue
+            case Key.OVERLAY:
+                return "OVERLAY"
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
-                    if char == 'z':
+                    if char == "z":
                         return "UNDO"
-                    if char == 'p':
+                    if char == "p":
                         return None
                     try:
                         idx = int(char) - 1
@@ -212,6 +219,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                             return options[idx]
                     except ValueError:
                         pass
+
 
 def show_help(reader: KeyReader) -> None:
     """Display a quick keyboard shortcut reference."""
@@ -247,7 +255,7 @@ def show_help(reader: KeyReader) -> None:
         "  [R]         Rematch (Game Over)",
         "  [t]         View Game History",
         "",
-        f"{DIM}Press [Any Key] to Return{RESET}"
+        f"{DIM}Press [Any Key] to Return{RESET}",
     ]
 
     out = clear_screen() + hide_cursor()
@@ -255,6 +263,7 @@ def show_help(reader: KeyReader) -> None:
     sys.stdout.write("".join([out, rendered]))
     sys.stdout.flush()
     reader.read()
+
 
 def show_rules(reader: KeyReader) -> None:
     """Display scrollable rules and history in EN/FR."""
@@ -271,14 +280,14 @@ def show_rules(reader: KeyReader) -> None:
         content: RulesPage = RULES_CONTENT[lang_key]
         lines = []
         lines.append(f"{BOLD}{gold_fg()}{content['title']}{RESET}")
-        lines.append("=" * visible_len(content['title']))
+        lines.append("=" * visible_len(content["title"]))
         lines.append("")
 
-        for section in content['sections']:
+        for section in content["sections"]:
             lines.append(f"{BOLD}{white_fg()}{section['header']}{RESET}")
-            lines.append("-" * len(section['header']))
+            lines.append("-" * len(section["header"]))
             # Wrap text manually
-            words = section['text'].split()
+            words = section["text"].split()
             line = "  "
             for w in words:
                 if len(line) + len(w) > wrap_at:
@@ -289,7 +298,9 @@ def show_rules(reader: KeyReader) -> None:
             lines.append(line)
             lines.append("")
 
-        lines.append(f"{DIM}Press [L] to Toggle Language ({lang_key.upper()}) | [Q/Enter] Back{RESET}")
+        lines.append(
+            f"{DIM}Press [L] to Toggle Language ({lang_key.upper()}) | [Q/Enter] Back{RESET}"
+        )
         cached_renders[(lang_key, wrap_at)] = lines
         return lines
 
@@ -320,9 +331,10 @@ def show_rules(reader: KeyReader) -> None:
             case Key.DOWN:
                 scroll = min(len(all_lines) - view_h, scroll + 1)
             case Key.CHAR:
-                if event.char and event.char.lower() == 'l':
+                if event.char and event.char.lower() == "l":
                     lang = "fr" if lang == "en" else "en"
                     scroll = 0
+
 
 def show_history(state: GameState, reader: KeyReader) -> None:
     """Display a scrollable overlay of round-by-round scores."""

@@ -26,8 +26,10 @@ from .render import display_hud, get_term_size
 def is_muted() -> bool:
     return AUDIO.is_muted()
 
+
 def toggle_mute() -> bool:
     return AUDIO.toggle_mute()
+
 
 def announce(message: str, duration: float = 2.0, reader: KeyReader | None = None) -> None:
     """Display a transient announcement banner."""
@@ -37,6 +39,7 @@ def announce(message: str, duration: float = 2.0, reader: KeyReader | None = Non
         interruptible_sleep(duration, reader)
     else:
         time.sleep(duration)
+
 
 def play_sound(kind: str) -> None:
     """Enhanced terminal sounds using frequency tones (where supported) or bells."""
@@ -60,6 +63,7 @@ def play_sound(kind: str) -> None:
             time.sleep(0.1)
     sys.stdout.flush()
 
+
 def show_stats(reader: KeyReader) -> None:
     """Display global game statistics."""
     stats = load_stats()
@@ -75,7 +79,9 @@ def show_stats(reader: KeyReader) -> None:
 
         # Win Rate section
         win_rate = (stats.games_won / stats.games_played * 100) if stats.games_played > 0 else 0
-        lines.append(f"  Games Played: {stats.games_played:<6} Won: {stats.games_won:<6} ({win_rate:.1f}%)")
+        lines.append(
+            f"  Games Played: {stats.games_played:<6} Won: {stats.games_won:<6} ({win_rate:.1f}%)"
+        )
         lines.append("")
 
         # Points section
@@ -106,7 +112,9 @@ def show_stats(reader: KeyReader) -> None:
         # Session Panel
         lines.append("")
         lines.append(f"{banner_bg()}{banner_fg()}       THIS SESSION       {RESET}")
-        lines.append(f"  Games: {session.games_played} ({session.games_won} won)  Rounds: {session.total_rounds}")
+        lines.append(
+            f"  Games: {session.games_played} ({session.games_won} won)  Rounds: {session.total_rounds}"
+        )
         lines.append(f"  Points: {session.total_points}  Capots: {session.capots}")
 
         lines.append("")
@@ -121,7 +129,10 @@ def show_stats(reader: KeyReader) -> None:
         if event:
             break
 
-def animate_score_update(state: GameState, target_ns: int, target_ew: int, duration: float = 1.0) -> None:
+
+def animate_score_update(
+    state: GameState, target_ns: int, target_ew: int, duration: float = 1.0
+) -> None:
     """Animate the team scores rolling up to their new values."""
     start_ns, start_ew = state.team_scores
     steps = 20

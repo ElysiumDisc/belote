@@ -7,22 +7,20 @@ from belote.deck import Card, Rank, Suit
 from belote.game import GameState, Phase, Seat, TrickCard
 
 
-def test_ai_easy_play():
+def test_ai_easy_play() -> None:
     player = AIPlayer(Seat.EAST, Difficulty.EASY)
     hand = (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.ACE))
     state = GameState(
-        hands=[(), hand, (), ()], # type: ignore[arg-type]
-        turn=Seat.EAST,
-        phase=Phase.PLAYING,
-        trump=Suit.HEARTS
+        hands=((), hand, (), ()), turn=Seat.EAST, phase=Phase.PLAYING, trump=Suit.HEARTS
     )
     # Easy AI should pick a random legal card
     # We mock rng to ensure it picks the first one
-    with unittest.mock.patch.object(player._rng, 'choice', side_effect=lambda x: x[0]):
+    with unittest.mock.patch.object(player._rng, "choice", side_effect=lambda x: x[0]):
         card = player.decide_card(state)
         assert card == Card(Suit.HEARTS, Rank.SEVEN)
 
-def test_ai_medium_bid():
+
+def test_ai_medium_bid() -> None:
     player = AIPlayer(Seat.EAST, Difficulty.MEDIUM)
     # Give it a strong hearts hand
     hand = (
@@ -34,43 +32,42 @@ def test_ai_medium_bid():
     )
     up_card = Card(Suit.HEARTS, Rank.TEN)
     state = GameState(
-        hands=[(), hand, (), ()], # type: ignore[arg-type]
+        hands=((), hand, (), ()),
         up_card=up_card,
         bidding_round=1,
         bidder_index=1,
-        dealer=Seat.SOUTH
+        dealer=Seat.SOUTH,
     )
     bid = player.decide_bid(state)
     assert bid == Suit.HEARTS
 
-def test_ai_medium_play_follows_suit():
+
+def test_ai_medium_play_follows_suit() -> None:
     player = AIPlayer(Seat.EAST, Difficulty.MEDIUM)
     hand = (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.ACE))
     state = GameState(
-        hands=[(), hand, (), ()], # type: ignore[arg-type]
+        hands=((), hand, (), ()),
         turn=Seat.EAST,
         phase=Phase.PLAYING,
         trump=Suit.DIAMONDS,
-        current_trick=(TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.ACE)),)
+        current_trick=(TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.ACE)),),
     )
     # Must follow hearts
     card = player.decide_card(state)
     assert card == Card(Suit.HEARTS, Rank.SEVEN)
 
-def test_ai_hard_void_inference():
+
+def test_ai_hard_void_inference() -> None:
     player = AIPlayer(Seat.EAST, Difficulty.HARD)
     # South leads Spades, West (partner of East) doesn't follow
     trick1 = (
         TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),
         TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.TEN)),
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.SEVEN)),
-        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.SEVEN)), # West void in Spades
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.SEVEN)),  # West void in Spades
     )
     state = GameState(
-        hands=[(), (), (), ()],
-        completed_tricks=(trick1,),
-        phase=Phase.PLAYING,
-        trump=Suit.DIAMONDS
+        hands=[(), (), (), ()], completed_tricks=(trick1,), phase=Phase.PLAYING, trump=Suit.DIAMONDS
     )
     player._update_voids(state)
     assert Suit.SPADES in player.memory.known_voids[Seat.WEST]

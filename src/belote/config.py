@@ -17,9 +17,9 @@ class Config:
 
     # Timing (ai_move_delay, trick_result_pause, round_result_pause)
     _SPEED_TIMINGS: tuple[tuple[str, tuple[float, float, float]], ...] = (
-        ("slow",    (1.5, 2.0, 4.0)),
-        ("normal",  (0.7, 1.2, 2.5)),
-        ("fast",    (0.25, 0.4, 1.0)),
+        ("slow", (1.5, 2.0, 4.0)),
+        ("normal", (0.7, 1.2, 2.5)),
+        ("fast", (0.25, 0.4, 1.0)),
         ("instant", (0.0, 0.0, 0.5)),
     )
 
@@ -49,7 +49,9 @@ class Config:
         """Create stats directory if it doesn't exist."""
         path = self.stats_path.parent
         import contextlib
+
         with contextlib.suppress(OSError):
             path.mkdir(parents=True, exist_ok=True)
+
 
 GLOBAL_CONFIG = Config()

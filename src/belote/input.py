@@ -27,6 +27,7 @@ class Key(Enum):
     MUTE = "MUTE"
     THEME = "THEME"
     HIST = "HIST"
+    OVERLAY = "OVERLAY"
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,20 +142,22 @@ class _UnixKeyReader:
         # Printable character
         try:
             ch = buf.decode("utf-8", errors="replace")
-            if ch.lower() == 'q':
+            if ch.lower() == "q":
                 return KeyEvent(Key.QUIT)
-            if ch == '?':
+            if ch == "?":
                 return KeyEvent(Key.HELP)
-            if ch == 'T':
+            if ch == "T":
                 return KeyEvent(Key.THEME)
-            if ch == 't':
+            if ch == "t":
                 return KeyEvent(Key.HIST)
-            if ch.lower() == 'h':
+            if ch.lower() == "h":
                 return KeyEvent(Key.HELP)
-            if ch.lower() == 'o':
+            if ch.lower() == "o":
                 return KeyEvent(Key.SORT)
-            if ch.lower() == 'm':
+            if ch.lower() == "m":
                 return KeyEvent(Key.MUTE)
+            if ch.lower() == "i":
+                return KeyEvent(Key.OVERLAY)
             return KeyEvent(Key.CHAR, ch)
         except Exception:
             return KeyEvent(Key.CHAR, chr(byte))
@@ -179,7 +182,6 @@ def interruptible_sleep(duration: float, reader: KeyReader) -> bool:
             # Timeout reached
             break
     return False
-
 
 
 # OS-specific reader selection
@@ -236,7 +238,7 @@ if sys.platform == "win32":
                 return KeyEvent(Key.ESC)
             if ch == " ":
                 return KeyEvent(Key.SPACE)
-            if ch.lower() == 'q':
+            if ch.lower() == "q":
                 return KeyEvent(Key.QUIT)
             return KeyEvent(Key.CHAR, ch)
 

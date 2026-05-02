@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "belote-cli"
-version = "1.1.0"
+version = "2.3.3"
 description = "A 4-player terminal card game"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,6 +47,7 @@ Issues = "https://github.com/ElysiumDisc/belote/issues"
 
 [project.scripts]
 belote = "belote.main:main"
+belatro = "belote.belatro.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/belote"]

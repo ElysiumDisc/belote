@@ -27,6 +27,7 @@ class Theme:
     menu_art_fg: tuple[int, int, int]
     menu_border_fg: tuple[int, int, int]
 
+
 THEMES: dict[str, Theme] = {
     "classic_green": Theme(
         name="Classic Green",
@@ -144,6 +145,7 @@ THEMES: dict[str, Theme] = {
     ),
 }
 
+
 class ThemeManager:
     _instance: ThemeManager | None = None
     _current_theme_name: str = "classic_green"
@@ -193,5 +195,6 @@ class ThemeManager:
 
     def _get_config_path(self) -> Path:
         return Path.home() / ".config" / "belote" / "theme.json"
+
 
 theme_manager = ThemeManager()

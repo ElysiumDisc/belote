@@ -36,20 +36,21 @@ TOTAL_POINTS = GLOBAL_CONFIG.TOTAL_POINTS
 # 1. Deck integrity
 # ---------------------------------------------------------------------------
 
+
 class TestDeckIntegrity:
-    def test_32_unique_cards(self):
+    def test_32_unique_cards(self) -> None:
         deck = make_deck()
         assert len(deck) == 32
         assert len(set(deck)) == 32
 
-    def test_all_suits_and_ranks(self):
+    def test_all_suits_and_ranks(self) -> None:
         deck = make_deck()
         suits = {c.suit for c in deck}
         ranks = {c.rank for c in deck}
         assert suits == set(Suit)
         assert ranks == set(Rank)
 
-    def test_total_points_consistency(self):
+    def test_total_points_consistency(self) -> None:
         """TOTAL_POINTS (152) + LAST_TRICK_BONUS (10) must equal 162."""
         assert GLOBAL_CONFIG.TOTAL_POINTS == 152
         assert GLOBAL_CONFIG.LAST_TRICK_BONUS == 10
@@ -60,7 +61,7 @@ class TestDeckIntegrity:
             total = sum(card_points(c, trump) for c in deck)
             assert total == GLOBAL_CONFIG.TOTAL_POINTS
 
-    def test_card_points_sum_152(self):
+    def test_card_points_sum_152(self) -> None:
         """Sum of card_points over all 32 cards must equal 152 for any trump suit."""
         deck = make_deck()
         for trump in Suit:
@@ -72,48 +73,80 @@ class TestDeckIntegrity:
 # 2-3. Ranking order
 # ---------------------------------------------------------------------------
 
+
 class TestRanking:
-    def test_trump_ranking_order(self):
+    def test_trump_ranking_order(self) -> None:
         """Trump: J > 9 > A > 10 > K > Q > 8 > 7."""
         trump = Suit.SPADES
-        order = [Rank.JACK, Rank.NINE, Rank.ACE, Rank.TEN,
-                 Rank.KING, Rank.QUEEN, Rank.EIGHT, Rank.SEVEN]
+        order = [
+            Rank.JACK,
+            Rank.NINE,
+            Rank.ACE,
+            Rank.TEN,
+            Rank.KING,
+            Rank.QUEEN,
+            Rank.EIGHT,
+            Rank.SEVEN,
+        ]
         ranks = [Card(trump, r) for r in order]
         for i in range(len(ranks) - 1):
-            assert trick_rank(ranks[i], trump) > trick_rank(ranks[i + 1], trump), \
-                f"{ranks[i]} should beat {ranks[i+1]}"
+            assert trick_rank(ranks[i], trump) > trick_rank(ranks[i + 1], trump), (
+                f"{ranks[i]} should beat {ranks[i + 1]}"
+            )
 
-    def test_nontrump_ranking_order(self):
+    def test_nontrump_ranking_order(self) -> None:
         """Non-trump: A > 10 > K > Q > J > 9 > 8 > 7."""
         trump = Suit.SPADES
-        order = [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
-                 Rank.JACK, Rank.NINE, Rank.EIGHT, Rank.SEVEN]
+        order = [
+            Rank.ACE,
+            Rank.TEN,
+            Rank.KING,
+            Rank.QUEEN,
+            Rank.JACK,
+            Rank.NINE,
+            Rank.EIGHT,
+            Rank.SEVEN,
+        ]
         suit = Suit.HEARTS  # non-trump
         ranks = [Card(suit, r) for r in order]
         for i in range(len(ranks) - 1):
-            assert trick_rank(ranks[i], trump) > trick_rank(ranks[i + 1], trump), \
-                f"{ranks[i]} should beat {ranks[i+1]}"
+            assert trick_rank(ranks[i], trump) > trick_rank(ranks[i + 1], trump), (
+                f"{ranks[i]} should beat {ranks[i + 1]}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # 4. Trump points
 # ---------------------------------------------------------------------------
 
+
 class TestTrumpPoints:
-    def test_trump_card_points(self):
+    def test_trump_card_points(self) -> None:
         trump = Suit.SPADES
         expected = {
-            Rank.JACK: 20, Rank.NINE: 14, Rank.ACE: 11, Rank.TEN: 10,
-            Rank.KING: 4, Rank.QUEEN: 3, Rank.EIGHT: 0, Rank.SEVEN: 0,
+            Rank.JACK: 20,
+            Rank.NINE: 14,
+            Rank.ACE: 11,
+            Rank.TEN: 10,
+            Rank.KING: 4,
+            Rank.QUEEN: 3,
+            Rank.EIGHT: 0,
+            Rank.SEVEN: 0,
         }
         for rank, pts in expected.items():
             assert card_points(Card(trump, rank), trump) == pts
 
-    def test_nontrump_card_points(self):
+    def test_nontrump_card_points(self) -> None:
         trump = Suit.SPADES
         expected = {
-            Rank.JACK: 2, Rank.NINE: 0, Rank.ACE: 11, Rank.TEN: 10,
-            Rank.KING: 4, Rank.QUEEN: 3, Rank.EIGHT: 0, Rank.SEVEN: 0,
+            Rank.JACK: 2,
+            Rank.NINE: 0,
+            Rank.ACE: 11,
+            Rank.TEN: 10,
+            Rank.KING: 4,
+            Rank.QUEEN: 3,
+            Rank.EIGHT: 0,
+            Rank.SEVEN: 0,
         }
         for rank, pts in expected.items():
             assert card_points(Card(Suit.HEARTS, rank), trump) == pts
@@ -122,6 +155,7 @@ class TestTrumpPoints:
 # ---------------------------------------------------------------------------
 # Helper: build a game state for trick-testing
 # ---------------------------------------------------------------------------
+
 
 def _make_play_state(
     hands: dict[Seat, list[Card]],
@@ -172,8 +206,9 @@ def _make_play_state(
 # 5-9. Legal moves
 # ---------------------------------------------------------------------------
 
+
 class TestLegalMoves:
-    def test_must_follow_suit(self):
+    def test_must_follow_suit(self) -> None:
         """If you have the led suit, you must follow."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -190,7 +225,7 @@ class TestLegalMoves:
         assert Card(Suit.HEARTS, Rank.QUEEN) in legal
         assert Card(Suit.SPADES, Rank.JACK) not in legal
 
-    def test_must_trump_when_void_partner_not_winning(self):
+    def test_must_trump_when_void_partner_not_winning(self) -> None:
         """Void in led suit + partner not winning → must trump."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -212,7 +247,7 @@ class TestLegalMoves:
         # But trump should also be legal (not forced to trump when partner winning)
         assert Card(Suit.SPADES, Rank.JACK) in legal
 
-    def test_must_overtrump(self):
+    def test_must_overtrump(self) -> None:
         """Must overtrump when possible."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -234,7 +269,7 @@ class TestLegalMoves:
         assert Card(Suit.SPADES, Rank.JACK) in legal
         assert Card(Suit.SPADES, Rank.SEVEN) not in legal
 
-    def test_must_overtrump_trump_led(self):
+    def test_must_overtrump_trump_led(self) -> None:
         """Must overtrump when trump is led and someone already played a trump."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -253,7 +288,7 @@ class TestLegalMoves:
         assert Card(Suit.SPADES, Rank.JACK) in legal
         assert Card(Suit.SPADES, Rank.SEVEN) not in legal
 
-    def test_partner_winning_exception(self):
+    def test_partner_winning_exception(self) -> None:
         """Void + partner winning + non-trump lead → discard allowed."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -273,7 +308,7 @@ class TestLegalMoves:
         legal = legal_cards(state, Seat.NORTH)
         assert Card(Suit.DIAMONDS, Rank.ACE) in legal
 
-    def test_trump_lead_no_partner_exception(self):
+    def test_trump_lead_no_partner_exception(self) -> None:
         """Trump lead: partner-winning exception does NOT apply."""
         trump = Suit.SPADES
         state = _make_play_state(
@@ -299,8 +334,9 @@ class TestLegalMoves:
 # 10. Belote detection
 # ---------------------------------------------------------------------------
 
+
 class TestBelote:
-    def test_belote_detected(self):
+    def test_belote_detected(self) -> None:
         trump = Suit.HEARTS
         hand = (
             Card(trump, Rank.KING),
@@ -309,7 +345,7 @@ class TestBelote:
         )
         assert detect_belote(hand, trump) is True
 
-    def test_belote_not_detected_missing_king(self):
+    def test_belote_not_detected_missing_king(self) -> None:
         trump = Suit.HEARTS
         hand = (
             Card(trump, Rank.QUEEN),
@@ -318,7 +354,7 @@ class TestBelote:
         )
         assert detect_belote(hand, trump) is False
 
-    def test_belote_not_detected_wrong_suit(self):
+    def test_belote_not_detected_wrong_suit(self) -> None:
         trump = Suit.HEARTS
         hand = (
             Card(Suit.SPADES, Rank.KING),
@@ -332,8 +368,9 @@ class TestBelote:
 # 11. Sequence detection
 # ---------------------------------------------------------------------------
 
+
 class TestSequences:
-    def test_tierce_detected(self):
+    def test_tierce_detected(self) -> None:
         hand = (
             Card(Suit.HEARTS, Rank.NINE),
             Card(Suit.HEARTS, Rank.TEN),
@@ -343,7 +380,7 @@ class TestSequences:
         assert len(seqs) == 1
         assert seqs[0].length == 3
 
-    def test_quarte_detected(self):
+    def test_quarte_detected(self) -> None:
         hand = (
             Card(Suit.HEARTS, Rank.EIGHT),
             Card(Suit.HEARTS, Rank.NINE),
@@ -354,7 +391,7 @@ class TestSequences:
         assert len(seqs) == 1
         assert seqs[0].length == 4
 
-    def test_quinte_detected(self):
+    def test_quinte_detected(self) -> None:
         hand = (
             Card(Suit.SPADES, Rank.SEVEN),
             Card(Suit.SPADES, Rank.EIGHT),
@@ -366,7 +403,7 @@ class TestSequences:
         assert len(seqs) == 1
         assert seqs[0].length == 5
 
-    def test_no_sequence_two_cards(self):
+    def test_no_sequence_two_cards(self) -> None:
         hand = (
             Card(Suit.HEARTS, Rank.ACE),
             Card(Suit.HEARTS, Rank.KING),
@@ -374,7 +411,7 @@ class TestSequences:
         seqs = detect_sequences(hand)
         assert len(seqs) == 0
 
-    def test_no_sequence_different_suits(self):
+    def test_no_sequence_different_suits(self) -> None:
         hand = (
             Card(Suit.HEARTS, Rank.NINE),
             Card(Suit.SPADES, Rank.TEN),
@@ -388,23 +425,24 @@ class TestSequences:
 # 12. Carré detection
 # ---------------------------------------------------------------------------
 
+
 class TestCarres:
-    def test_carre_jacks(self):
+    def test_carre_jacks(self) -> None:
         hand = tuple(Card(s, Rank.JACK) for s in Suit)
         carres = detect_carres(hand)
         assert len(carres) == 1
 
-    def test_carre_nines(self):
+    def test_carre_nines(self) -> None:
         hand = tuple(Card(s, Rank.NINE) for s in Suit)
         carres = detect_carres(hand)
         assert len(carres) == 1
 
-    def test_carre_sevens_no_count(self):
+    def test_carre_sevens_no_count(self) -> None:
         hand = tuple(Card(s, Rank.SEVEN) for s in Suit)
         carres = detect_carres(hand)
         assert len(carres) == 1  # detected but worth 0 points
 
-    def test_no_carre(self):
+    def test_no_carre(self) -> None:
         hand = (
             Card(Suit.SPADES, Rank.ACE),
             Card(Suit.HEARTS, Rank.KING),
@@ -418,14 +456,15 @@ class TestCarres:
 # 13. Declaration priority
 # ---------------------------------------------------------------------------
 
+
 class TestDeclarationPriority:
-    def test_carre_beats_sequence(self):
+    def test_carre_beats_sequence(self) -> None:
         """Carré outranks any sequence."""
         from belote.scoring import Carre, Sequence
+
         trump = Suit.SPADES
         jack_carre = Carre(rank=5, cards=tuple(Card(s, Rank.JACK) for s in Suit))
-        seq = Sequence(length=5, top_rank=8, suit=Suit.HEARTS,
-                       is_trump=False, cards=())
+        seq = Sequence(length=5, top_rank=8, suit=Suit.HEARTS, is_trump=False, cards=())
 
         decls = {
             Seat.SOUTH: {"sequences": [seq], "carres": [], "belote": False},
@@ -436,13 +475,12 @@ class TestDeclarationPriority:
         resolved = resolve_declarations(decls, trump)
         assert resolved.scoring_team == 1  # EW has carré
 
-    def test_longer_sequence_wins(self):
+    def test_longer_sequence_wins(self) -> None:
         from belote.scoring import Sequence
+
         trump = Suit.SPADES
-        quarte = Sequence(length=4, top_rank=8, suit=Suit.HEARTS,
-                          is_trump=False, cards=())
-        tierce = Sequence(length=3, top_rank=8, suit=Suit.DIAMONDS,
-                          is_trump=False, cards=())
+        quarte = Sequence(length=4, top_rank=8, suit=Suit.HEARTS, is_trump=False, cards=())
+        tierce = Sequence(length=3, top_rank=8, suit=Suit.DIAMONDS, is_trump=False, cards=())
 
         decls = {
             Seat.SOUTH: {"sequences": [quarte], "carres": [], "belote": False},
@@ -453,13 +491,12 @@ class TestDeclarationPriority:
         resolved = resolve_declarations(decls, trump)
         assert resolved.scoring_team == 0  # NS has longer sequence
 
-    def test_trump_sequence_beats_equal_nontrump(self):
+    def test_trump_sequence_beats_equal_nontrump(self) -> None:
         from belote.scoring import Sequence
+
         trump = Suit.SPADES
-        trump_seq = Sequence(length=3, top_rank=6, suit=Suit.SPADES,
-                             is_trump=True, cards=())
-        nontrump_seq = Sequence(length=3, top_rank=6, suit=Suit.HEARTS,
-                                is_trump=False, cards=())
+        trump_seq = Sequence(length=3, top_rank=6, suit=Suit.SPADES, is_trump=True, cards=())
+        nontrump_seq = Sequence(length=3, top_rank=6, suit=Suit.HEARTS, is_trump=False, cards=())
 
         decls = {
             Seat.SOUTH: {"sequences": [trump_seq], "carres": [], "belote": False},
@@ -475,8 +512,9 @@ class TestDeclarationPriority:
 # 14. Capot scoring
 # ---------------------------------------------------------------------------
 
+
 class TestCapot:
-    def test_capot_base_score(self):
+    def test_capot_base_score(self) -> None:
         trump = Suit.SPADES
         # 8 tricks where NS wins ALL tricks = capot.
         # South's ♠: J,9,A,10,K,Q (6 trumps) | North's ♠: none
@@ -485,22 +523,54 @@ class TestCapot:
         # Tricks 6-7: North leads A♥,K♥ → North wins (no trump played)
         # Trick 8: South leads Q♠ → beats East's K♠ and West's 8♠
         trick_data = [
-            (Card(Suit.SPADES, Rank.JACK), Card(Suit.HEARTS, Rank.SEVEN),
-             Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.CLUBS, Rank.SEVEN)),
-            (Card(Suit.SPADES, Rank.NINE), Card(Suit.HEARTS, Rank.EIGHT),
-             Card(Suit.DIAMONDS, Rank.EIGHT), Card(Suit.CLUBS, Rank.EIGHT)),
-            (Card(Suit.SPADES, Rank.ACE), Card(Suit.HEARTS, Rank.NINE),
-             Card(Suit.DIAMONDS, Rank.NINE), Card(Suit.CLUBS, Rank.NINE)),
-            (Card(Suit.SPADES, Rank.TEN), Card(Suit.HEARTS, Rank.TEN),
-             Card(Suit.DIAMONDS, Rank.TEN), Card(Suit.CLUBS, Rank.TEN)),
-            (Card(Suit.SPADES, Rank.KING), Card(Suit.HEARTS, Rank.JACK),
-             Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK)),
-            (Card(Suit.CLUBS, Rank.EIGHT), Card(Suit.HEARTS, Rank.JACK),
-             Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.HEARTS, Rank.QUEEN)),
-            (Card(Suit.CLUBS, Rank.NINE), Card(Suit.HEARTS, Rank.KING),
-             Card(Suit.DIAMONDS, Rank.QUEEN), Card(Suit.HEARTS, Rank.TEN)),
-            (Card(Suit.SPADES, Rank.QUEEN), Card(Suit.CLUBS, Rank.KING),
-             Card(Suit.DIAMONDS, Rank.KING), Card(Suit.SPADES, Rank.EIGHT)),
+            (
+                Card(Suit.SPADES, Rank.JACK),
+                Card(Suit.HEARTS, Rank.SEVEN),
+                Card(Suit.DIAMONDS, Rank.SEVEN),
+                Card(Suit.CLUBS, Rank.SEVEN),
+            ),
+            (
+                Card(Suit.SPADES, Rank.NINE),
+                Card(Suit.HEARTS, Rank.EIGHT),
+                Card(Suit.DIAMONDS, Rank.EIGHT),
+                Card(Suit.CLUBS, Rank.EIGHT),
+            ),
+            (
+                Card(Suit.SPADES, Rank.ACE),
+                Card(Suit.HEARTS, Rank.NINE),
+                Card(Suit.DIAMONDS, Rank.NINE),
+                Card(Suit.CLUBS, Rank.NINE),
+            ),
+            (
+                Card(Suit.SPADES, Rank.TEN),
+                Card(Suit.HEARTS, Rank.TEN),
+                Card(Suit.DIAMONDS, Rank.TEN),
+                Card(Suit.CLUBS, Rank.TEN),
+            ),
+            (
+                Card(Suit.SPADES, Rank.KING),
+                Card(Suit.HEARTS, Rank.JACK),
+                Card(Suit.DIAMONDS, Rank.JACK),
+                Card(Suit.CLUBS, Rank.JACK),
+            ),
+            (
+                Card(Suit.CLUBS, Rank.EIGHT),
+                Card(Suit.HEARTS, Rank.JACK),
+                Card(Suit.DIAMONDS, Rank.ACE),
+                Card(Suit.HEARTS, Rank.QUEEN),
+            ),
+            (
+                Card(Suit.CLUBS, Rank.NINE),
+                Card(Suit.HEARTS, Rank.KING),
+                Card(Suit.DIAMONDS, Rank.QUEEN),
+                Card(Suit.HEARTS, Rank.TEN),
+            ),
+            (
+                Card(Suit.SPADES, Rank.QUEEN),
+                Card(Suit.CLUBS, Rank.KING),
+                Card(Suit.DIAMONDS, Rank.KING),
+                Card(Suit.SPADES, Rank.EIGHT),
+            ),
         ]
         tricks = []
         for cards in trick_data:
@@ -510,11 +580,10 @@ class TestCapot:
         # Verify: all tricks won by NS team
         for i, trick in enumerate(tricks):
             w = trick_winner_seat(trick, trump)
-            assert w is not None and team_of(w) == 0, \
-                f"Trick {i+1}: Expected NS to win, got {w}"
+            assert w is not None and team_of(w) == 0, f"Trick {i + 1}: Expected NS to win, got {w}"
 
         # Reconstruct hands for scoring to work
-        hands_by_seat = [[] for _ in range(4)]
+        hands_by_seat: list[list[Card]] = [[] for _ in range(4)]
         for trick in tricks:
             for tc in trick:
                 hands_by_seat[tc.seat.value].append(tc.card)
@@ -560,8 +629,9 @@ class TestCapot:
 # 15. Bid failure
 # ---------------------------------------------------------------------------
 
+
 class TestBidFailure:
-    def test_failed_bid_scoring(self):
+    def test_failed_bid_scoring(self) -> None:
         """When taker_pts < defender_pts, taker scores 0, defenders get 162 + declarations."""
         trump = Suit.SPADES
         # Build tricks where defenders win more points
@@ -614,27 +684,60 @@ class TestBidFailure:
 # 16. Last-trick bonus
 # ---------------------------------------------------------------------------
 
+
 class TestLastTrickBonus:
-    def test_last_trick_bonus_applied(self):
+    def test_last_trick_bonus_applied(self) -> None:
         trump = Suit.SPADES
         # Capot scenario: last trick bonus is subsumed by capot scoring
         trick_data = [
-            (Card(Suit.SPADES, Rank.JACK), Card(Suit.HEARTS, Rank.SEVEN),
-             Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.CLUBS, Rank.SEVEN)),
-            (Card(Suit.SPADES, Rank.NINE), Card(Suit.HEARTS, Rank.EIGHT),
-             Card(Suit.DIAMONDS, Rank.EIGHT), Card(Suit.CLUBS, Rank.EIGHT)),
-            (Card(Suit.SPADES, Rank.ACE), Card(Suit.HEARTS, Rank.NINE),
-             Card(Suit.DIAMONDS, Rank.NINE), Card(Suit.CLUBS, Rank.NINE)),
-            (Card(Suit.SPADES, Rank.TEN), Card(Suit.HEARTS, Rank.TEN),
-             Card(Suit.DIAMONDS, Rank.TEN), Card(Suit.CLUBS, Rank.TEN)),
-            (Card(Suit.SPADES, Rank.KING), Card(Suit.HEARTS, Rank.JACK),
-             Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK)),
-            (Card(Suit.DIAMONDS, Rank.EIGHT), Card(Suit.HEARTS, Rank.QUEEN),
-             Card(Suit.HEARTS, Rank.ACE), Card(Suit.HEARTS, Rank.KING)),
-            (Card(Suit.DIAMONDS, Rank.NINE), Card(Suit.HEARTS, Rank.KING),
-             Card(Suit.HEARTS, Rank.QUEEN), Card(Suit.HEARTS, Rank.JACK)),
-            (Card(Suit.SPADES, Rank.QUEEN), Card(Suit.CLUBS, Rank.KING),
-             Card(Suit.DIAMONDS, Rank.KING), Card(Suit.SPADES, Rank.EIGHT)),
+            (
+                Card(Suit.SPADES, Rank.JACK),
+                Card(Suit.HEARTS, Rank.SEVEN),
+                Card(Suit.DIAMONDS, Rank.SEVEN),
+                Card(Suit.CLUBS, Rank.SEVEN),
+            ),
+            (
+                Card(Suit.SPADES, Rank.NINE),
+                Card(Suit.HEARTS, Rank.EIGHT),
+                Card(Suit.DIAMONDS, Rank.EIGHT),
+                Card(Suit.CLUBS, Rank.EIGHT),
+            ),
+            (
+                Card(Suit.SPADES, Rank.ACE),
+                Card(Suit.HEARTS, Rank.NINE),
+                Card(Suit.DIAMONDS, Rank.NINE),
+                Card(Suit.CLUBS, Rank.NINE),
+            ),
+            (
+                Card(Suit.SPADES, Rank.TEN),
+                Card(Suit.HEARTS, Rank.TEN),
+                Card(Suit.DIAMONDS, Rank.TEN),
+                Card(Suit.CLUBS, Rank.TEN),
+            ),
+            (
+                Card(Suit.SPADES, Rank.KING),
+                Card(Suit.HEARTS, Rank.JACK),
+                Card(Suit.DIAMONDS, Rank.JACK),
+                Card(Suit.CLUBS, Rank.JACK),
+            ),
+            (
+                Card(Suit.DIAMONDS, Rank.EIGHT),
+                Card(Suit.HEARTS, Rank.QUEEN),
+                Card(Suit.HEARTS, Rank.ACE),
+                Card(Suit.HEARTS, Rank.KING),
+            ),
+            (
+                Card(Suit.DIAMONDS, Rank.NINE),
+                Card(Suit.HEARTS, Rank.KING),
+                Card(Suit.HEARTS, Rank.QUEEN),
+                Card(Suit.HEARTS, Rank.JACK),
+            ),
+            (
+                Card(Suit.SPADES, Rank.QUEEN),
+                Card(Suit.CLUBS, Rank.KING),
+                Card(Suit.DIAMONDS, Rank.KING),
+                Card(Suit.SPADES, Rank.EIGHT),
+            ),
         ]
         tricks = []
         for cards in trick_data:
@@ -677,8 +780,9 @@ class TestLastTrickBonus:
 # 17. Round point conservation
 # ---------------------------------------------------------------------------
 
+
 class TestPointConservation:
-    def test_non_capot_points_sum_162(self):
+    def test_non_capot_points_sum_162(self) -> None:
         """In non-capot non-failure rounds, ns_card_pts + ew_card_pts == 162."""
         trump = Suit.SPADES
         deck = make_deck()
@@ -686,13 +790,7 @@ class TestPointConservation:
         tricks: list[tuple[TrickCard, ...]] = []
         card_idx = 0
         for _i in range(8):
-            trick = tuple(
-                TrickCard(
-                    list(Seat)[j],
-                    deck[card_idx + j]
-                )
-                for j in range(4)
-            )
+            trick = tuple(TrickCard(list(Seat)[j], deck[card_idx + j]) for j in range(4))
             tricks.append(trick)
             card_idx += 4
 
@@ -741,8 +839,9 @@ class TestPointConservation:
 # 18. Round determinism
 # ---------------------------------------------------------------------------
 
+
 class TestDeterminism:
-    def test_same_seed_same_deal(self):
+    def test_same_seed_same_deal(self) -> None:
         seed = 42
         rng1 = random.Random(seed)
         state1 = start_round(new_game(), rng1)
@@ -752,7 +851,7 @@ class TestDeterminism:
 
         assert state1.hands == state2.hands
 
-    def test_different_seed_different_deal(self):
+    def test_different_seed_different_deal(self) -> None:
         rng1 = random.Random(42)
         state1 = start_round(new_game(), rng1)
 
@@ -766,20 +865,21 @@ class TestDeterminism:
 # Additional: team_of / partner
 # ---------------------------------------------------------------------------
 
+
 class TestHelpers:
-    def test_team_of(self):
+    def test_team_of(self) -> None:
         assert team_of(Seat.SOUTH) == 0
         assert team_of(Seat.NORTH) == 0
         assert team_of(Seat.EAST) == 1
         assert team_of(Seat.WEST) == 1
 
-    def test_partner(self):
+    def test_partner(self) -> None:
         assert partner(Seat.SOUTH) == Seat.NORTH
         assert partner(Seat.NORTH) == Seat.SOUTH
         assert partner(Seat.EAST) == Seat.WEST
         assert partner(Seat.WEST) == Seat.EAST
 
-    def test_seat_order(self):
+    def test_seat_order(self) -> None:
         """Counter-clockwise: S → E → N → W → S."""
         assert Seat.SOUTH.next_seat() == Seat.EAST
         assert Seat.EAST.next_seat() == Seat.NORTH

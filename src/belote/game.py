@@ -14,6 +14,7 @@ from .deck import shuffle as shuffle_deck_
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class Phase(Enum):
     DEAL = "DEAL"
     BIDDING = "BIDDING"
@@ -24,6 +25,7 @@ class Phase(Enum):
 
 class IllegalMoveError(Exception):
     """Raised when a player attempts an illegal play."""
+
     pass
 
 
@@ -62,6 +64,7 @@ class Seat(Enum):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def team_of(seat: Seat) -> int:
     """0 = NS, 1 = EW."""
     return 0 if seat in (Seat.SOUTH, Seat.NORTH) else 1
@@ -80,6 +83,7 @@ def partner(seat: Seat) -> Seat:
 # ---------------------------------------------------------------------------
 # Declaration types
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class Sequence:
@@ -111,6 +115,7 @@ class Declaration:
 # ---------------------------------------------------------------------------
 # GameState
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class TrickCard:
@@ -166,6 +171,7 @@ class GameState:
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
     litige_points: int = 0
+
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
 
@@ -173,9 +179,11 @@ class GameState:
     def current_bidder(self) -> Seat:
         return get_bidder(self.dealer, self.bidder_index)
 
+
 # ---------------------------------------------------------------------------
 # Pure transitions
 # ---------------------------------------------------------------------------
+
 
 def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
     """Return a new state with round-specific fields reset to defaults."""
@@ -230,7 +238,9 @@ def shuffle_deck(rng: random.Random) -> tuple[Card, ...]:
     return shuffle_deck_(make_deck(), rng)
 
 
-def deal_cards(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tuple[Card, ...]]:
+def deal_cards(
+    deck: tuple[Card, ...],
+) -> tuple[tuple[tuple[Card, ...], ...], Card, tuple[Card, ...]]:
     return deal_cards_(deck)
 
 
@@ -264,15 +274,17 @@ def _distribute_remaining_cards(state: GameState, taker: Seat) -> list[list[Card
         if s == taker:
             new_hands[s.value].append(state.up_card)  # type: ignore[arg-type]
             # Taker only needs 2 more
-            new_hands[s.value].extend(pool[pool_idx:pool_idx+2])
+            new_hands[s.value].extend(pool[pool_idx : pool_idx + 2])
             pool_idx += 2
         else:
             # Others need 3 more
-            new_hands[s.value].extend(pool[pool_idx:pool_idx+3])
+            new_hands[s.value].extend(pool[pool_idx : pool_idx + 3])
             pool_idx += 3
 
     if pool_idx != len(pool):
-        raise ValueError(f"Deal corruption: {pool_idx} cards distributed from {len(pool)} available")
+        raise ValueError(
+            f"Deal corruption: {pool_idx} cards distributed from {len(pool)} available"
+        )
 
     return new_hands
 
@@ -303,6 +315,7 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
 
         # Pre-calculate declarations
         from .scoring import get_declarations
+
         # initial_hands stores the 8-card hands at start of play (not the 5-card deal),
         # used by score_round for declaration detection after cards are played out.
         temp_state = replace(
@@ -318,7 +331,7 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
 
         return replace(
             temp_state,
-            leader=state.dealer.next_seat(), # Standard: left of dealer leads
+            leader=state.dealer.next_seat(),  # Standard: left of dealer leads
             turn=state.dealer.next_seat(),
             up_card=None,
             remaining_cards=(),
@@ -397,7 +410,9 @@ def _calculate_legal_cards_impl(
     # Who is currently winning the trick?
     # We need an internal version of _current_trick_winner that works with IDs
     # or just use the existing one but reconstruct the list.
-    played_cards = [TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in current_trick_ids if s != seat_val]
+    played_cards = [
+        TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in current_trick_ids if s != seat_val
+    ]
 
     current_winner = _current_trick_winner(played_cards, trump, lead_suit)
     partner_winning = current_winner is not None and partner(seat) == current_winner
@@ -408,15 +423,12 @@ def _calculate_legal_cards_impl(
     if lead_suit == trump:
         # Trump led: must follow if possible, must overtrump if possible
         if my_suit_cards:
-            highest_in_trick = max(
-                (trick_rank(tc.card, trump) for tc in played_cards),
-                default=-1
-            )
-            must_overtrump = any(
-                trick_rank(c, trump) > highest_in_trick for c in my_suit_cards
-            )
+            highest_in_trick = max((trick_rank(tc.card, trump) for tc in played_cards), default=-1)
+            must_overtrump = any(trick_rank(c, trump) > highest_in_trick for c in my_suit_cards)
             if must_overtrump:
-                res_cards = tuple(c for c in my_suit_cards if trick_rank(c, trump) > highest_in_trick)
+                res_cards = tuple(
+                    c for c in my_suit_cards if trick_rank(c, trump) > highest_in_trick
+                )
             else:
                 res_cards = tuple(my_suit_cards)
         else:
@@ -438,7 +450,11 @@ def _calculate_legal_cards_impl(
                 if my_trumps:
                     # Must trump; also must overtrump if possible
                     highest_trump_in_trick = max(
-                        (trick_rank(tc.card, trump) for tc in played_cards if tc.card.suit == trump),
+                        (
+                            trick_rank(tc.card, trump)
+                            for tc in played_cards
+                            if tc.card.suit == trump
+                        ),
                         default=-1,
                     )
                     can_overtrump = any(
@@ -446,8 +462,7 @@ def _calculate_legal_cards_impl(
                     )
                     if can_overtrump:
                         res_cards = tuple(
-                            c for c in my_trumps
-                            if trick_rank(c, trump) > highest_trump_in_trick
+                            c for c in my_trumps if trick_rank(c, trump) > highest_trump_in_trick
                         )
                     else:
                         res_cards = tuple(my_trumps)
@@ -467,19 +482,12 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
 
-    res_ids = _calculate_legal_cards_impl(
-        hand_ids,
-        state.trump,
-        trick_ids,
-        seat.value
-    )
+    res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value)
 
     return tuple(_ID_TO_CARD[i] for i in res_ids)
 
 
-def _current_trick_winner(
-    played: list[TrickCard], trump: Suit, lead_suit: Suit
-) -> Seat | None:
+def _current_trick_winner(played: list[TrickCard], trump: Suit, lead_suit: Suit) -> Seat | None:
     """Determine who is currently winning the trick based on cards played so far."""
     if not played:
         return None
@@ -527,7 +535,7 @@ def _trick_winner_seat_impl(trick_ids: tuple[tuple[int, int], ...], trump: Suit)
     # We can optimize this further by avoiding reconstruction if we rewrite _current_trick_winner
     # but for now this fixes the cache effectiveness while keeping logic central.
     res = _current_trick_winner(played, trump, lead_suit)
-    assert res is not None # Should not be None if trick_ids is not empty
+    assert res is not None  # Should not be None if trick_ids is not empty
     return res
 
 
@@ -540,8 +548,8 @@ def play_card(state: GameState, card: Card) -> GameState:
     t = state.turn.value
     old_hand = state.hands[t]
     idx = old_hand.index(card)
-    new_hand = old_hand[:idx] + old_hand[idx + 1:]
-    new_hands = state.hands[:t] + (new_hand,) + state.hands[t + 1:]
+    new_hand = old_hand[:idx] + old_hand[idx + 1 :]
+    new_hands = state.hands[:t] + (new_hand,) + state.hands[t + 1 :]
 
     new_trick = state.current_trick + (TrickCard(state.turn, card),)
 
@@ -652,17 +660,42 @@ def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
         suits_order.insert(0, trump)
 
     suit_idx = {s: i for i, s in enumerate(suits_order)}
-    trump_rank_idx: dict[Rank, int] = {r: i for i, r in enumerate([
-        Rank.JACK, Rank.NINE, Rank.ACE, Rank.TEN,
-        Rank.KING, Rank.QUEEN, Rank.EIGHT, Rank.SEVEN,
-    ])}
-    normal_rank_idx: dict[Rank, int] = {r: i for i, r in enumerate([
-        Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
-        Rank.JACK, Rank.NINE, Rank.EIGHT, Rank.SEVEN,
-    ])}
+    trump_rank_idx: dict[Rank, int] = {
+        r: i
+        for i, r in enumerate(
+            [
+                Rank.JACK,
+                Rank.NINE,
+                Rank.ACE,
+                Rank.TEN,
+                Rank.KING,
+                Rank.QUEEN,
+                Rank.EIGHT,
+                Rank.SEVEN,
+            ]
+        )
+    }
+    normal_rank_idx: dict[Rank, int] = {
+        r: i
+        for i, r in enumerate(
+            [
+                Rank.ACE,
+                Rank.TEN,
+                Rank.KING,
+                Rank.QUEEN,
+                Rank.JACK,
+                Rank.NINE,
+                Rank.EIGHT,
+                Rank.SEVEN,
+            ]
+        )
+    }
 
     def sort_key(c: Card) -> tuple[int, int]:
-        return (suit_idx[c.suit], trump_rank_idx[c.rank] if c.suit == trump else normal_rank_idx[c.rank])
+        return (
+            suit_idx[c.suit],
+            trump_rank_idx[c.rank] if c.suit == trump else normal_rank_idx[c.rank],
+        )
 
     return tuple(sorted(hand, key=sort_key))
 
@@ -674,6 +707,8 @@ def sort_south_hand(state: GameState) -> GameState:
 
     new_initial = list(state.initial_hands)
     if new_initial[Seat.SOUTH.value]:
-        new_initial[Seat.SOUTH.value] = sort_hand(state.initial_hands[Seat.SOUTH.value], state.trump)
+        new_initial[Seat.SOUTH.value] = sort_hand(
+            state.initial_hands[Seat.SOUTH.value], state.trump
+        )
 
     return replace(state, hands=tuple(new_hands), initial_hands=tuple(new_initial))

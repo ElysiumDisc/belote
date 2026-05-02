@@ -136,7 +136,9 @@ class AIPlayer:
 
     # ---- Medium AI ----
 
-    def _medium_bid(self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None) -> Suit | None:
+    def _medium_bid(
+        self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None
+    ) -> Suit | None:
         """Heuristic score per suit with personality variance."""
         suit_scores: dict[Suit, float] = dict.fromkeys(Suit, 0.0)
         honor_values = {
@@ -263,7 +265,9 @@ class AIPlayer:
 
     # ---- Hard AI ----
 
-    def _hard_bid(self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None) -> Suit | None:
+    def _hard_bid(
+        self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None
+    ) -> Suit | None:
         """Monte-Carlo-lite bidding evaluation with personality."""
         suit_scores: dict[Suit, float] = dict.fromkeys(Suit, 0.0)
         personality = self._rng.uniform(-0.8, 0.8)
@@ -376,10 +380,12 @@ class AIPlayer:
                 next_opp = self.seat.next_seat()
                 opp_voids = self.memory.known_voids.get(next_opp, set())
                 # trick_rank(J, trump)=15, trick_rank(9, trump)=14
-                if (next_opp != partner(self.seat)
-                        and lead_suit in opp_voids
-                        and trump not in opp_voids
-                        and (card.suit != trump or rank < _NINE_TRUMP_RANK)):
+                if (
+                    next_opp != partner(self.seat)
+                    and lead_suit in opp_voids
+                    and trump not in opp_voids
+                    and (card.suit != trump or rank < _NINE_TRUMP_RANK)
+                ):
                     score -= 5
         elif partner_winning:
             # We aren't winning but partner is. Don't play high unless necessary.
@@ -398,9 +404,7 @@ class AIPlayer:
 
         return score
 
-    def _hard_lead(
-        self, legal: tuple[Card, ...], trump: Suit, state: GameState
-    ) -> Card:
+    def _hard_lead(self, legal: tuple[Card, ...], trump: Suit, state: GameState) -> Card:
         """Strategic lead with void awareness."""
         # Prefer leading suit where opponent is known void
         for card in legal:

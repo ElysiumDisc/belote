@@ -19,18 +19,20 @@ class Statistics:
     current_capot_streak: int = 0
 
     # Enhanced stats
-    most_used_trump: dict[str, int] = field(default_factory=lambda: {
-        "♠": 0, "♥": 0, "♦": 0, "♣": 0
-    })
-    difficulty_stats: dict[str, dict[str, int]] = field(default_factory=lambda: {
-        "easy": {"played": 0, "won": 0},
-        "medium": {"played": 0, "won": 0},
-        "hard": {"played": 0, "won": 0},
-        "mixed": {"played": 0, "won": 0}
-    })
+    most_used_trump: dict[str, int] = field(
+        default_factory=lambda: {"♠": 0, "♥": 0, "♦": 0, "♣": 0}
+    )
+    difficulty_stats: dict[str, dict[str, int]] = field(
+        default_factory=lambda: {
+            "easy": {"played": 0, "won": 0},
+            "medium": {"played": 0, "won": 0},
+            "hard": {"played": 0, "won": 0},
+            "mixed": {"played": 0, "won": 0},
+        }
+    )
     longest_game_rounds: int = 0
     best_round_score: int = 0
-    worst_round_score: int = 999 # Higher than max possible (162 + decls)
+    worst_round_score: int = 999  # Higher than max possible (162 + decls)
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -89,7 +91,9 @@ class StatisticsManager:
         if self._stats_cache is not None:
             self.save_stats(self._stats_cache)
 
-    def update_stats_round(self, is_capot: bool, points_scored: int, trump_symbol: str | None = None) -> None:
+    def update_stats_round(
+        self, is_capot: bool, points_scored: int, trump_symbol: str | None = None
+    ) -> None:
         stats = self.load_stats()
         stats.total_rounds += 1
         stats.total_points_scored += points_scored
@@ -137,11 +141,26 @@ class StatisticsManager:
 # Global instance for backward compatibility (can be replaced with DI later)
 _MANAGER = StatisticsManager()
 
-def load_stats() -> Statistics: return _MANAGER.load_stats()
-def save_stats(stats: Statistics) -> None: _MANAGER.save_stats(stats)
-def flush_stats() -> None: _MANAGER.flush_stats()
+
+def load_stats() -> Statistics:
+    return _MANAGER.load_stats()
+
+
+def save_stats(stats: Statistics) -> None:
+    _MANAGER.save_stats(stats)
+
+
+def flush_stats() -> None:
+    _MANAGER.flush_stats()
+
+
 def update_stats_round(is_capot: bool, points_scored: int, trump_symbol: str | None = None) -> None:
     _MANAGER.update_stats_round(is_capot, points_scored, trump_symbol)
+
+
 def update_stats_game(won: bool, num_rounds: int, difficulty: str) -> None:
     _MANAGER.update_stats_game(won, num_rounds, difficulty)
-def get_session_stats() -> SessionStats: return _MANAGER.get_session_stats()
+
+
+def get_session_stats() -> SessionStats:
+    return _MANAGER.get_session_stats()

@@ -82,11 +82,7 @@ def deal(deck: tuple[Card, ...]) -> tuple[tuple[tuple[Card, ...], ...], Card, tu
     # Remaining 11 cards
     # We'll just return them as a flat tuple and distribute in game.py
     remaining_pool = deck[idx:]
-    return (
-        tuple(tuple(h) for h in initial),
-        up_card,
-        remaining_pool
-    )
+    return (tuple(tuple(h) for h in initial), up_card, remaining_pool)
 
 
 # Trump ranking: J=7, 9=6, A=5, 10=4, K=3, Q=2, 8=1, 7=0 (higher = stronger)

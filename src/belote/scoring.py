@@ -134,34 +134,42 @@ def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
                 if run_len >= 3:
                     top = ranks[i - 1]
                     seq_cards = tuple(
-                        c for c in hand
-                        if c.suit == suit and _RANK_VALUES[c.rank] >= ranks[run_start]
+                        c
+                        for c in hand
+                        if c.suit == suit
+                        and _RANK_VALUES[c.rank] >= ranks[run_start]
                         and _RANK_VALUES[c.rank] <= ranks[i - 1]
                     )
-                    sequences.append(Sequence(
-                        length=run_len,
-                        top_rank=top,
-                        suit=suit,
-                        is_trump=False,  # will be updated later
-                        cards=seq_cards,
-                    ))
+                    sequences.append(
+                        Sequence(
+                            length=run_len,
+                            top_rank=top,
+                            suit=suit,
+                            is_trump=False,  # will be updated later
+                            cards=seq_cards,
+                        )
+                    )
                 run_start = i
         # Final run
         run_len = len(ranks) - run_start
         if run_len >= 3:
             top = ranks[-1]
             seq_cards = tuple(
-                c for c in hand
-                if c.suit == suit and _RANK_VALUES[c.rank] >= ranks[run_start]
+                c
+                for c in hand
+                if c.suit == suit
+                and _RANK_VALUES[c.rank] >= ranks[run_start]
                 and _RANK_VALUES[c.rank] <= ranks[-1]
             )
-            sequences.append(Sequence(
-                length=run_len,
-                top_rank=top,
-                suit=suit,
-                is_trump=False,
-                cards=seq_cards,
-            ))
+            sequences.append(
+                Sequence(
+                    length=run_len,
+                    top_rank=top,
+                    suit=suit,
+                    is_trump=False,
+                    cards=seq_cards,
+                )
+            )
     return sequences
 
 
@@ -176,10 +184,12 @@ def detect_carres(hand: tuple[Card, ...]) -> list[Carre]:
     carres: list[Carre] = []
     for rank, cards in by_rank.items():
         if len(cards) == 4:
-            carres.append(Carre(
-                rank=_RANK_VALUES[rank],
-                cards=tuple(cards),
-            ))
+            carres.append(
+                Carre(
+                    rank=_RANK_VALUES[rank],
+                    cards=tuple(cards),
+                )
+            )
     return carres
 
 
@@ -228,8 +238,11 @@ def resolve_declarations(
     for seat, decls in decls_per_seat.items():
         updated_seqs = [
             Sequence(
-                length=s.length, top_rank=s.top_rank, suit=s.suit,
-                is_trump=(s.suit == trump), cards=s.cards,
+                length=s.length,
+                top_rank=s.top_rank,
+                suit=s.suit,
+                is_trump=(s.suit == trump),
+                cards=s.cards,
             )
             for s in decls["sequences"]
         ]
@@ -335,7 +348,9 @@ def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDe
         }
 
         # Use initial_hands if in scoring phase, else current hands (bidding phase)
-        hand = state.initial_hands[seat.value] if state.phase == Phase.SCORING else state.hand_of(seat)
+        hand = (
+            state.initial_hands[seat.value] if state.phase == Phase.SCORING else state.hand_of(seat)
+        )
         if not hand:
             continue
 
@@ -355,14 +370,21 @@ def score_round(state: GameState) -> ScoringBreakdown:
     if state.trump is None or state.taker is None:
         return ScoringBreakdown(
             taker_team=team_of(Seat.SOUTH),
-            table_taker_pts=0, table_defender_pts=0,
-            credit_taker_pts=0, credit_defender_pts=0,
+            table_taker_pts=0,
+            table_defender_pts=0,
+            credit_taker_pts=0,
+            credit_defender_pts=0,
             last_trick_team=None,
-            taker_declarations=0, defender_declarations=0,
-            taker_belote=0, defender_belote=0,
-            taker_rebelote=False, defender_rebelote=False,
-            taker_total=0, defender_total=0,
-            is_capot=False, is_failed=False,
+            taker_declarations=0,
+            defender_declarations=0,
+            taker_belote=0,
+            defender_belote=0,
+            taker_rebelote=False,
+            defender_rebelote=False,
+            taker_total=0,
+            defender_total=0,
+            is_capot=False,
+            is_failed=False,
             messages=(),
         )
 
@@ -460,12 +482,24 @@ def score_round(state: GameState) -> ScoringBreakdown:
         messages.append("Capot!")
         if capot_winner_team == taker_team:
             # Taker achieved capot
-            taker_total = GLOBAL_CONFIG.CAPOT_BASE + taker_declarations + defender_declarations + taker_belote + state.litige_points
+            taker_total = (
+                GLOBAL_CONFIG.CAPOT_BASE
+                + taker_declarations
+                + defender_declarations
+                + taker_belote
+                + state.litige_points
+            )
             defender_total = defender_belote
         else:
             # Defense achieved capot
             is_failed = True
-            defender_total = GLOBAL_CONFIG.CAPOT_BASE + defender_declarations + taker_declarations + defender_belote + state.litige_points
+            defender_total = (
+                GLOBAL_CONFIG.CAPOT_BASE
+                + defender_declarations
+                + taker_declarations
+                + defender_belote
+                + state.litige_points
+            )
             taker_total = taker_belote
 
         return ScoringBreakdown(
@@ -502,7 +536,9 @@ def score_round(state: GameState) -> ScoringBreakdown:
         is_failed = True
         messages.append("Chute! (bid failed)")
         # Defense scores 162 + all declarations + any previous litige points
-        defender_total = 162 + defender_declarations + taker_declarations + defender_belote + state.litige_points
+        defender_total = (
+            162 + defender_declarations + taker_declarations + defender_belote + state.litige_points
+        )
         taker_total = taker_belote
     # 4. Success Logic (Taker > Defense)
     else:

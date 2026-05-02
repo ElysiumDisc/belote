@@ -27,14 +27,14 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "published in 1921. It is the national card game of France, and variants are "
                     "widely played in countries like Armenia, Bulgaria, Croatia, Cyprus, and Greece. "
                     "The game is traditionally played by four people in two permanent partnerships."
-                )
+                ),
             },
             {
                 "header": "The Deck",
                 "text": (
                     "A 32-card piquet deck is used (A, K, Q, J, 10, 9, 8, 7 in four suits). "
                     "The ranking and point values of cards differ between Trump and Non-Trump suits."
-                )
+                ),
             },
             {
                 "header": "Bidding",
@@ -43,7 +43,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Round 1: Players decide if they want to 'Take' the up-card's suit as trump.\n"
                     "• Round 2: If everyone passes, players can choose any other suit as trump.\n"
                     "The 'Taker' receives the up-card, and remaining cards are dealt so everyone gets 8."
-                )
+                ),
             },
             {
                 "header": "Gameplay",
@@ -52,7 +52,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• If void in the lead suit, a player must 'cut' with a trump card.\n"
                     "• If the partner is currently winning the trick, cutting is sometimes optional depending on rules.\n"
                     "• When playing trumps, you must 'overtrump' (play a higher trump) if possible."
-                )
+                ),
             },
             {
                 "header": "Declarations (Melds)",
@@ -61,7 +61,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Tierce (3-card sequence): 20 pts  |  Quarte (4-card): 50 pts  |  Quinte (5-card): 100 pts\n"
                     "• Carré (4 of a kind): Jacks=200 pts, Nines=150 pts, A/K/Q/10=100 pts.\n"
                     "• Belote: Holding the King and Queen of Trumps awards 20 pts when played."
-                )
+                ),
             },
             {
                 "header": "Scoring",
@@ -74,9 +74,9 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Chute (Failure): Defenders score 162 + all declarations from both teams.\n"
                     "• Capot (All 8 tricks): Winning team scores 252 + all declarations from both teams.\n"
                     "• Game End: First team to target score wins. Perfect ties trigger a tie-breaker round."
-                )
-            }
-        ]
+                ),
+            },
+        ],
     },
     "fr": {
         "title": "LA BELOTE - RÈGLES & HISTOIRE",
@@ -89,14 +89,14 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "en 1921. C'est le jeu de cartes national en France, et ses variantes sont jouées "
                     "dans de nombreux pays (Arménie, Bulgarie, etc.). "
                     "Il se joue traditionnellement à quatre joueurs répartis en deux équipes."
-                )
+                ),
             },
             {
                 "header": "Le Jeu",
                 "text": (
                     "On utilise un jeu de 32 cartes (As, R, D, V, 10, 9, 8, 7). "
                     "L'ordre et la valeur des cartes diffèrent selon que la couleur est Atout ou non."
-                )
+                ),
             },
             {
                 "header": "Les Enchères",
@@ -105,7 +105,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• 1er tour: Les joueurs choisissent de 'Prendre' la couleur de la carte retournée.\n"
                     "• 2ème tour: Si tout le monde passe, on peut choisir n'importe quelle autre couleur.\n"
                     "Le 'Preneur' reçoit la carte, et les autres cartes sont distribuées (8 chacun)."
-                )
+                ),
             },
             {
                 "header": "Le Jeu de la Carte",
@@ -114,7 +114,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Si on n'a pas la couleur, on doit 'couper' avec un atout.\n"
                     "• Si le partenaire est maître sur un pli hors-atout, la coupe est facultative.\n"
                     "• À l'atout, on est obligé de 'monter' (jouer un atout plus fort) si possible."
-                )
+                ),
             },
             {
                 "header": "Les Annonces",
@@ -123,7 +123,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Tierce: 20 pts | Cinquante (4 cartes): 50 pts | Cent (5 cartes): 100 pts\n"
                     "• Carré (4 cartes pareilles): Valets=200 pts, Neufs=150 pts, As/R/D/10=100 pts.\n"
                     "• Belote et Rebelote: Le Roi et la Dame d'atout rapportent 20 pts."
-                )
+                ),
             },
             {
                 "header": "Le Score",
@@ -136,8 +136,8 @@ RULES_CONTENT: dict[str, RulesPage] = {
                     "• Chute: La défense marque 162 points + toutes les annonces des deux camps.\n"
                     "• Capot (8 plis): Le camp vainqueur marque 252 points + toutes les annonces.\n"
                     "• Fin de partie: Le premier camp au score cible gagne. En cas d'égalité, on rejoue."
-                )
-            }
-        ]
-    }
+                ),
+            },
+        ],
+    },
 }

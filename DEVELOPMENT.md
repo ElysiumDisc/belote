@@ -23,14 +23,20 @@ Welcome to the Belote development guide. This project is structured as a standar
 
 ## Running the Game
 
-After installing, you can run the game using the `belote` command:
+After installing, you can run the game using the `belote` command for Classic mode:
 ```bash
 belote
+```
+
+Or the `belatro` command for the Roguelite expansion:
+```bash
+belatro
 ```
 
 Or via python:
 ```bash
 python -m belote.main
+python -m belote.belatro.main
 ```
 
 ## Testing
@@ -42,7 +48,28 @@ pip install pytest
 
 Run tests:
 ```bash
+# Run all tests (Classic + BelAtro)
 PYTHONPATH=src pytest
+
+# Run only Classic Belote tests
+PYTHONPATH=src pytest tests/
+
+# Run only BelAtro tests
+PYTHONPATH=src pytest tests/belatro/
+
+# Run a single test file
+PYTHONPATH=src pytest tests/test_game.py
+PYTHONPATH=src pytest tests/belatro/test_scoring.py
+
+# Run a single test by name
+PYTHONPATH=src pytest tests/test_game.py::test_play_card_legal
+PYTHONPATH=src pytest -k "test_scoring"
+
+# Run with verbose output
+PYTHONPATH=src pytest -v
+
+# Run with coverage report
+PYTHONPATH=src pytest --cov=belote --cov-report=term-missing
 ```
 
 ## Code Quality
@@ -51,19 +78,20 @@ The project maintains zero lint and type-check violations. Run all checks with:
 
 ```bash
 # Type checking (0 errors expected)
-PYTHONPATH=src .venv/bin/mypy src/belote
+PYTHONPATH=src mypy .
 
 # Linting (0 violations expected)
-PYTHONPATH=src .venv/bin/ruff check src/ tests/
+ruff check .
 
-# Full test suite (71 tests expected)
+# Full test suite (276 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (v1.1.0):
-- **mypy**: 0 errors (strict mode, `check_untyped_defs`, `disallow_untyped_defs`)
-- **ruff**: 0 violations (rules: E, F, W, I, N, UP, B, A, C4, RET, SIM, PTH)
-- **pytest**: 71 tests, 0 failures
+Current baseline:
+- **mypy**: 0 errors (strict mode)
+- **ruff**: 0 violations
+- **pytest**: 276 tests, 0 failures
+
 
 ## Benchmarking
 

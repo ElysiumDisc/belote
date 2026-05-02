@@ -6,12 +6,8 @@ from belote.game import GameState, Phase, Seat, new_game, start_round
 from belote.scoring import ScoringBreakdown, apply_round_score
 
 
-def test_apply_round_score():
-    state = GameState(
-        hands=[(), (), (), ()], # type: ignore[arg-type]
-        team_scores=(100, 50),
-        target=1000
-    )
+def test_apply_round_score() -> None:
+    state = GameState(hands=[(), (), (), ()], team_scores=(100, 50), target=1000)
     score = ScoringBreakdown(
         taker_team=0,
         table_taker_pts=80,
@@ -29,20 +25,21 @@ def test_apply_round_score():
         defender_total=72,
         is_failed=False,
         is_capot=False,
-        messages=()
+        messages=(),
     )
     new_state = apply_round_score(state, score)
     assert new_state.team_scores == (220, 122)
-    assert new_state.dealer == Seat.EAST # Dealer should rotate
-    assert new_state.phase == Phase.DEAL # Ready for next round
+    assert new_state.dealer == Seat.EAST  # Dealer should rotate
+    assert new_state.phase == Phase.DEAL  # Ready for next round
 
-def test_dealer_rotation_full_cycle():
+
+def test_dealer_rotation_full_cycle() -> None:
     state = new_game()
     assert state.dealer == Seat.SOUTH
 
     rng = random.Random(42)
     # Mocking round end (17 arguments)
-    score = ScoringBreakdown(0,0,0,0,0,0,0,0,0,0,False,False,0,0,False,False,())
+    score = ScoringBreakdown(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, False, False, 0, 0, False, False, ())
     # 1st round
     state = start_round(state, rng)
     state = apply_round_score(state, score)
@@ -63,7 +60,8 @@ def test_dealer_rotation_full_cycle():
     state = apply_round_score(state, score)
     assert state.dealer == Seat.SOUTH
 
-def test_start_round_integrity():
+
+def test_start_round_integrity() -> None:
     state = new_game()
     rng = random.Random(42)
     state = start_round(state, rng)

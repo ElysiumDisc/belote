@@ -23,7 +23,7 @@ from belote.game import (
 from belote.scoring import ScoringBreakdown, apply_round_score, score_round
 
 
-def test_belote_rebelote_transitions():
+def test_belote_rebelote_transitions() -> None:
     # Setup a game state where South has K and Q of Spades (trump)
     trump = Suit.SPADES
     south_hand = (Card(trump, Rank.KING), Card(trump, Rank.QUEEN), Card(trump, Rank.ACE))
@@ -51,7 +51,8 @@ def test_belote_rebelote_transitions():
     assert state.belote_tracker == (True, True)
     assert state.announced == "Rebelote!"
 
-def test_rebelote_scoring():
+
+def test_rebelote_scoring() -> None:
     trump = Suit.SPADES
     state = GameState(
         hands=((), (), (), ()),
@@ -61,8 +62,8 @@ def test_rebelote_scoring():
         turn=Seat.SOUTH,
         phase=Phase.SCORING,
         belote_holders={trump: Seat.SOUTH},
-        belote_tracker=(True, True), # Rebelote
-        completed_tricks=(), # dummy
+        belote_tracker=(True, True),  # Rebelote
+        completed_tricks=(),  # dummy
         last_trick_winner=Seat.SOUTH,
     )
 
@@ -71,14 +72,15 @@ def test_rebelote_scoring():
     assert breakdown.taker_rebelote is True
     assert breakdown.taker_total >= 40
 
-def test_illegal_move_error():
+
+def test_illegal_move_error() -> None:
     trump = Suit.SPADES
     state = GameState(
         hands=((Card(Suit.HEARTS, Rank.ACE),), (), (), ()),
         trump=trump,
         turn=Seat.SOUTH,
         phase=Phase.PLAYING,
-        current_trick=(TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.JACK)),), # Trump led
+        current_trick=(TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.JACK)),),  # Trump led
     )
     # South has Hearts, but Spades led. South must play Spade if they had one,
     # but here they only have Heart ACE. So it is legal to play Heart ACE.
@@ -86,16 +88,17 @@ def test_illegal_move_error():
     with pytest.raises(IllegalMoveError):
         play_card(state, Card(Suit.DIAMONDS, Rank.SEVEN))
 
-def test_apply_round_score_ew_taker():
+
+def test_apply_round_score_ew_taker() -> None:
     state = GameState(
         hands=((), (), (), ()),
         team_scores=(100, 100),
         target=1000,
         dealer=Seat.SOUTH,
-        taker=Seat.EAST, # EW taker
+        taker=Seat.EAST,  # EW taker
     )
     breakdown = ScoringBreakdown(
-        taker_team=1, # EW
+        taker_team=1,  # EW
         table_taker_pts=100,
         table_defender_pts=62,
         credit_taker_pts=100,
@@ -107,17 +110,18 @@ def test_apply_round_score_ew_taker():
         defender_belote=0,
         taker_rebelote=False,
         defender_rebelote=False,
-        taker_total=110, # 100 + 10 last trick
+        taker_total=110,  # 100 + 10 last trick
         defender_total=62,
         is_capot=False,
         is_failed=False,
-        messages=()
+        messages=(),
     )
     new_state = apply_round_score(state, breakdown)
     assert new_state.team_scores == (162, 210)
     assert new_state.score_history[-1].taker_team == 1
 
-def test_sorting():
+
+def test_sorting() -> None:
     trump = Suit.HEARTS
     hand = (
         Card(Suit.SPADES, Rank.ACE),
@@ -130,15 +134,12 @@ def test_sorting():
     assert sorted_h[0] == Card(Suit.HEARTS, Rank.JACK)
     assert sorted_h[1] == Card(Suit.HEARTS, Rank.NINE)
 
-    state = GameState(
-        hands=(hand, (), (), ()),
-        trump=trump,
-        phase=Phase.PLAYING
-    )
+    state = GameState(hands=(hand, (), (), ()), trump=trump, phase=Phase.PLAYING)
     state = sort_south_hand(state)
     assert state.hands[0][0] == Card(Suit.HEARTS, Rank.JACK)
 
-def test_multi_round_bidding_logic():
+
+def test_multi_round_bidding_logic() -> None:
     # Test all pass in round 1, then someone takes in round 2
     state = new_game()
     rng = random.Random(42)
@@ -157,7 +158,8 @@ def test_multi_round_bidding_logic():
     assert state.phase == Phase.PLAYING
     assert state.trump == Suit.DIAMONDS
 
-def test_all_pass_redeal():
+
+def test_all_pass_redeal() -> None:
     state = new_game()
     rng = random.Random(42)
     state = start_round(state, rng)
@@ -171,18 +173,19 @@ def test_all_pass_redeal():
     assert state.dealer == dealer_before.next_seat()
 
 
-def test_ui_card_face():
+def test_ui_card_face() -> None:
     from belote.deck import Card, Rank, Suit
     from belote.ui.render import _get_card_face
 
     card = Card(Suit.SPADES, Rank.ACE)
     face = _get_card_face(card, selected=False, legal=True)
-    assert len(face) == 7 # CARD_H
+    assert len(face) == 7  # CARD_H
     # Check for spade symbol (UTF-8) or 'S'
     assert any("♠" in line or "S" in line for line in face)
     assert any("A" in line for line in face)
 
-def test_input_parsing():
+
+def test_input_parsing() -> None:
 
     from belote.input import Key, _UnixKeyReader
 
@@ -190,40 +193,36 @@ def test_input_parsing():
         reader = _UnixKeyReader()
 
         # Mock os.read and select.select to simulate 'q' key
-        with patch("os.read") as mock_read, \
-             patch("select.select") as mock_select:
-
+        with patch("os.read") as mock_read, patch("select.select") as mock_select:
             mock_select.return_value = ([True], [], [])
-            mock_read.side_effect = [b'q']
+            mock_read.side_effect = [b"q"]
 
             event = reader.read()
             assert event.key == Key.QUIT
 
         # Mock ESC sequence for LEFT arrow: \x1B [ D
-        with patch("os.read") as mock_read, \
-             patch("select.select") as mock_select:
-
+        with patch("os.read") as mock_read, patch("select.select") as mock_select:
             mock_select.return_value = ([True], [], [])
-            mock_read.side_effect = [b'\x1b', b'[', b'D']
+            mock_read.side_effect = [b"\x1b", b"[", b"D"]
 
             event = reader.read()
             assert event.key == Key.LEFT
 
-def test_input_enter_parsing():
+
+def test_input_enter_parsing() -> None:
 
     from belote.input import Key, _UnixKeyReader
 
     with patch("sys.stdin.fileno", return_value=0):
         reader = _UnixKeyReader()
-        with patch("os.read") as mock_read, \
-             patch("select.select") as mock_select:
+        with patch("os.read") as mock_read, patch("select.select") as mock_select:
             mock_select.return_value = ([True], [], [])
-            mock_read.side_effect = [b'\r']
+            mock_read.side_effect = [b"\r"]
             event = reader.read()
             assert event.key == Key.ENTER
 
 
-def test_input_multibyte_utf8():
+def test_input_multibyte_utf8() -> None:
     """Multi-byte UTF-8 characters (e.g. '♠' = 3 bytes) are read as a single event."""
     from belote.input import Key, _UnixKeyReader
 
@@ -233,8 +232,7 @@ def test_input_multibyte_utf8():
 
     with patch("sys.stdin.fileno", return_value=0):
         reader = _UnixKeyReader()
-        with patch("os.read") as mock_read, \
-             patch("select.select") as mock_select:
+        with patch("os.read") as mock_read, patch("select.select") as mock_select:
             # First select returns data (first byte), subsequent selects for
             # continuation bytes also return ready
             mock_select.return_value = ([True], [], [])
@@ -248,7 +246,7 @@ def test_input_multibyte_utf8():
             assert event.char == "♠"
 
 
-def test_failed_bid_taker_declarations_transferred():
+def test_failed_bid_taker_declarations_transferred() -> None:
     """On chute, taker's declarations are transferred to the defenders."""
     from belote.scoring import score_round
 
@@ -298,7 +296,7 @@ def test_failed_bid_taker_declarations_transferred():
     assert breakdown.defender_total == 252 + 100
 
 
-def test_sort_south_hand_persists_across_plays():
+def test_sort_south_hand_persists_across_plays() -> None:
     """Sorting via sort_south_hand produces a stable ordering that survives card removal."""
     trump = Suit.HEARTS
     south_hand = (
@@ -325,7 +323,7 @@ def test_sort_south_hand_persists_across_plays():
     assert twice_sorted.hand_of(Seat.SOUTH) == sorted_hand
 
 
-def test_declaration_consistency_between_place_bid_and_score_round():
+def test_declaration_consistency_between_place_bid_and_score_round() -> None:
     """Declarations stored at bid time and recalculated at scoring must agree."""
     from belote.scoring import get_declarations
 
@@ -334,7 +332,8 @@ def test_declaration_consistency_between_place_bid_and_score_round():
     state = start_round(state, rng)
 
     # Find a bid to take in round 1
-    up_suit = state.up_card.suit  # type: ignore[union-attr]
+    assert state.up_card is not None
+    up_suit = state.up_card.suit
     # Have first bidder take the up-card suit
     bid_state = process_bid(state, up_suit)
     assert bid_state.phase == Phase.PLAYING

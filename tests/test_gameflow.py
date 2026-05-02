@@ -8,16 +8,20 @@ from belote.gameflow import create_ai_players, run_bidding, run_play
 from belote.input import KeyReader
 
 
-def test_run_bidding_human_takes():
+def test_run_bidding_human_takes() -> None:
     # Mocking UI and side effects
-    with unittest.mock.patch('belote.gameflow.display'), \
-         unittest.mock.patch('belote.gameflow.prompt_bid', return_value=Suit.HEARTS), \
-         unittest.mock.patch('belote.gameflow.interruptible_sleep', return_value=False):
-
+    with (
+        unittest.mock.patch("belote.gameflow.display"),
+        unittest.mock.patch("belote.gameflow.prompt_bid", return_value=Suit.HEARTS),
+        unittest.mock.patch("belote.gameflow.interruptible_sleep", return_value=False),
+    ):
         state = new_game()
         # Mock deal: each player has 5 cards, 11 remaining
         hands = tuple(
-            tuple(Card(Suit.SPADES, r) for r in [Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN])
+            tuple(
+                Card(Suit.SPADES, r)
+                for r in [Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN]
+            )
             for _ in range(4)
         )
         state = GameState(
@@ -26,16 +30,14 @@ def test_run_bidding_human_takes():
             phase=Phase.BIDDING,
             turn=Seat.SOUTH,
             dealer=Seat.WEST,
-            remaining_cards=tuple(Card(Suit.SPADES, Rank.SEVEN) for _ in range(11))
+            remaining_cards=tuple(Card(Suit.SPADES, Rank.SEVEN) for _ in range(11)),
         )
         reader = unittest.mock.Mock(spec=KeyReader)
-        history = []
+        history: list[GameState] = []
         human_seats = {Seat.SOUTH}
-        ai_players = create_ai_players({
-            Seat.EAST: "medium",
-            Seat.NORTH: "medium",
-            Seat.WEST: "medium"
-        }, human_seats)
+        ai_players = create_ai_players(
+            {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}, human_seats
+        )
 
         new_state = run_bidding(state, reader, ai_players, 0, history, human_seats)
 
@@ -44,25 +46,23 @@ def test_run_bidding_human_takes():
         assert new_state.trump == Suit.HEARTS
         assert new_state.taker == Seat.SOUTH
 
-def test_run_play_8_tricks():
-    # Mocking UI and side effects
-    with unittest.mock.patch('belote.gameflow.display'), \
-         unittest.mock.patch('belote.gameflow.patch_trick_card'), \
-         unittest.mock.patch('belote.gameflow.play_sound'), \
-         unittest.mock.patch('belote.gameflow.announce'):
 
+def test_run_play_8_tricks() -> None:
+    # Mocking UI and side effects
+    with (
+        unittest.mock.patch("belote.gameflow.display"),
+        unittest.mock.patch("belote.gameflow.patch_trick_card"),
+        unittest.mock.patch("belote.gameflow.play_sound"),
+        unittest.mock.patch("belote.gameflow.announce"),
+    ):
         # Build a state at start of play
         hands = tuple(tuple(Card(Suit.HEARTS, r) for r in list(Rank)) for _ in range(4))
         state = GameState(
-            hands=hands,
-            phase=Phase.PLAYING,
-            trump=Suit.SPADES,
-            turn=Seat.SOUTH,
-            taker=Seat.SOUTH
+            hands=hands, phase=Phase.PLAYING, trump=Suit.SPADES, turn=Seat.SOUTH, taker=Seat.SOUTH
         )
         reader = unittest.mock.Mock(spec=KeyReader)
-        history = []
-        human_seats = set() # All AI for speed
+        history: list[GameState] = []
+        human_seats: set[Seat] = set()  # All AI for speed
         ai_players = create_ai_players(dict.fromkeys(Seat, "easy"), human_seats)
 
         # Mock AI to just pick first legal card

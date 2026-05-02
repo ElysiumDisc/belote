@@ -15,6 +15,7 @@ class AudioManager:
     def is_muted(self) -> bool:
         return self.muted
 
+
 class TerminalContext:
     def __init__(self) -> None:
         self._size_cache: tuple[int, int] | None = None
@@ -27,6 +28,7 @@ class TerminalContext:
 
     def clear_cache(self) -> None:
         self._size_cache = None
+
 
 # Global instances
 AUDIO = AudioManager()

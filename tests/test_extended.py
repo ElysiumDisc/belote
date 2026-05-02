@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 from belote.ai import AIPlayer, Difficulty
 from belote.game import Card, GameState, Phase, Rank, Seat, Suit, TrickCard, new_game
@@ -8,7 +9,7 @@ from belote.scoring import ScoringBreakdown, apply_round_score
 from belote.stats import _MANAGER, load_stats, update_stats_game, update_stats_round
 
 
-def test_round_score_history():
+def test_round_score_history() -> None:
     state = new_game()
     # Mock a breakdown
     breakdown = ScoringBreakdown(
@@ -27,7 +28,7 @@ def test_round_score_history():
         taker_total=120,
         defender_total=62,
         is_capot=False,
-        is_failed=False
+        is_failed=False,
     )
 
     state = apply_round_score(state, breakdown)
@@ -35,7 +36,8 @@ def test_round_score_history():
     assert state.score_history[0].ns_total == 120
     assert state.score_history[0].ew_total == 62
 
-def test_statistics_persistence(tmp_path, monkeypatch):
+
+def test_statistics_persistence(tmp_path: Any, monkeypatch: Any) -> None:
     # Mock stats_file to use tmp_path
     stats_file = tmp_path / "stats.json"
     monkeypatch.setattr(_MANAGER, "stats_file", stats_file)
@@ -54,14 +56,16 @@ def test_statistics_persistence(tmp_path, monkeypatch):
     assert stats.capots_achieved == 1
     assert stats.max_capot_streak == 1
 
-def test_ai_seat_specific_difficulty():
+
+def test_ai_seat_specific_difficulty() -> None:
     ai_easy = AIPlayer(Seat.NORTH, Difficulty.EASY)
     ai_hard = AIPlayer(Seat.NORTH, Difficulty.HARD)
 
     assert ai_easy.difficulty == Difficulty.EASY
     assert ai_hard.difficulty == Difficulty.HARD
 
-def test_current_round_points_update():
+
+def test_current_round_points_update() -> None:
     """Verify that current_round_points tracks points as tricks are completed."""
     state = GameState(
         hands=((), (), (), ()),
@@ -69,7 +73,7 @@ def test_current_round_points_update():
         taker=Seat.SOUTH,
         phase=Phase.PLAYING,
         turn=Seat.SOUTH,
-        team_scores=(0, 0)
+        team_scores=(0, 0),
     )
 
     # Simulate playing a trick
@@ -92,7 +96,7 @@ def test_current_round_points_update():
         state,
         completed_tricks=(trick1,),
         last_trick_winner=Seat.SOUTH,
-        current_round_points=(34, 0) # J=20, 9=14, others=0
+        current_round_points=(34, 0),  # J=20, 9=14, others=0
     )
 
     assert state.current_round_points == (34, 0)
@@ -100,7 +104,7 @@ def test_current_round_points_update():
     # Trick 2: EW wins
     trick2 = (
         TrickCard(Seat.SOUTH, Card(Suit.DIAMONDS, Rank.SEVEN)),
-        TrickCard(Seat.EAST, Card(Suit.DIAMONDS, Rank.ACE)), # wins with 11
+        TrickCard(Seat.EAST, Card(Suit.DIAMONDS, Rank.ACE)),  # wins with 11
         TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.EIGHT)),
         TrickCard(Seat.WEST, Card(Suit.DIAMONDS, Rank.NINE)),
     )
@@ -109,7 +113,7 @@ def test_current_round_points_update():
         state,
         completed_tricks=(trick1, trick2),
         last_trick_winner=Seat.EAST,
-        current_round_points=(34, 11)
+        current_round_points=(34, 11),
     )
 
     assert state.current_round_points == (34, 11)

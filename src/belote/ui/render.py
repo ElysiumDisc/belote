@@ -66,6 +66,8 @@ def get_term_size() -> tuple[int, int]:
 def _handle_sigwinch(_signum: int, _frame: object) -> None:
     """Invalidate terminal size cache on resize."""
     TERMINAL.clear_cache()
+
+
 if hasattr(signal, "SIGWINCH"):
     signal.signal(signal.SIGWINCH, _handle_sigwinch)
 
@@ -77,7 +79,9 @@ def _card_symbol(card: Card) -> str:
 
 
 @lru_cache(maxsize=1024)
-def _card_face_internal(card: Card, selected: bool, legal: bool, theme_name: str, has_utf8: bool) -> list[str]:
+def _card_face_internal(
+    card: Card, selected: bool, legal: bool, theme_name: str, has_utf8: bool
+) -> list[str]:
     """Render a card as CARD_H lines of width CARD_W with Art Nouveau styling (cached)."""
     rank_str = card.rank.value
     suit_sym = card.suit.symbol if has_utf8 else card.suit.name[0]
@@ -126,15 +130,17 @@ def _card_face_internal(card: Card, selected: bool, legal: bool, theme_name: str
         art_mid = f"   {suit_sym}   "
 
     # Use ornate border characters
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+    b_tl, b_tr, b_bl, b_br, b_h, b_v = (
+        ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+    )
 
     return [
         f"{prefix}{bg_code}{color}{b_tl}{b_h * inner_w}{b_tr}{RESET}",
-        f"{prefix}{bg_code}{color}{b_v}{tl_rank}{' ' * (inner_w-2)}{b_v}{RESET}",
+        f"{prefix}{bg_code}{color}{b_v}{tl_rank}{' ' * (inner_w - 2)}{b_v}{RESET}",
         f"{prefix}{bg_code}{color}{b_v}{art_top}{b_v}{RESET}",
         f"{prefix}{bg_code}{color}{b_v}{art_mid}{b_v}{RESET}",
         f"{prefix}{bg_code}{color}{b_v}{art_bot}{b_v}{RESET}",
-        f"{prefix}{bg_code}{color}{b_v}{' ' * (inner_w-2)}{br_rank}{b_v}{RESET}",
+        f"{prefix}{bg_code}{color}{b_v}{' ' * (inner_w - 2)}{br_rank}{b_v}{RESET}",
         f"{prefix}{bg_code}{color}{b_bl}{b_h * inner_w}{b_br}{RESET}",
     ]
 
@@ -142,9 +148,7 @@ def _card_face_internal(card: Card, selected: bool, legal: bool, theme_name: str
 def _get_card_face(card: Card, selected: bool = False, legal: bool = True) -> list[str]:
     """Helper to call cached _card_face with current global state."""
     return _card_face_internal(
-        card, selected, legal,
-        theme_manager._current_theme_name,
-        TERMINAL.has_utf8
+        card, selected, legal, theme_manager._current_theme_name, TERMINAL.has_utf8
     )
 
 
@@ -170,7 +174,9 @@ def _card_back(theme_name: str, has_utf8: bool) -> list[str]:
         " ░▒▓▒░ " if has_utf8 else " XXXXX ",
     ]
 
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+    b_tl, b_tr, b_bl, b_br, b_h, b_v = (
+        ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
+    )
 
     res = [f"{card_back_bg()}{b_tl}{b_h * inner_w}{b_tr}{RESET}"]
     for line in pattern:
@@ -211,14 +217,15 @@ def _felt_placeholder() -> list[str]:
     """Card-sized dashed outline on the felt — shown for an empty trick slot."""
     inner_w = CARD_W - 2
     dim = felt_placeholder_fg()
-    top    = felt_bg() + dim + "┌" + "─" * inner_w + "┐" + RESET
-    mid    = felt_bg() + dim + "│" + " " * inner_w + "│" + RESET
+    top = felt_bg() + dim + "┌" + "─" * inner_w + "┐" + RESET
+    mid = felt_bg() + dim + "│" + " " * inner_w + "│" + RESET
     bottom = felt_bg() + dim + "└" + "─" * inner_w + "┘" + RESET
     return [top] + [mid] * (CARD_H - 2) + [bottom]
 
 
 def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
     """21-row green felt mat with full card graphics at compass positions."""
+
     def slot(seat: Seat) -> list[str]:
         return _get_card_face(seat_map[seat]) if seat in seat_map else _felt_placeholder()
 
@@ -231,31 +238,37 @@ def _render_trick_mat(seat_map: dict[Seat, Card], center_w: int) -> list[str]:
     w_start = max(0, center_w // 4 - CARD_W // 2)
     e_start = max(0, 3 * center_w // 4 - CARD_W // 2)
     mid_gap = max(0, e_start - w_start - CARD_W)
-    r_pad   = max(0, center_w - e_start - CARD_W)
+    r_pad = max(0, center_w - e_start - CARD_W)
 
     n_label = _felt_pad(f"{light_gray_fg()}N{RESET}", center_w)
     s_label = _felt_pad(f"{light_gray_fg()}S{RESET}", center_w)
 
     rows: list[str] = []
 
-    rows.append(_get_felt_blank(center_w))                       # top padding
-    rows.append(n_label)                                     # N label
-    for line in n_card:                                      # North card (7 rows)
+    rows.append(_get_felt_blank(center_w))  # top padding
+    rows.append(n_label)  # N label
+    for line in n_card:  # North card (7 rows)
         rows.append(_felt_pad(line, center_w))
-    rows.append(_get_felt_blank(center_w))                       # gap
-    for i in range(CARD_H):                                  # West + East (7 rows)
+    rows.append(_get_felt_blank(center_w))  # gap
+    for i in range(CARD_H):  # West + East (7 rows)
         rows.append(
-            felt_bg() + " " * w_start + RESET +
-            w_card[i] +
-            felt_bg() + " " * mid_gap + RESET +
-            e_card[i] +
-            felt_bg() + " " * r_pad + RESET
+            felt_bg()
+            + " " * w_start
+            + RESET
+            + w_card[i]
+            + felt_bg()
+            + " " * mid_gap
+            + RESET
+            + e_card[i]
+            + felt_bg()
+            + " " * r_pad
+            + RESET
         )
-    rows.append(_get_felt_blank(center_w))                       # gap
-    for line in s_card:                                      # South card (7 rows)
+    rows.append(_get_felt_blank(center_w))  # gap
+    for line in s_card:  # South card (7 rows)
         rows.append(_felt_pad(line, center_w))
-    rows.append(s_label)                                     # S label
-    rows.append(_get_felt_blank(center_w))                       # bottom padding
+    rows.append(s_label)  # S label
+    rows.append(_get_felt_blank(center_w))  # bottom padding
 
     return rows  # 27 rows total
 
@@ -283,8 +296,8 @@ def _render_hand_horizontal(
 
     # Join cards horizontally with a 1-space gap
     gap = " "
-    slot_w = CARD_W + len(gap)          # visible width of one card slot
-    total_hand_w = len(cards) * slot_w - len(gap)   # visible width of full hand
+    slot_w = CARD_W + len(gap)  # visible width of one card slot
+    total_hand_w = len(cards) * slot_w - len(gap)  # visible width of full hand
 
     # Compute left padding that ansi_center will add — we need this for the cursor
     left_pad = max(0, (term_w - total_hand_w) // 2)
@@ -292,7 +305,7 @@ def _render_hand_horizontal(
     rows: list[str] = []
     for row_idx in range(CARD_H):
         raw = gap.join(group[row_idx] for group in card_line_groups)
-        rows.append(ansi_center(raw, term_w))   # ← ANSI-aware centering
+        rows.append(ansi_center(raw, term_w))  # ← ANSI-aware centering
 
     # Cursor row — must account for the centering offset so ▲ lands under the card
     if selection is not None:
@@ -350,7 +363,7 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
     left_rows: list[str] = [""] * n_rows
     mid = n_rows // 2
     left_rows[mid - 1] = w_label
-    left_rows[mid]     = w_cards
+    left_rows[mid] = w_cards
     left_rows[mid + 1] = w_count
 
     # ── Right column (EAST) — vertically centred in the mat ──────────────────
@@ -381,11 +394,12 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
 
     return result
 
+
 def _build_hud(state: GameState, term_w: int) -> str:
     """Build the top HUD bar, padded to term_w visible chars."""
-    trump_sym  = state.trump.symbol if state.trump else "?"
-    ns, ew     = state.team_scores
-    trick_num  = len(state.completed_tricks) + (1 if state.current_trick else 0)
+    trump_sym = state.trump.symbol if state.trump else "?"
+    ns, ew = state.team_scores
+    trick_num = len(state.completed_tricks) + (1 if state.current_trick else 0)
     taker_name = state.taker.name if state.taker else "-"
 
     # Live round points
@@ -393,12 +407,14 @@ def _build_hud(state: GameState, term_w: int) -> str:
 
     left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
     theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
-    mid  = (f"{white_fg()}Trump: {trump_sym}   "
-            f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
-            f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
-            f"Trick {trick_num}/8   Taker: {taker_name}   "
-            f"{DIM}[T]History [Z]Undo [S-T]Theme{RESET}")
-    bar  = left + "   " + mid
+    mid = (
+        f"{white_fg()}Trump: {trump_sym}   "
+        f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
+        f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
+        f"Trick {trick_num}/8   Taker: {taker_name}   "
+        f"{DIM}[T]History [Z]Undo [S-T]Theme{RESET}"
+    )
+    bar = left + "   " + mid
 
     # Right-align theme name
     vlen_bar = visible_len(bar)
@@ -408,7 +424,7 @@ def _build_hud(state: GameState, term_w: int) -> str:
     return bar + " " * pad + theme_label
 
 
-def render(state: GameState, selection: int | None = None) -> str:
+def render(state: GameState, selection: int | None = None, show_north_hand: bool = False) -> str:
     """Pure: returns a full-screen ANSI-formatted string. No I/O.
 
     Terminal width is queried fresh on every call so resizing works correctly.
@@ -416,8 +432,8 @@ def render(state: GameState, selection: int | None = None) -> str:
     # Query terminal size HERE, not at module level.
     term_w, term_h = get_term_size()
 
-    out   = move(1, 1) + hide_cursor()
-    legal : tuple[Card, ...] = ()
+    out = move(1, 1) + hide_cursor()
+    legal: tuple[Card, ...] = ()
     if state.phase == Phase.PLAYING and state.turn == Seat.SOUTH:
         legal = legal_cards(state, Seat.SOUTH)
 
@@ -428,15 +444,17 @@ def render(state: GameState, selection: int | None = None) -> str:
     lines.append("─" * term_w)
 
     # ── NORTH ────────────────────────────────────────────────────────────────
-    north_hand  = state.hand_of(Seat.NORTH)
-    north_cards = f"{_card_back_small()} " * min(len(north_hand), 4)
+    north_hand = state.hand_of(Seat.NORTH)
+    if show_north_hand:
+        # Show actual card symbols for North
+        north_cards = " ".join(_card_symbol(c) for c in north_hand)
+    else:
+        north_cards = f"{_card_back_small()} " * min(len(north_hand), 4)
     north_label = _seat_label(Seat.NORTH, state)
     north_count = f"{light_gray_fg()}({len(north_hand)} cards){RESET}"
     if term_h > 40:
         lines.append("")
-    lines.append(ansi_center(
-        f"{north_label}  {north_cards}  {north_count}", term_w
-    ))
+    lines.append(ansi_center(f"{north_label}  {north_cards}  {north_count}", term_w))
 
     # ── WEST | trick area | EAST  (3-column, same rows) ──────────────────────
     if term_h > 38:
@@ -467,9 +485,11 @@ def render(state: GameState, selection: int | None = None) -> str:
     # Show persistent belote/rebelote badge derived from tracker (not the one-shot announced field)
     if state.belote_tracker[1]:
         from ..ansi import banner_bg, banner_fg
+
         phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Rebelote! {RESET}"
     elif state.belote_tracker[0]:
         from ..ansi import banner_bg, banner_fg
+
         phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Belote! {RESET}"
 
     lines.append(ansi_center(phase_info, term_w))
@@ -477,12 +497,12 @@ def render(state: GameState, selection: int | None = None) -> str:
         lines.append("")
 
     # ── SOUTH hand ────────────────────────────────────────────────────────────
-    south_hand  = state.hand_of(Seat.SOUTH)
+    south_hand = state.hand_of(Seat.SOUTH)
     south_legal = legal if state.turn == Seat.SOUTH else ()
 
     if south_hand:
         # Keyboard shortcut hints
-        hints = " ".join(f"[{i+1}]" for i in range(len(south_hand)))
+        hints = " ".join(f"[{i + 1}]" for i in range(len(south_hand)))
         lines.append(ansi_center(hints, term_w))
 
         # Cards + cursor (already centered inside _render_hand_horizontal)
@@ -515,8 +535,8 @@ def display_hud(state: GameState) -> None:
     sys.stdout.flush()
 
 
-def display(state: GameState, selection: int | None = None) -> None:
-    sys.stdout.write(render(state, selection))
+def display(state: GameState, selection: int | None = None, show_north_hand: bool = False) -> None:
+    sys.stdout.write(render(state, selection, show_north_hand))
     sys.stdout.flush()
 
 

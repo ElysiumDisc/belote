@@ -5,7 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.3] - 2026-05-02
+
+### Added
+- **BelAtro Mode Integration**: Fully integrated the BelAtro roguelite mode into the main menu.
+- **WIP Deck Completion**: Fully implemented all starting decks (L'Ermite, Le Vétéran, Le Flambeur) with their unique starting items and modifiers.
+- **Advanced Joker Logic**: Completed implementation for all 50+ Jokers, including complex round-end and bidding-phase triggers.
+- **Dynamic UI Rendering**: Refactored menu systems to dynamically center art and text based on terminal width.
+- **Alternate Screen Support**: Implemented alternate screen switching for BelAtro to provide a clean, isolated terminal buffer.
+
+### Fixed
+- **BelAtro Startup**: Resolved a `TypeError` and `ImportError` that prevented BelAtro from launching correctly.
+- **UI Centering**: Fixed an issue where menu art assumed a fixed 80-column width, causing misaligned headers on different terminal sizes.
+- **Game Loop Continuity**: Fixed a bug where BelAtro would exit immediately back to the main menu instead of starting a run.
+- **Event Bus Robustness**: Overhauled the `RoundEndEvent` to provide complete game state snapshots to Jokers, fixing several uninitialized logic paths.
+
+## [2.3.1] - 2026-05-01
+
+### Fixed
+- **Contract Engine Logic**: Fixed a critical bug where trick winner detection failed during "Sans Atout" (No Trump) contracts. The engine now correctly handles `trump=None` scenarios.
+- **Tout Atout / Sans Atout support**: Fully implemented correct card values and rankings for special contracts.
+  - *Tout Atout*: All Jacks (20 pts), all 9s (14 pts), and all suits follow trump ranking.
+  - *Sans Atout*: All Aces (11 pts), all 10s (10 pts), and all 9s (0 pts).
+- **Coinche Multipliers**: Fixed a bug where Coinche (×2) and Surcoinche (×4) multipliers were not being applied to the final score in the core engine.
+- **Sequence Detection**: Refactored sequence detection logic to be more maintainable and fixed a potential `NameError` in the detection loop.
+- **Project-wide Type Safety**: Resolved over 250 `mypy` errors across the `tests/` and `src/` directories, achieving 100% strict type compliance.
+- **Linting & Code Cleanup**: Eliminated all `ruff` violations and improved idiomatic Python usage throughout the codebase.
+- **API Consistency**: Updated `trick_winner_seat`, `card_points`, and `trick_rank` to explicitly accept the `contract` type, ensuring accurate scoring and AI decisions across all game modes.
+
+## [2.3.0] - 2026-05-01
+
+### Added
+- **Full Tarot System**: All 10 Tarot cards are now fully functional. Use `[U]` during your turn to open the consumable menu.
+  - *Le Chariot*: Steal the current trick (wired `force_next_trick_win`).
+  - *La Roue*: Change trump mid-round.
+  - *Le Jugement*: Resurrect sold Jokers.
+  - *Le Monde*: Double declaration points.
+  - *La Tempérance* & *Le Fou*: Permanent deck editing (random removal/duplication).
+- **Complete Voucher Set**: All 9 vouchers are implemented with unique hooks.
+  - *La Télescope*: Preview the talon during bidding.
+  - *L'Encyclopédie*: Reveal partner personality during bidding.
+  - *Les Cartes Dorées*: Increased Gold Seal value (+$5).
+  - *Le Couteau*: Unlock card destruction in the Shop for $2 refunds.
+  - *La Balance*: Automatic win on close losses (within 10 points of target).
+  - *La Surcoinche*: Unlocks the massive ×4.0 Mult contract.
+- **Dynamic Deck-Building**: The game engine now supports modified decks, allowing for permanent card additions and removals across a run.
+- **Corrupted Joker Mechanics**: Implemented `Le Démon` (trust penalty on purchase).
+- **Expanded Test Suite**: Added 52 new tests (total 165), significantly increasing coverage for `round_driver.py`, `shop.py`, `tarots.py`, and `vouchers.py`.
+
+### Changed
+- **Bidding Overhaul**: Opponents can now Coinche your bids (×2.0 Mult), and you can counter with Surcoinche (×4.0 Mult) if the voucher is owned.
+- **Input Map**: Added `[U]` key for using consumables and removed `Tab` -> `Enter` mapping.
+- **Performance**: Increased render cache size to 2048 and moved suit/ID mappings to module level for faster scoring.
+- **Code Quality**: Extracted `_undo_or_restart` helper in `gameflow.py` and improved `EventBus` error logging.
+
+### Fixed
+- **Critical Bug Fixes**:
+  - *La Sentinelle*: Now correctly requires both Jack AND trump suit.
+  - *Le Rebelle*: Multiplier no longer stacks exponentially on Belote+Rebelote.
+  - *Le Stratège*: Strategic bidding logic (requires high-value cards instead of just any hand).
+  - *Recursive UI*: Fixed stack overflow risk in `prompt_card` on UNDO.
+  - *Shop Duplicates*: Replaced random choice with sampling to prevent identical jokers in shop.
+  - *UI Truncation*: Card destruction UI no longer truncates at 20 cards.
+- **Boss Modifier Engine**: Fully wired 17 boss modifiers (forced pass, zero-point kings/tens, no Dix de Der, etc.) into the game engine.
+- **Declaration scoring crash** (`round_driver.py`): replaced nonexistent `belote.deck.declaration_points` import with `belote.scoring.get_declaration_points`.
+- **JokerResult multiplier zeroing** (`items/base.py`): `times_mult` default changed from `0.0` to `1.0`.
+- **BelAtro standalone crash** (`belatro/main.py`): fixed missing `KeyReader` context.
+- **Bid prompt null-dereference** (`ui/prompts.py`): added guards for `up_card`.
+- **Type safety**: Resolved all 32 mypy errors and improved overall project type integrity.
+- **Starting Decks**: All bonuses for *Le Joueur*, *L'Aristocrate*, *L'Ermite*, *Le Flambeur*, *Le Vétéran*, and *L'Anarchiste* are now correctly applied.
+- **Scoring Hooks**: Wired missing `on_bid`, `on_round_start`, and `on_round_end` triggers for all Jokers.
+
+## [2.2.0] - 2026-04-30
+
+### Added
+- **BelAtro Score Overlay Toggle**: Press `[I]` during any Belote/BelAtro game to toggle the per-trick score breakdown popup on or off. Useful when you want an unobstructed view of the table between tricks.
+
+### Fixed
+- **BelAtro trick display**: The 4th card played in a trick (the trick-completing card) was never shown on the table — the table went blank before the score popup appeared. All 4 cards now remain visible on the mat until the next trick begins.
+- **BelAtro 4th-card visibility**: `on_card_played` now reconstructs the display state from `completed_tricks[-1]` when `current_trick` has been cleared by `play_card`, mirroring the classic mode's pre-play display state pattern.
+
+## [2.0.1] - 2026-04-30
+
+### Added
+- **Le Républicain deck** is now fully playable: 7s and 8s are wild cards that can be played on any trick regardless of suit constraints. Your team earns +5 chips for every 7 or 8 you capture.
+- **Le Carnet voucher** is now fully implemented: your partner's full hand is visible to you throughout every round. You earn +1 Mult each time South personally wins a trick.
+- Both mechanics documented in the in-game Belatro Rules screen (EN and FR), under new "Starting Decks" and "Vouchers — Le Carnet" sections.
+
+### Fixed
+- Card-count invariant assertion added to `_handle_trick` to catch any future hand-size corruption early.
+- Cards on the trick mat now render immediately after each card is played (previously only updated after the trick was complete).
+
+## [2.0.0] - 2026-04-30
+
+### Added
+- **BelAtro Expansion**: A massive roguelite expansion inspired by Balatro, integrated into the Belote core.
+  - **The Run**: Progress through 8 'Antes' with increasing target scores. Each Ante consists of Small, Big, and Boss Blinds.
+  - **Scoring Engine**: New Multiplier-based scoring system: `Score = (Chips + Declarations) × Multiplier`.
+  - **Joker System**: 50+ unique Jokers (Contract, Corrupted, Economy, Hand Comp, Trick Timing) that provide passive buffs and scoring modifiers.
+  - **Consumables**: Planet cards to level up contracts, Tarot cards for one-shot effects, and permanent Vouchers.
+  - **Partner Trust**: Dynamic relationship with your AI partner. High trust reveals their hand/voids and boosts their specific "Partner Jokers."
+  - **Boss Blinds**: 10+ unique bosses with rule-breaking modifiers (e.g., hidden scores, suit debuffs, mid-round trump changes).
+- **Event-Driven Architecture**: Introduced a centralized `EventBus` to handle complex item interactions and state updates.
+- **Save/Load System**: Persistence for run progress, unlocks, and global statistics.
+- **New UI Package**: Dedicated BelAtro HUD with Multiplier animations, Shop interface, and Trust bar visualization.
+
+### Changed
+- **Entry Points**: Added `belatro` as a secondary CLI command for direct access to the roguelite mode.
+- **Core Refactor**: Decoupled the game loop from the rendering engine to support multiple game modes (Classic vs. BelAtro).
+- **Test Suite**: Expanded tests to cover economy, ante scaling, item registry, and boss modifiers.
+
+### Fixed
+- **State Leakage**: Fixed an issue where items from previous runs could occasionally persist in the registry.
+- **Trust Calculation**: Resolved a rounding error in trust gains during high-multiplier rounds.
 
 ## [1.1.0] - 2026-04-30
 
