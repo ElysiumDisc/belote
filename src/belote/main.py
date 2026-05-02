@@ -159,6 +159,16 @@ def main() -> None:
                         show_stats(reader)
                         continue
 
+                    if choice == "Reset Statistics":
+                        from .belatro.progression.save import SaveManager
+                        from .stats import reset_stats
+
+                        reset_stats()
+                        SaveManager().delete_profile()
+                        from .ui.announce import announce
+                        announce("Statistics & Progression Reset!", duration=1.5, reader=reader)
+                        continue
+
                     if choice == "BelAtro":
                         from .belatro.main import BelAtroGame
 

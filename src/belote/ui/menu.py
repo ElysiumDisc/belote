@@ -239,6 +239,7 @@ def show_main_menu(
             f"Theme:        < {theme_manager.get_current().name} >",
             "Rules & History",
             "Statistics",
+            "Reset Statistics",
             "Quit",
         ]
 
@@ -316,6 +317,7 @@ def show_main_menu(
                     "Theme",
                     "Rules & History",
                     "Statistics",
+                    "Reset Statistics",
                     "Quit",
                 ][sel]
                 if choice == "AI Config":
@@ -324,7 +326,14 @@ def show_main_menu(
                 if choice == "Theme":
                     show_theme_selector(reader)
                     continue
-                if choice in ("BelAtro", "Start Game", "Quit", "Rules & History", "Statistics"):
+                if choice in (
+                    "BelAtro",
+                    "Start Game",
+                    "Quit",
+                    "Rules & History",
+                    "Statistics",
+                    "Reset Statistics",
+                ):
                     return choice, curr_diffs, curr_target, curr_speed, curr_mode
                 # For settings, Enter can also toggle forward
                 if sel == 2:

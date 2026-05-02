@@ -134,6 +134,10 @@ class StatisticsManager:
 
         self.flush_stats()
 
+    def reset_stats(self) -> None:
+        self._stats_cache = Statistics()
+        self.save_stats(self._stats_cache)
+
     def get_session_stats(self) -> SessionStats:
         return self._session_stats
 
@@ -148,6 +152,10 @@ def load_stats() -> Statistics:
 
 def save_stats(stats: Statistics) -> None:
     _MANAGER.save_stats(stats)
+
+
+def reset_stats() -> None:
+    _MANAGER.reset_stats()
 
 
 def flush_stats() -> None:

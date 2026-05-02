@@ -34,7 +34,7 @@ class Profile:
 class SaveManager:
     """Handles OS-specific persistence of player profiles."""
 
-    def __init__(self, app_name: str = "belatro") -> None:
+    def __init__(self, app_name: str = "belote") -> None:
         self._save_path = self._get_save_path(app_name) / "profile.json"
 
     def _get_save_path(self, app_name: str) -> Path:
@@ -47,6 +47,11 @@ class SaveManager:
         path = base / app_name
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def delete_profile(self) -> None:
+        """Permanently remove the profile file from disk."""
+        if self._save_path.exists():
+            self._save_path.unlink()
 
     def save_profile(self, profile: Profile) -> None:
         import dataclasses

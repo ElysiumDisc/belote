@@ -15,6 +15,7 @@ from ..ansi import (
     clear_screen,
     gold_fg,
     hide_cursor,
+    white_fg,
 )
 from ..context import AUDIO
 from ..game import GameState
@@ -69,6 +70,12 @@ def show_stats(reader: KeyReader) -> None:
     stats = load_stats()
     session = get_session_stats()
 
+    # Load BelAtro profile
+    from ..belatro.progression.save import SaveManager
+
+    profile = SaveManager().load_profile()
+    b_stats = profile.stats
+
     while True:
         term_w, term_h = get_term_size()
 
@@ -77,25 +84,37 @@ def show_stats(reader: KeyReader) -> None:
         lines.append("=" * 17)
         lines.append("")
 
-        # Win Rate section
+        # ── BELOTE (Classic) ────────────────────────────────────────────────
+        lines.append(f"{BOLD}{white_fg()}CLASSIC BELOTE{RESET}")
+        lines.append("-" * 14)
         win_rate = (stats.games_won / stats.games_played * 100) if stats.games_played > 0 else 0
         lines.append(
             f"  Games Played: {stats.games_played:<6} Won: {stats.games_won:<6} ({win_rate:.1f}%)"
         )
-        lines.append("")
-
-        # Points section
         avg_pts = (stats.total_points_scored / stats.total_rounds) if stats.total_rounds > 0 else 0
         lines.append(f"  Total Rounds: {stats.total_rounds:<6} Avg Pts/Rd: {avg_pts:.1f}")
         worst = stats.worst_round_score if stats.total_rounds > 0 else 0
         lines.append(f"  Best Rd: {stats.best_round_score:<10} Worst Rd: {worst}")
+        lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
         lines.append("")
 
+        # ── BELATRO (Roguelite) ──────────────────────────────────────────────
+        lines.append(f"{BOLD}{gold_fg()}BELATRO EXPANSION{RESET}")
+        lines.append("-" * 17)
+        lines.append(f"  Runs Won (Ante 8): {b_stats.get('runs_won', 0)}")
+        lines.append(f"  Total Capots:      {b_stats.get('total_capots', 0)}")
+        lines.append(
+            f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
+            f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}"
+        )
+        lines.append(f"  Unlocks:           {len(profile.unlocked_ids)} items found")
+        lines.append("")
+
+        # ── OTHER ──────────────────────────────────────────────────────────
         # Trump usage
         trump_list = sorted(stats.most_used_trump.items(), key=lambda x: x[1], reverse=True)
         trump_str = " ".join(f"{k}:{v}" for k, v in trump_list)
         lines.append(f"  Trump Usage: {trump_str}")
-        lines.append("")
 
         # Difficulty breakdown
         lines.append(f"  {UNDERLINE}Win Rate by AI Level:{RESET}")
@@ -104,10 +123,6 @@ def show_stats(reader: KeyReader) -> None:
             dw = dstats["won"]
             dwr = (dw / dp * 100) if dp > 0 else 0
             lines.append(f"    {diff.capitalize():<8}: {dw}/{dp} ({dwr:.1f}%)")
-
-        lines.append("")
-        lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
-        lines.append(f"  Longest Game: {stats.longest_game_rounds} rounds")
 
         # Session Panel
         lines.append("")

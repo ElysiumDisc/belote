@@ -221,3 +221,17 @@ The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
 - **pytest**: 276/276 passed
+
+## Statistics & Progression
+
+**Belote-CLI** tracks your long-term performance across both game modes.
+
+- **Global Statistics:** View your win rates, best round scores, and trump usage from the "Statistics" menu.
+- **BelAtro Unlocks:** Progression in the roguelite mode is saved automatically. You can track your Ante 8 wins and total items found in the expansion.
+
+### Resetting Progress
+If you want to start fresh:
+1.  Select **"Reset Statistics"** from the main menu. This will clear both your classic Belote records and your BelAtro expansion unlocks.
+2.  Alternatively, you can manually delete the data files:
+    - **Linux**: `rm ~/.local/share/belote/*.json`
+    - **Windows**: `del %APPDATA%\belote\*.json`
