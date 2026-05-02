@@ -317,7 +317,13 @@ def _render_hand_horizontal(
 
 def _seat_label(seat: Seat, state: GameState) -> str:
     """Colored seat label, highlighted when it's that seat's turn."""
-    name = seat.name
+    if seat == Seat.SOUTH:
+        name = "You"
+    elif seat == Seat.NORTH:
+        name = "Partner"
+    else:
+        name = seat.name
+
     if state.turn == seat:
         return f"{BOLD}{gold_fg()}{name} >>{RESET}"
     return f"{BOLD}{white_fg()}{name}{RESET}"
@@ -397,6 +403,16 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
 
 def _build_hud(state: GameState, term_w: int) -> str:
     """Build the top HUD bar, padded to term_w visible chars."""
+    if getattr(state, "_hide_hud", False):
+        left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
+        mid = f"{DIM} [HUD HIDDEN BY BOSS] {RESET}"
+        theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
+        bar = left + "   " + mid
+        vlen_bar = visible_len(bar)
+        vlen_theme = visible_len(theme_label)
+        pad = max(0, term_w - vlen_bar - vlen_theme - 1)
+        return bar + " " * pad + theme_label
+
     trump_sym = state.trump.symbol if state.trump else "?"
     ns, ew = state.team_scores
     trick_num = len(state.completed_tricks) + (1 if state.current_trick else 0)

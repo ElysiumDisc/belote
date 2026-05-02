@@ -318,13 +318,15 @@ def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None
     if not all_tricks or len(all_tricks) < 8:
         return None
 
-    first_winner = trick_winner_seat(all_tricks[0], state.trump)
+    first_winner = trick_winner_seat(
+        all_tricks[0], state.trump, getattr(state, "_seven_eight_trump", False)
+    )
     if first_winner is None:
         return None
     winning_team = team_of(first_winner)
 
     for trick in all_tricks[1:]:
-        winner = trick_winner_seat(trick, state.trump)
+        winner = trick_winner_seat(trick, state.trump, getattr(state, "_seven_eight_trump", False))
         if winner is None or team_of(winner) != winning_team:
             return None
     return winning_team
@@ -391,15 +393,37 @@ def score_round(state: GameState) -> ScoringBreakdown:
     trump = state.trump
     taker_team = team_of(state.taker)
     defender_team = 1 - taker_team
+    messages: list[str] = []
 
     # Calculate card points per team from completed tricks
     taker_card_pts = 0
     defender_card_pts = 0
+
+    # Boss: Les Clubs Bannis / Le Deluge / Le Roi Mort / Les Dix Maudits
+    kings_zero = getattr(state, "_kings_zero", False)
+    tens_zero = getattr(state, "_tens_zero", False)
+    ban_clubs = getattr(state, "_ban_clubs", False)
+
+    def get_points(card: Card, t: Suit) -> int:
+        if kings_zero and card.rank == Rank.KING:
+            return 0
+        if tens_zero and card.rank == Rank.TEN:
+            return 0
+        if ban_clubs and card.suit == Suit.CLUBS:
+            return 0
+        return card_points_fn(card, t)
+
     for trick in state.completed_tricks:
-        winner = trick_winner_seat(trick, trump)
+        winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
         if winner is None:
             continue
-        trick_pts = sum(card_points_fn(tc.card, trump) for tc in trick)
+
+        # Boss: Les Clubs Bannis (Club tricks score 0)
+        if ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
+            trick_pts = 0
+        else:
+            trick_pts = sum(get_points(tc.card, trump) for tc in trick)
+
         if team_of(winner) == taker_team:
             taker_card_pts += trick_pts
         else:
@@ -408,7 +432,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # Last trick bonus
     last_trick_winner = state.last_trick_winner
     last_trick_team: int | None = None
-    if last_trick_winner is not None:
+    if last_trick_winner is not None and not getattr(state, "_no_dix_de_der", False):
         last_trick_team = team_of(last_trick_winner)
         if last_trick_team == taker_team:
             taker_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
@@ -426,7 +450,8 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_rebelote = False
     defender_rebelote = False
 
-    if belote_holder is not None:
+    # Boss: La Grande Muette (Belote removed)
+    if belote_holder is not None and not getattr(state, "_no_belote", False):
         holder_team = team_of(belote_holder)
         points = 0
         is_rebelote = state.belote_tracker[1]
@@ -460,10 +485,59 @@ def score_round(state: GameState) -> ScoringBreakdown:
             for carre in resolved.ns_carres if defender_team == 0 else resolved.ew_carres:
                 defender_declarations += _carre_points(carre)
 
+    # Boss: La Competition (Separate scoring)
+    if getattr(state, "_separate_scoring", False):
+        s_pts = 0
+        n_pts = 0
+        e_pts = 0
+        w_pts = 0
+        for trick in state.completed_tricks:
+            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            if winner is None:
+                continue
+            tp = sum(get_points(tc.card, trump) for tc in trick)
+            if winner == Seat.SOUTH:
+                s_pts += tp
+            elif winner == Seat.NORTH:
+                n_pts += tp
+            elif winner == Seat.EAST:
+                e_pts += tp
+            elif winner == Seat.WEST:
+                w_pts += tp
+
+        # Add 10 de der
+        if state.last_trick_winner == Seat.SOUTH:
+            s_pts += 10
+        elif state.last_trick_winner == Seat.NORTH:
+            n_pts += 10
+        elif state.last_trick_winner == Seat.EAST:
+            e_pts += 10
+        elif state.last_trick_winner == Seat.WEST:
+            w_pts += 10
+
+        if taker_team == 0:
+            taker_card_pts = max(s_pts, n_pts)
+            defender_card_pts = max(e_pts, w_pts)
+        else:
+            taker_card_pts = max(e_pts, w_pts)
+            defender_card_pts = max(s_pts, n_pts)
+        messages.append("Compétition: Higher individual score used!")
+
+    # Boss: La Reine Noire (Queen of Spades penalty)
+    if getattr(state, "_queen_spades_penalty", False):
+        qs = Card(Suit.SPADES, Rank.QUEEN)
+        for trick in state.completed_tricks:
+            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            if winner is not None and any(tc.card == qs for tc in trick):
+                if team_of(winner) == taker_team:
+                    taker_card_pts -= 25
+                else:
+                    defender_card_pts -= 25
+        messages.append("Reine Noire: -25 points for capture!")
+
     # Check capot: either team won all 8 tricks
     capot_winner_team = is_capot(state)
 
-    messages: list[str] = []
     is_failed = False
     is_litige = False
     litige_points_awarded = 0
@@ -545,6 +619,22 @@ def score_round(state: GameState) -> ScoringBreakdown:
         messages.append("Contract fulfilled!")
         taker_total = taker_card_pts + taker_declarations + taker_belote + state.litige_points
         defender_total = defender_card_pts + defender_declarations + defender_belote
+
+    # Boss: La Malediction (Invert scoring: team with more tricks gets 0)
+    if getattr(state, "_invert_scoring", False):
+        t_tricks = 0
+        for trick in state.completed_tricks:
+            w = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            if w is not None and team_of(w) == taker_team:
+                t_tricks += 1
+
+        defender_tricks = 8 - t_tricks
+        if t_tricks > defender_tricks:
+            taker_total = 0
+            messages.append("Malédiction: Taker won more tricks!")
+        elif defender_tricks > t_tricks:
+            defender_total = 0
+            messages.append("Malédiction: Defense won more tricks!")
 
     return ScoringBreakdown(
         taker_team=taker_team,

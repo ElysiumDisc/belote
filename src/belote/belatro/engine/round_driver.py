@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from belote.ai import AIPlayer, Difficulty
+from belote.deck import Card, card_points
 from belote.game import (
     GameState,
     Phase,
@@ -27,8 +28,6 @@ from .event_bus import (
 )
 
 if TYPE_CHECKING:
-    from belote.deck import Card
-
     from ..core.scoring import ScoreAccumulator
     from ..items.base import Voucher
     from ..partner.partner_state import PartnerState
@@ -121,8 +120,13 @@ def drive_round(
             last_trick = state.completed_tricks[-1]
             from belote.game import trick_winner_seat
 
-            winner = trick_winner_seat(last_trick, state.trump)
-            points = sum(c.card.points(state.trump) for c in last_trick)
+            winner = trick_winner_seat(
+                last_trick, state.trump, getattr(state, "_seven_eight_trump", False)
+            )
+            points = sum(
+                card_points(c.card, state.trump, getattr(state, "_seven_eight_trump", False))
+                for c in last_trick
+            )
 
             # Emit declarations first if it's the first trick
             if len(state.completed_tricks) == 1:

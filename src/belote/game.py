@@ -389,6 +389,7 @@ def _calculate_legal_cards_impl(
     trump: Suit | None,
     current_trick_ids: tuple[tuple[int, int], ...],
     seat_val: int,
+    seven_eight_trump: bool = False,
 ) -> tuple[int, ...]:
     """Calculate legal cards using card IDs (memoized)."""
     # Map IDs back to Cards for logic
@@ -408,32 +409,45 @@ def _calculate_legal_cards_impl(
     lead_suit = lead_card.suit
 
     # Who is currently winning the trick?
-    # We need an internal version of _current_trick_winner that works with IDs
-    # or just use the existing one but reconstruct the list.
     played_cards = [
         TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in current_trick_ids if s != seat_val
     ]
 
-    current_winner = _current_trick_winner(played_cards, trump, lead_suit)
+    current_winner = _current_trick_winner(played_cards, trump, lead_suit, seven_eight_trump)
     partner_winning = current_winner is not None and partner(seat) == current_winner
 
     my_suit_cards = [c for c in hand if c.suit == lead_suit]
 
     res_cards: tuple[Card, ...] = ()
-    if lead_suit == trump:
+    is_trump_lead = (lead_suit == trump) or (
+        seven_eight_trump and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
+    )
+
+    if is_trump_lead:
         # Trump led: must follow if possible, must overtrump if possible
         if my_suit_cards:
-            highest_in_trick = max((trick_rank(tc.card, trump) for tc in played_cards), default=-1)
-            must_overtrump = any(trick_rank(c, trump) > highest_in_trick for c in my_suit_cards)
+            highest_in_trick = max(
+                (trick_rank(tc.card, trump, seven_eight_trump) for tc in played_cards), default=-1
+            )
+            must_overtrump = any(
+                trick_rank(c, trump, seven_eight_trump) > highest_in_trick for c in my_suit_cards
+            )
             if must_overtrump:
                 res_cards = tuple(
-                    c for c in my_suit_cards if trick_rank(c, trump) > highest_in_trick
+                    c
+                    for c in my_suit_cards
+                    if trick_rank(c, trump, seven_eight_trump) > highest_in_trick
                 )
             else:
                 res_cards = tuple(my_suit_cards)
         else:
             # Void in trump (led suit) - can only play non-trump
-            res_cards = tuple(c for c in hand if c.suit != trump)
+            res_cards = tuple(
+                c
+                for c in hand
+                if c.suit != trump
+                and not (seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT))
+            )
     else:
         # Non-trump led
         if my_suit_cards:
@@ -446,23 +460,31 @@ def _calculate_legal_cards_impl(
                 res_cards = hand
             else:
                 # Must trump if possible
-                my_trumps = [c for c in hand if c.suit == trump]
+                my_trumps = [
+                    c
+                    for c in hand
+                    if c.suit == trump or (seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT))
+                ]
                 if my_trumps:
                     # Must trump; also must overtrump if possible
                     highest_trump_in_trick = max(
                         (
-                            trick_rank(tc.card, trump)
+                            trick_rank(tc.card, trump, seven_eight_trump)
                             for tc in played_cards
                             if tc.card.suit == trump
+                            or (seven_eight_trump and tc.card.rank in (Rank.SEVEN, Rank.EIGHT))
                         ),
                         default=-1,
                     )
                     can_overtrump = any(
-                        trick_rank(c, trump) > highest_trump_in_trick for c in my_trumps
+                        trick_rank(c, trump, seven_eight_trump) > highest_trump_in_trick
+                        for c in my_trumps
                     )
                     if can_overtrump:
                         res_cards = tuple(
-                            c for c in my_trumps if trick_rank(c, trump) > highest_trump_in_trick
+                            c
+                            for c in my_trumps
+                            if trick_rank(c, trump, seven_eight_trump) > highest_trump_in_trick
                         )
                     else:
                         res_cards = tuple(my_trumps)
@@ -481,51 +503,75 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand = state.hand_of(seat)
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
+    se_trump = getattr(state, "_seven_eight_trump", False)
 
-    res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value)
+    res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value, se_trump)
 
     return tuple(_ID_TO_CARD[i] for i in res_ids)
 
 
-def _current_trick_winner(played: list[TrickCard], trump: Suit, lead_suit: Suit) -> Seat | None:
+def _current_trick_winner(
+    played: list[TrickCard], trump: Suit, lead_suit: Suit, seven_eight_trump: bool = False
+) -> Seat | None:
     """Determine who is currently winning the trick based on cards played so far."""
     if not played:
         return None
     best = played[0]
     for tc in played[1:]:
-        if _card_beats(tc.card, best.card, trump, lead_suit):
+        if _card_beats(tc.card, best.card, trump, lead_suit, seven_eight_trump):
             best = tc
     return best.seat
 
 
-def _card_beats(card: Card, current_best: Card, trump: Suit, lead_suit: Suit) -> bool:
+def _card_beats(
+    card: Card, current_best: Card, trump: Suit, lead_suit: Suit, seven_eight_trump: bool = False
+) -> bool:
     """Does card beat current_best?"""
     if card.suit == current_best.suit:
-        return trick_rank(card, trump) > trick_rank(current_best, trump)
+        return trick_rank(card, trump, seven_eight_trump) > trick_rank(
+            current_best, trump, seven_eight_trump
+        )
 
-    if lead_suit == trump:
-        # Trump led; current_best.suit cannot be trump (handled by first check)
-        return card.suit == trump
-    # Non-trump led
-    if card.suit == trump:
+    # Lead card is usually the first card in the trick.
+    # We need to know if the LEAD was a trump (declared or 7/8 in Deluge).
+    is_trump_card = (card.suit == trump) or (
+        seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT)
+    )
+    is_best_trump = (current_best.suit == trump) or (
+        seven_eight_trump and current_best.rank in (Rank.SEVEN, Rank.EIGHT)
+    )
+
+    if is_trump_card and not is_best_trump:
         return True
-    if current_best.suit == trump:
+    if not is_trump_card and is_best_trump:
         return False
+
+    # Neither are trump (or both are trump but different suits - only possible with 7/8 deluge)
+    if is_trump_card and is_best_trump:
+        # Both act as trumps, compare their trick_ranks
+        return trick_rank(card, trump, seven_eight_trump) > trick_rank(
+            current_best, trump, seven_eight_trump
+        )
+
     return card.suit == lead_suit
 
 
-def trick_winner_seat(trick: tuple[TrickCard, ...], trump: Suit | None) -> Seat | None:
+def trick_winner_seat(
+    trick: tuple[TrickCard, ...], trump: Suit | None, seven_eight_trump: bool = False
+) -> Seat | None:
     """Determine the winner of a completed trick."""
     if not trick or trump is None:
         return None
 
     # Use a primitive-only key for memoization
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in trick)
-    return _trick_winner_seat_impl(trick_ids, trump)
+    return _trick_winner_seat_impl(trick_ids, trump, seven_eight_trump)
 
 
 @lru_cache(maxsize=1024)
-def _trick_winner_seat_impl(trick_ids: tuple[tuple[int, int], ...], trump: Suit) -> Seat:
+def _trick_winner_seat_impl(
+    trick_ids: tuple[tuple[int, int], ...], trump: Suit, seven_eight_trump: bool = False
+) -> Seat:
     """Internal memoized winner detection using primitives."""
     # Convert back to TrickCard for existing logic or just use IDs
     # Existing logic uses _current_trick_winner which uses _card_beats
@@ -534,7 +580,7 @@ def _trick_winner_seat_impl(trick_ids: tuple[tuple[int, int], ...], trump: Suit)
 
     # We can optimize this further by avoiding reconstruction if we rewrite _current_trick_winner
     # but for now this fixes the cache effectiveness while keeping logic central.
-    res = _current_trick_winner(played, trump, lead_suit)
+    res = _current_trick_winner(played, trump, lead_suit, seven_eight_trump)
     assert res is not None  # Should not be None if trick_ids is not empty
     return res
 
@@ -570,7 +616,28 @@ def play_card(state: GameState, card: Card) -> GameState:
 
     # Check if trick is complete (4 cards)
     if len(new_trick) == 4:
-        winner = trick_winner_seat(new_trick, trump)
+        se_trump = getattr(state, "_seven_eight_trump", False)
+        winner = trick_winner_seat(new_trick, trump, se_trump)
+
+        # Boss: La Rupture (No consecutive team wins)
+        if getattr(state, "_no_consecutive_team_wins", False) and state.completed_tricks:
+            last_winner = trick_winner_seat(state.completed_tricks[-1], trump, se_trump)
+            if last_winner and winner and team_of(winner) == team_of(last_winner):
+                # Force the other team to win if they had any card in the trick
+                # or just pick the highest card of the other team.
+                # Simplified Balatro-style boss: the current winner's team is penalized.
+                # Actually, let's just pick the best card from the other team.
+                other_team_cards = [
+                    tc for tc in new_trick if team_of(tc.seat) != team_of(last_winner)
+                ]
+                if other_team_cards and trump:
+                    # Find best card among other team
+                    best_other = _current_trick_winner(
+                        other_team_cards, trump, new_trick[0].card.suit, se_trump
+                    )
+                    if best_other:
+                        winner = best_other
+
         if winner is None:
             winner = state.turn
 
@@ -578,7 +645,11 @@ def play_card(state: GameState, card: Card) -> GameState:
         tricks_count = len(new_completed)
 
         # Update current round points
-        trick_pts = sum(card_points(tc.card, trump) for tc in new_trick) if trump is not None else 0
+        trick_pts = (
+            sum(card_points(tc.card, trump, se_trump) for tc in new_trick)
+            if trump is not None
+            else 0
+        )
         ns_pts, ew_pts = state.current_round_points
         if team_of(winner) == 0:
             ns_pts += trick_pts
@@ -593,6 +664,16 @@ def play_card(state: GameState, card: Card) -> GameState:
                 ew_pts += 10
 
         new_round_points = (ns_pts, ew_pts)
+
+        # Boss: L'Anarchie (Trump changes every 2 tricks)
+        current_trump = trump
+        if getattr(state, "_dynamic_trump", False) and tricks_count % 2 == 0 and tricks_count < 8:
+            import random
+
+            possible = [s for s in Suit if s != trump]
+            current_trump = random.choice(possible)
+            # Use set_announced to notify user?
+            # For now we'll just update it quietly, maybe add a message.
 
         # Check if round is complete (8 tricks)
         if tricks_count >= 8:
@@ -610,6 +691,7 @@ def play_card(state: GameState, card: Card) -> GameState:
                 belote_tracker=(belote_tracker[0], belote_tracker[1]),
                 first_trick_done=True,
                 current_round_points=new_round_points,
+                trump=current_trump,
             )
         # Next trick led by winner
         first_trick_done = state.first_trick_done or tricks_count >= 1
@@ -626,6 +708,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             belote_tracker=(belote_tracker[0], belote_tracker[1]),
             first_trick_done=first_trick_done,
             current_round_points=new_round_points,
+            trump=current_trump,
         )
     # Next player in trick
     next_turn = state.turn.next_seat()

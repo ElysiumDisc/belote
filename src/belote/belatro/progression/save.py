@@ -14,6 +14,7 @@ class Profile:
     unlocked_ids: list[str] = field(
         default_factory=lambda: ["le_classique", "le_courageux", "l_econome"]
     )
+    discovered_items: list[str] = field(default_factory=list)
     stats: dict[str, Any] = field(
         default_factory=lambda: dict.fromkeys(
             ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
@@ -27,6 +28,14 @@ class Profile:
         """Returns True if the item was newly unlocked."""
         if item_id not in self.unlocked_ids:
             self.unlocked_ids.append(item_id)
+            self.discover(item_id)
+            return True
+        return False
+
+    def discover(self, item_id: str) -> bool:
+        """Add an item to the collection if not already present."""
+        if item_id not in self.discovered_items:
+            self.discovered_items.append(item_id)
             return True
         return False
 
@@ -65,6 +74,7 @@ class SaveManager:
                 data = json.load(f)
             return Profile(
                 unlocked_ids=data.get("unlocked_ids", []),
+                discovered_items=data.get("discovered_items", []),
                 stats=data.get("stats", {}),
             )
         except (FileNotFoundError, json.JSONDecodeError):

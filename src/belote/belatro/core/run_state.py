@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..items.base import Joker, Voucher
+    from ..progression.save import Profile
     from ..run.ante import Ante
 
 from ..partner.partner_state import PartnerState
@@ -22,6 +23,7 @@ class BelAtroRun:
     blind_index: int = 0  # 0=Small, 1=Big, 2=Boss
     run_over: bool = False
     run_won: bool = False
+    profile: Profile | None = None
 
     # ── Collectibles ───────────────────────────────────────
     jokers: list[Joker] = field(default_factory=list)
@@ -50,6 +52,8 @@ class BelAtroRun:
                 joker_cls = registry.get_joker(joker_id)
                 if joker_cls:
                     self.jokers.append(joker_cls())
+                    if self.profile:
+                        self.profile.discover(joker_id)
 
             if deck.deck_modifications.get("free_planet"):
                 import random
@@ -60,6 +64,8 @@ class BelAtroRun:
                     planet_cls = registry.get_planet(p_id)
                     if planet_cls:
                         # Applying planet effect immediately
+                        if self.profile:
+                            self.profile.discover(p_id)
                         pass  # Currently no contract tracking to apply to
 
     # ── Current blind target ───────────────────────────────

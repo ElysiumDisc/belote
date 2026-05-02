@@ -69,6 +69,10 @@ class AIPlayer:
 
     def decide_bid(self, state: GameState) -> Suit | None:
         """Decide whether to bid and which suit."""
+        # Boss: La Solitude (Partner forced pass)
+        if getattr(state, "_partner_forced_pass", False) and self.seat == partner(Seat.SOUTH):
+            return None
+
         hand = state.hand_of(self.seat)
         forbidden = state.up_card.suit if state.up_card else None
 
@@ -97,6 +101,14 @@ class AIPlayer:
         """Decide which card to play."""
         hand = state.hand_of(self.seat)
         legal = legal_cards(state, self.seat)
+
+        # Boss: L'Agent Double (Partner sabotages)
+        if getattr(state, "_agent_double_active", False) and self.seat == partner(Seat.SOUTH):
+            # For simplicity, if active, partner picks the 'worst' card (lowest score)
+            # Designing it as 'optimal for opponents' usually means discarding honors or ducking.
+            trump = state.trump
+            if trump:
+                return min(legal, key=lambda c: trick_rank(c, trump))
 
         if not hand:
             # Should never happen — game state is invalid if hand is empty mid-play.
@@ -341,66 +353,83 @@ class AIPlayer:
         trick: tuple[TrickCard, ...],
         partner_winning: bool,
     ) -> float:
-        """Score a card play decision."""
+        """Score a card play decision with advanced heuristics."""
         score = 0.0
         points = card_points_fn(card, trump)
         rank = trick_rank(card, trump)
+        is_last_trick = len(state.completed_tricks) == 7
 
-        # Base: card point value
+        # Base: card point value (prefer keeping high value cards if not winning)
         score += points * 0.1
 
         if not trick:
-            # Leading
+            # Leading logic
             if card.suit == trump:
-                # Leading trump is generally good for pulling
-                score += 2
+                # Leading trump is good for pulling if opponents still have them
+                opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
+                my_trumps = sum(1 for c in state.hand_of(self.seat) if c.suit == trump)
+                if opp_trumps > my_trumps:
+                    score += 4
+                else:
+                    score += 1
             elif card.rank == Rank.ACE:
-                score += 3
+                score += 5
             elif points == 0:
-                # Leading waste card
-                score += 1
+                # Leading waste card to probe
+                score += 2
             return score
 
         lead_suit = trick[0].card.suit
+        p = partner(self.seat)
 
         if partner_winning and lead_suit != trump:
-            # Partner winning - discard low value cards
-            score -= points * 0.5
-            if card.suit != trump:
-                score += 1
+            # Partner winning - discard strategy
+            score -= points * 0.7  # Penalize throwing away points
+
+            # Prefer discarding from short suits (to establish voids)
+            my_hand = state.hand_of(self.seat)
+            suit_count = sum(1 for c in my_hand if c.suit == card.suit)
+            if suit_count == 1:
+                score += 3
+
+            # Prefer keeping cards that partner is void in (to trump later)
+            if card.suit in self.memory.known_voids.get(p, set()):
+                score -= 2
+
             return score
 
         # Try to win the trick
         highest_rank = max((trick_rank(tc.card, trump) for tc in trick), default=-1)
         if rank > highest_rank:
-            score += 10  # Winning is valuable
+            win_bonus = 15 if is_last_trick else 10  # Prioritize Dix de Der
+            score += win_bonus
 
             # 2-PLY: If we are winning now, will the next player beat us?
             if len(trick) < 3:
                 next_opp = self.seat.next_seat()
                 opp_voids = self.memory.known_voids.get(next_opp, set())
-                # trick_rank(J, trump)=15, trick_rank(9, trump)=14
                 if (
-                    next_opp != partner(self.seat)
+                    next_opp != p
                     and lead_suit in opp_voids
                     and trump not in opp_voids
                     and (card.suit != trump or rank < _NINE_TRUMP_RANK)
                 ):
-                    score -= 5
+                    # Opponent likely to trump us
+                    score -= 8
         elif partner_winning:
-            # We aren't winning but partner is. Don't play high unless necessary.
-            score -= points * 0.8
+            # We aren't winning but partner is. Duck low.
+            score -= points * 0.9
+            if card.suit != trump:
+                score += 2
         else:
             # We are losing and partner is losing.
-            score -= points * 0.2
+            # If we can't win, throw away low cards or probe
+            score -= points * 0.4
 
-        # Strand opponent honors: if we know opponent is void in lead suit,
-        # playing a low card of lead suit forces them to trump or discard
-        opp = self.seat.next_seat()
-        if opp in self.memory.known_voids:
-            voids = self.memory.known_voids[opp]
-            if lead_suit in voids and card.suit == lead_suit:
-                score += 3
+        # Specific BelAtro awareness: If partner's hand is visible,
+        # don't duplicate their strength.
+        if card in self.memory.partner_hand:  # Should not happen, but for logic
+            score -= 5
 
         return score
 

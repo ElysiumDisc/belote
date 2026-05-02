@@ -133,7 +133,6 @@ def main() -> None:
 
             target = args.target
             speed = args.speed
-            mode = "Single Player"
             diffs_map = {
                 Seat.EAST: args.difficulty,
                 Seat.NORTH: args.difficulty,
@@ -143,8 +142,8 @@ def main() -> None:
             rematch = False
             while True:
                 if not rematch:
-                    choice, diffs_map, target, speed, mode = show_main_menu(
-                        reader, diffs_map, target, speed, mode
+                    choice, diffs_map, target, speed = show_main_menu(
+                        reader, diffs_map, target, speed
                     )
 
                     if choice == "Quit":
@@ -157,16 +156,6 @@ def main() -> None:
 
                     if choice == "Statistics":
                         show_stats(reader)
-                        continue
-
-                    if choice == "Reset Statistics":
-                        from .belatro.progression.save import SaveManager
-                        from .stats import reset_stats
-
-                        reset_stats()
-                        SaveManager().delete_profile()
-                        from .ui.announce import announce
-                        announce("Statistics & Progression Reset!", duration=1.5, reader=reader)
                         continue
 
                     if choice == "BelAtro":
@@ -185,13 +174,8 @@ def main() -> None:
                 sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
                 sys.stdout.flush()
 
-                # Setup players
-                human_seats = {Seat.SOUTH}
-                if mode == "Hotseat (2P)":
-                    human_seats.add(Seat.WEST)
-
                 # Create AI players
-                ai_players = create_ai_players(diffs_map, human_seats)
+                ai_players = create_ai_players(diffs_map)
 
                 # Seed AI random for reproducibility
                 if args.seed is not None:
@@ -205,6 +189,7 @@ def main() -> None:
 
                 # Main game loop
                 while state.phase != Phase.GAME_OVER:
+                    # Run one complete round
                     res_round = run_round(
                         state,
                         reader,
@@ -213,9 +198,9 @@ def main() -> None:
                         trick_pause,
                         round_pause,
                         history_stack,
-                        human_seats,
-                        rng=game_rng,
+                        game_rng,
                     )
+
                     if res_round is None:  # User quit mid-game
                         break
                     state = res_round

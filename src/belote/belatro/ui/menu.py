@@ -26,6 +26,8 @@ from ..run.decks import STARTING_DECKS
 if TYPE_CHECKING:
     from belote.input import KeyReader
 
+    from ..progression.save import Profile
+
 BELATRO_ART: tuple[str, ...] = (
     r" ____  _____ _        _  _____ ____   ___  ",
     r"| __ )| ____| |      / \|_   _|  _ \ / _ \ ",
@@ -41,15 +43,16 @@ SUIT_ROW = "  ♠  ♦  ♣  ♥  ♠  ♦  ♣  ♥  "
 class BelAtroMainMenu:
     """The main menu for the roguelite mode."""
 
-    def __init__(self, reader: KeyReader) -> None:
+    def __init__(self, reader: KeyReader, profile: Profile) -> None:
         self.reader = reader
+        self.profile = profile
         self.selected = 0
         self.options: list[str] = []
         self.selected_deck_id = "classique"
 
     def run(self) -> BelAtroRun | None:
         """Main loop for the menu."""
-        self.options = ["Start Run", "Select Deck", "Rules", "Quit"]
+        self.options = ["Start Run", "Select Deck", "Collection", "Rules", "Quit"]
         sys.stdout.write(hide_cursor())
         while True:
             self._render()
@@ -62,15 +65,20 @@ class BelAtroMainMenu:
             elif key == Key.ENTER:
                 choice = self.options[self.selected]
                 if choice == "Start Run":
-                    return BelAtroRun(deck_id=self.selected_deck_id)
+                    return BelAtroRun(deck_id=self.selected_deck_id, profile=self.profile)
                 if choice == "Select Deck":
                     self._select_deck()
+                elif choice == "Collection":
+                    from .collection import show_collection
+
+                    show_collection(self.reader, self.profile)
                 elif choice == "Rules":
                     from .rules import show_belatro_rules
 
                     show_belatro_rules(self.reader)
                 elif choice == "Quit":
                     return None
+
             elif key in (Key.ESC, Key.QUIT):
                 return None
 

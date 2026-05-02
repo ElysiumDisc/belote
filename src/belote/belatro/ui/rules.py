@@ -174,8 +174,6 @@ def show_belatro_rules(reader: KeyReader) -> None:
     """Display scrollable BelAtro rules in EN/FR."""
     lang = "en"
     scroll = 0
-    wrap_at = min(80, max(40, get_term_size()[1] - 4))
-    visible_rows = 8
 
     def get_render(lang_key: str, wrap_at: int) -> list[str]:
         content = BELATRO_RULES[lang_key]
@@ -206,14 +204,20 @@ def show_belatro_rules(reader: KeyReader) -> None:
 
     hide_cursor()
     while True:
-        lines = get_render(lang, wrap_at)
-        max_scroll = max(0, len(lines) - visible_rows)
-        scroll = min(scroll, max_scroll)
+        term_w, term_h = get_term_size()
+        wrap_at = min(80, term_w - 8)
+        view_h = term_h - 4
 
-        clear_screen()
-        visible_lines = lines[scroll : scroll + visible_rows]
-        output = "\r\n".join(ansi_center(line, 80) for line in visible_lines)
-        sys.stdout.write(output)
+        lines = get_render(lang, wrap_at)
+        max_scroll = max(0, len(lines) - view_h)
+        scroll = max(0, min(scroll, max_scroll))
+
+        visible_lines = lines[scroll : scroll + view_h]
+        output = [clear_screen()]
+        for line in visible_lines:
+            output.append(ansi_center(line, term_w) + "\r\n")
+
+        sys.stdout.write("".join(output))
         sys.stdout.flush()
 
         event = reader.read()

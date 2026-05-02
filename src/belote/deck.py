@@ -110,16 +110,18 @@ _NONTRUMP_ORDER: dict[Rank, int] = {
 }
 
 
-def trick_rank(card: Card, trump: Suit) -> int:
+def trick_rank(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
     """Higher value = stronger card. Returns 0-15 (trump cards get 8-15)."""
-    if card.suit == trump:
+    is_trump = (card.suit == trump) or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    if is_trump:
         return 8 + _TRUMP_ORDER[card.rank]
     return _NONTRUMP_ORDER[card.rank]
 
 
-def card_points(card: Card, trump: Suit) -> int:
+def card_points(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
     """Point value of a card. Sum over all 32 cards = 152."""
-    if card.suit == trump:
+    is_trump = (card.suit == trump) or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    if is_trump:
         match card.rank:
             case Rank.JACK:
                 return 20

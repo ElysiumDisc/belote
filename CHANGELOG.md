@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] - 2026-05-02
+
+### Fixed
+- **BelAtro Rules UI**: Fixed a major rendering bug where the rules screen would not clear correctly, leading to overlapping text.
+- **Dynamic Formatting**: Rules screen now correctly handles terminal resizing and dynamic centering.
+
+## [2.4.0] - 2026-05-02
+
+### Added
+- **BelAtro Collection (Almanac)**: A persistent gallery in the expansion menu to track discovered Jokers, Tarots, Planets, and Vouchers.
+- **Full Boss Blind Suite**: All 17 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
+- **Hard AI Overhaul**: Improved endgame awareness (Dix de Der), strategic discarding, and 2-ply void inference.
+- **Enhanced UI Terminology**: Transitioned to "You" and "Partner" labels for a more immersive single-player experience.
+
+### Changed
+- **Single-Player Focus**: Removed Hotseat (2P) mode and simplified the game engine and UI menus accordingly.
+- **Consolidated Save Paths**: All local data (stats and profile) now live in a unified `belote` directory.
+- **Menu Streamlining**: Removed "Mode" and "Reset Statistics" options for a cleaner main menu.
+
+### Fixed
+- **Gameflow Reliability**: Fixed a regression that caused certain tests to hang by properly mocking UI prompts.
+- **Technical Integrity**: Achieved 100% type-safety (0 mypy errors) across all source and test modules.
+
 ## [2.3.3] - 2026-05-02
 
 ### Added

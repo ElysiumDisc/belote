@@ -34,12 +34,11 @@ def test_run_bidding_human_takes() -> None:
         )
         reader = unittest.mock.Mock(spec=KeyReader)
         history: list[GameState] = []
-        human_seats = {Seat.SOUTH}
         ai_players = create_ai_players(
-            {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}, human_seats
+            {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}
         )
 
-        new_state = run_bidding(state, reader, ai_players, 0, history, human_seats)
+        new_state = run_bidding(state, reader, ai_players, 0, history)
 
         assert isinstance(new_state, GameState)
         assert new_state.phase == Phase.PLAYING
@@ -54,6 +53,7 @@ def test_run_play_8_tricks() -> None:
         unittest.mock.patch("belote.gameflow.patch_trick_card"),
         unittest.mock.patch("belote.gameflow.play_sound"),
         unittest.mock.patch("belote.gameflow.announce"),
+        unittest.mock.patch("belote.gameflow.prompt_card") as mock_prompt,
     ):
         # Build a state at start of play
         hands = tuple(tuple(Card(Suit.HEARTS, r) for r in list(Rank)) for _ in range(4))
@@ -62,14 +62,16 @@ def test_run_play_8_tricks() -> None:
         )
         reader = unittest.mock.Mock(spec=KeyReader)
         history: list[GameState] = []
-        human_seats: set[Seat] = set()  # All AI for speed
-        ai_players = create_ai_players(dict.fromkeys(Seat, "easy"), human_seats)
+        ai_players = create_ai_players(dict.fromkeys(Seat, "easy"))
 
         # Mock AI to just pick first legal card
         for ai in ai_players.values():
             ai.decide_card = unittest.mock.Mock(side_effect=lambda s, ai=ai: s.hand_of(ai.seat)[0])
 
-        new_state = run_play(state, reader, ai_players, 0, 0, history, human_seats)
+        # Mock prompt_card to return the first card in South's hand and the same state
+        mock_prompt.side_effect = lambda s, r: (s.hand_of(Seat.SOUTH)[0], s)
+
+        new_state = run_play(state, reader, ai_players, 0, 0, history)
 
         assert isinstance(new_state, GameState)
         assert new_state.phase == Phase.SCORING

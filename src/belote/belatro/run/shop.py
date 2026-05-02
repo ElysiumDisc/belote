@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..core.run_state import BelAtroRun
@@ -14,7 +14,7 @@ class Shop:
     def __init__(self, run: BelAtroRun, profile: Profile | None = None) -> None:
         self.run = run
         self.profile = profile
-        self.inventory: list[object] = []
+        self.inventory: list[Any] = []
         self.reroll_cost = 5
 
     def generate_inventory(self) -> None:
@@ -31,7 +31,10 @@ class Shop:
         if joker_ids:
             for _ in range(2):
                 j_id = random.choice(joker_ids)
-                self.inventory.append(available_jokers[j_id]())
+                j_item: Any = available_jokers[j_id]()
+                self.inventory.append(j_item)
+                if self.profile:
+                    self.profile.discover(j_id)
 
         # 1 Tarot or Planet
         if random.random() < 0.5:
@@ -40,14 +43,20 @@ class Shop:
                 t_id = random.choice(tarot_ids)
                 tarot_cls = registry.get_tarot(t_id)
                 if tarot_cls:
-                    self.inventory.append(tarot_cls())
+                    t_item: Any = tarot_cls()
+                    self.inventory.append(t_item)
+                    if self.profile:
+                        self.profile.discover(t_id)
         else:
             planet_ids = list(registry.planets.keys())
             if planet_ids:
                 p_id = random.choice(planet_ids)
                 planet_cls = registry.get_planet(p_id)
                 if planet_cls:
-                    self.inventory.append(planet_cls())
+                    p_item: Any = planet_cls()
+                    self.inventory.append(p_item)
+                    if self.profile:
+                        self.profile.discover(p_id)
 
         # 1 Voucher (if available and unlocked)
         available_vouchers = registry.get_available_vouchers(prof)
@@ -58,7 +67,10 @@ class Shop:
         ]
         if voucher_ids:
             v_id = random.choice(voucher_ids)
-            self.inventory.append(available_vouchers[v_id]())
+            v_item: Any = available_vouchers[v_id]()
+            self.inventory.append(v_item)
+            if self.profile:
+                self.profile.discover(v_id)
 
     def reroll(self) -> bool:
         """Pay to refresh the shop inventory."""
@@ -72,7 +84,7 @@ class Shop:
         """Attempt to buy an item from the inventory."""
         if 0 <= index < len(self.inventory):
             item = self.inventory[index]
-            if self.run.economy.spend_money(item.cost):  # type: ignore[attr-defined]
+            if self.run.economy.spend_money(item.cost):
                 self._apply_item(item)
                 self.inventory.pop(index)
                 return True

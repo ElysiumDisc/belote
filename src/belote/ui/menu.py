@@ -56,11 +56,12 @@ CUP_TEMPLATE = [
     "     {gold}|  |    |  {opt3}                |{reset}",
     "     {gold}|  |    |  {opt4}                |{reset}",
     "     {gold}|  |    |  {opt5}                |{reset}",
-    "      {gold}\\  \\   |  {opt6}                |{reset}",
-    "       {gold}`\\ `\\ |  {opt7}                |{reset}",
-    "         {gold}`\\ `|  {opt8}                |{reset}",
-    "         {gold}_/ /\\  {opt9}                /{reset}",
-    "        {gold}(__/  \\                           /{reset}",
+    "     {gold}|  |    |  {opt6}                |{reset}",
+    "      {gold}\\  \\   |  {opt7}                |{reset}",
+    "       {gold}`\\ `\\ |  {opt8}                |{reset}",
+    "         {gold}`\\ `|  {opt9}                |{reset}",
+    "         {gold}_/ /\\  {opt10}               /{reset}",
+    "        {gold}(__/  \\ {opt11}               /{reset}",
     "     {gold}_..---''` \\                         /`''---.._{reset}",
     "  {gold}.-'           \\                       /          '-.{reset}",
     " {gold}:               `-.__             __.-'              :{reset}",
@@ -87,10 +88,10 @@ def _render_main_menu_art(sel: int, options: list[str], frame: int, term_h: int)
 
     # Process placeholders
     opts = {}
-    assert len(options) <= 10, (
+    assert len(options) <= 12, (
         f"Too many menu options ({len(options)}); add opt slots to CUP_TEMPLATE"
     )
-    for i in range(10):
+    for i in range(12):
         label = options[i] if i < len(options) else ""
         text = f"{REVERSE} > {label} < {RESET}" if i == sel else f"  {label}  "
         opts[f"opt{i}"] = ansi_center(text, 29)
@@ -210,18 +211,16 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
 
 
 def show_main_menu(
-    reader: KeyReader, diffs_map: dict[Seat, str], target: int, speed: str, mode: str
-) -> tuple[str, dict[Seat, str], int, str, str]:
-    """Display the main menu and return (choice, diffs_map, target, speed, mode)."""
+    reader: KeyReader, diffs_map: dict[Seat, str], target: int, speed: str
+) -> tuple[str, dict[Seat, str], int, str]:
+    """Display the main menu and return (choice, diffs_map, target, speed)."""
     curr_target = target
     curr_speed = speed
-    curr_mode = mode
     curr_diffs = diffs_map
 
     sel = 0
     targs = [500, 1000, 1500, 2000]
     spds = ["slow", "normal", "fast", "instant"]
-    modes = ["Single Player", "Hotseat (2P)"]
     frame = 0
 
     while True:
@@ -232,14 +231,12 @@ def show_main_menu(
         options_labels = [
             "BelAtro",
             "Start Game",
-            f"Mode:         < {curr_mode} >",
             f"AI Config:     < {diff_display} >",
             f"Target Score: < {curr_target} >",
             f"Speed:        < {curr_speed.capitalize()} >",
             f"Theme:        < {theme_manager.get_current().name} >",
             "Rules & History",
             "Statistics",
-            "Reset Statistics",
             "Quit",
         ]
 
@@ -274,7 +271,7 @@ def show_main_menu(
 
         match event.key:
             case Key.QUIT:
-                return "Quit", curr_diffs, curr_target, curr_speed, curr_mode
+                return "Quit", curr_diffs, curr_target, curr_speed
             case Key.HELP:
                 show_help(reader)
             case Key.MUTE:
@@ -286,8 +283,6 @@ def show_main_menu(
             case Key.LEFT | Key.RIGHT:
                 delta = 1 if event.key == Key.RIGHT else -1
                 if sel == 2:
-                    curr_mode = modes[(modes.index(curr_mode) + delta) % len(modes)]
-                elif sel == 3:
                     # Change all AI difficulties at once
                     diffs = ["easy", "medium", "hard"]
                     # If mixed, start from medium
@@ -296,11 +291,11 @@ def show_main_menu(
                     new_diff = diffs[new_idx]
                     for s in [Seat.EAST, Seat.NORTH, Seat.WEST]:
                         curr_diffs[s] = new_diff
-                elif sel == 4:
+                elif sel == 3:
                     curr_target = targs[(targs.index(curr_target) + delta) % len(targs)]
-                elif sel == 5:
+                elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + delta) % len(spds)]
-                elif sel == 6:
+                elif sel == 5:
                     # Cycle theme with left/right
                     themes_list = list(THEMES.keys())
                     curr_theme = theme_manager._current_theme_name
@@ -310,14 +305,12 @@ def show_main_menu(
                 choice = [
                     "BelAtro",
                     "Start Game",
-                    "Mode",
                     "AI Config",
                     "Target Score",
                     "Speed",
                     "Theme",
                     "Rules & History",
                     "Statistics",
-                    "Reset Statistics",
                     "Quit",
                 ][sel]
                 if choice == "AI Config":
@@ -326,23 +319,14 @@ def show_main_menu(
                 if choice == "Theme":
                     show_theme_selector(reader)
                     continue
-                if choice in (
-                    "BelAtro",
-                    "Start Game",
-                    "Quit",
-                    "Rules & History",
-                    "Statistics",
-                    "Reset Statistics",
-                ):
-                    return choice, curr_diffs, curr_target, curr_speed, curr_mode
+                if choice in ("BelAtro", "Start Game", "Quit", "Rules & History", "Statistics"):
+                    return choice, curr_diffs, curr_target, curr_speed
                 # For settings, Enter can also toggle forward
-                if sel == 2:
-                    curr_mode = modes[(modes.index(curr_mode) + 1) % len(modes)]
-                elif sel == 4:
+                if sel == 3:
                     curr_target = targs[(targs.index(curr_target) + 1) % len(targs)]
-                elif sel == 5:
+                elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
-                elif sel == 6:
+                elif sel == 5:
                     themes_list = list(THEMES.keys())
                     curr_theme = theme_manager._current_theme_name
                     new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)

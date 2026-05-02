@@ -48,9 +48,9 @@ from .ui import (
 )
 
 
-def create_ai_players(diffs_map: dict[Seat, str], human_seats: set[Seat]) -> dict[Seat, AIPlayer]:
+def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     """Create AI players for seats not occupied by humans."""
-    ai_seats = {s for s in Seat if s not in human_seats}
+    ai_seats = {Seat.EAST, Seat.NORTH, Seat.WEST}
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
 
 
@@ -60,7 +60,6 @@ def run_bidding(
     ai_players: dict[Seat, AIPlayer],
     ai_delay: float,
     history: list[GameState],
-    human_seats: set[Seat],
 ) -> GameState | str | None:
     """Run the bidding phase. Returns None if user quits, 'UNDO' if requested."""
     current = state
@@ -68,18 +67,15 @@ def run_bidding(
     while current.phase == Phase.BIDDING:
         bidder = bidding_turn(current)
 
-        if bidder in human_seats:
+        if bidder == Seat.SOUTH:
             display(current, None)
-            if bidder != Seat.SOUTH:
-                sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}PLAYER {bidder.name}'s TURN{RESET}\r\n")
-                sys.stdout.flush()
             res = prompt_bid(current, reader)
             if res == "QUIT":
                 return None
             if res == "UNDO":
                 return "UNDO"
             if isinstance(res, str):
-                return None  # unreachable; exhausts str branch for type narrowing
+                return None
             bid: Suit | None = res
         else:
             ai = ai_players[bidder]
@@ -110,7 +106,6 @@ def run_play(
     ai_delay: float,
     trick_pause: float,
     history: list[GameState],
-    human_seats: set[Seat],
 ) -> GameState | str | None:
     """Run the play phase (all 8 tricks). Returns None if user quits, 'UNDO' if requested."""
     current = state
@@ -119,11 +114,8 @@ def run_play(
     while current.phase == Phase.PLAYING:
         player = current.turn
 
-        if player in human_seats:
+        if player == Seat.SOUTH:
             display(current, None)
-            if player != Seat.SOUTH:
-                sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}PLAYER {player.name}'s TURN{RESET}\r\n")
-                sys.stdout.flush()
             card, current = prompt_card(current, reader)
             if card is None:
                 return None
@@ -160,7 +152,8 @@ def run_play(
         if len(display_state.current_trick) == 4:
             play_sound("trick")
             if len(current.completed_tricks) == 7:  # This was the 8th trick
-                winner = trick_winner_seat(display_state.current_trick, current.trump)
+                se_trump = getattr(current, "_seven_eight_trump", False)
+                winner = trick_winner_seat(display_state.current_trick, current.trump, se_trump)
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"
                     announce(
@@ -254,7 +247,6 @@ def run_round(
     trick_pause: float,
     round_pause: float,
     history_stack: list[GameState],
-    human_seats: set[Seat],
     rng: random.Random | None = None,
 ) -> GameState | None:
     """Run a complete round: deal, bid, play, score. Returns None if user quits."""
@@ -269,7 +261,7 @@ def run_round(
 
     while True:
         # Bidding Phase
-        res_bid = run_bidding(current, reader, ai_players, ai_delay, history_stack, human_seats)
+        res_bid = run_bidding(current, reader, ai_players, ai_delay, history_stack)
         if res_bid is None:
             return None
         if res_bid == "UNDO":
@@ -287,9 +279,7 @@ def run_round(
             return current
 
         # Play Phase
-        res_play = run_play(
-            current, reader, ai_players, ai_delay, trick_pause, history_stack, human_seats
-        )
+        res_play = run_play(current, reader, ai_players, ai_delay, trick_pause, history_stack)
         if res_play is None:
             return None
         if res_play == "UNDO":

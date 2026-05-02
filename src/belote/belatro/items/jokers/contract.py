@@ -76,7 +76,9 @@ class LePatriote(Joker):
 
     def on_trick_won(self, event: TrickWonEvent) -> JokerResult | None:
         if event.winner == Seat.SOUTH and event.trump:
-            trump_pts = sum(card_points(c, event.trump) for c in event.cards if c.suit == event.trump)
+            trump_pts = sum(
+                card_points(c, event.trump) for c in event.cards if c.suit == event.trump
+            )
             if trump_pts > 0:
                 return JokerResult(add_chips=trump_pts // 2)
         return None

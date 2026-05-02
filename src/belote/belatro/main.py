@@ -46,7 +46,7 @@ class BelAtroGame:
         sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
         sys.stdout.flush()
         try:
-            menu = BelAtroMainMenu(self.reader)
+            menu = BelAtroMainMenu(self.reader, self.profile)
             self.run = menu.run()
 
             if self.run:
