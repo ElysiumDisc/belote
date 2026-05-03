@@ -12,6 +12,7 @@ from ..partner.partner_state import PartnerState
 from .economy import Economy
 
 MAX_JOKER_SLOTS = 5
+DEFAULT_CONSUMABLE_SLOTS = 2
 
 
 @dataclass
@@ -29,6 +30,7 @@ class BelAtroRun:
     jokers: list[Joker] = field(default_factory=list)
     vouchers: list[Voucher] = field(default_factory=list)
     joker_slots: int = MAX_JOKER_SLOTS
+    consumable_slots: int = DEFAULT_CONSUMABLE_SLOTS
 
     # ── Economy ────────────────────────────────────────────
     economy: Economy = field(default_factory=Economy)

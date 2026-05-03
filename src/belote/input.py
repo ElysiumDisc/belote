@@ -76,7 +76,7 @@ class _UnixKeyReader:
             r, _, _ = select.select([sys.stdin], [], [], 0.01)
             if not r:
                 return KeyEvent(Key.ESC)
-            
+
             next_byte = os.read(self._stdin_fd, 1)
             if next_byte == b"[":
                 # Likely an arrow key
@@ -107,7 +107,7 @@ class _UnixKeyReader:
             elif (byte & 0xF0) == 0xE0: n = 2
             elif (byte & 0xF8) == 0xF0: n = 3
             else: return KeyEvent(Key.ESC)
-            
+
             full_buf = bytes([byte])
             while len(full_buf) < n + 1:
                 chunk = os.read(self._stdin_fd, n + 1 - len(full_buf))
@@ -133,13 +133,19 @@ class _UnixKeyReader:
                 return KeyEvent(Key.MUTE)
             if ch.lower() == "t":
                 return KeyEvent(Key.HIST)
-            if ch.lower() == "v":
+            if ch.lower() == "i" or ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
 
             return KeyEvent(Key.CHAR, ch)
         except Exception:
             return KeyEvent(Key.ESC)
 
+    def read_timeout(self, timeout: float) -> KeyEvent | None:
+        """Read a key with a timeout. Returns None if no key is pressed."""
+        r, _, _ = select.select([sys.stdin], [], [], timeout)
+        if r:
+            return self.read()
+        return None
 
 def interruptible_sleep(seconds: float, reader: KeyReader | None = None) -> KeyEvent | None:
     """Sleep for some time, but return immediately if a key is pressed."""
@@ -160,7 +166,8 @@ class KeyReader:
 
     def __enter__(self) -> KeyReader: ...
     def __exit__(self, *args: Any) -> None: ...
-    def read_key(self) -> KeyEvent: ...
+    def read(self) -> KeyEvent: ...
+    def read_timeout(self, timeout: float) -> KeyEvent | None: ...
 
 
 if os.name == "nt":
@@ -172,7 +179,7 @@ if os.name == "nt":
         def __exit__(self, *args: Any) -> None:
             pass
 
-        def read_key(self) -> KeyEvent:
+        def read(self) -> KeyEvent:
             import msvcrt  # type: ignore[import-not-found]
 
             ch = msvcrt.getch()
@@ -195,12 +202,32 @@ if os.name == "nt":
                 return KeyEvent(Key.SPACE)
             if ch.lower() == b"q":
                 return KeyEvent(Key.QUIT)
+            if ch.lower() == b"h":
+                return KeyEvent(Key.HELP)
+            if ch.lower() == b"s":
+                return KeyEvent(Key.SORT)
+            if ch.lower() == b"m":
+                return KeyEvent(Key.MUTE)
+            if ch.lower() == b"t":
+                return KeyEvent(Key.HIST)
+            if ch.lower() in (b"i", b"v"):
+                return KeyEvent(Key.OVERLAY)
 
             try:
                 char = ch.decode("utf-8")
                 return KeyEvent(Key.CHAR, char)
             except Exception:
                 return KeyEvent(Key.ESC)
+
+        def read_timeout(self, timeout: float) -> KeyEvent | None:
+            import msvcrt  # type: ignore[import-not-found]
+
+            start = time.time()
+            while time.time() - start < timeout:
+                if msvcrt.kbhit():
+                    return self.read()
+                time.sleep(0.01)
+            return None
 
     KeyReader = _WindowsKeyReader  # type: ignore[misc, assignment]
 else:

@@ -20,7 +20,8 @@ class LePremierSang(Joker):
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.trick_number == 1 and event.winner == Seat.SOUTH:
-            return JokerResult(times_mult=2.0)
+            state[f"{self.id}_active"] = True
+            return JokerResult(add_mult=2.0)
         return None
 
 
@@ -71,9 +72,4 @@ class LExecuteur(Joker):
         if event.is_last and event.winner == Seat.SOUTH:
             return JokerResult(add_chips=40, times_mult=1.5)
         return None
-s_unlockable = True
 
-    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.is_last and event.winner == Seat.SOUTH:
-            return JokerResult(add_chips=40, times_mult=1.5)
-        return None

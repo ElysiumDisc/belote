@@ -41,7 +41,16 @@ class RoundUICallbacks(ABC):
     """Interface for UI interaction during a round."""
 
     @abstractmethod
+    def prompt_bid(self, state: GameState) -> Suit | None: ...
+
+    @abstractmethod
+    def prompt_card(self, state: GameState) -> tuple[Card, GameState]: ...
+
+    @abstractmethod
     def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None: ...
+
+    @abstractmethod
+    def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None: ...
 
     @abstractmethod
     def on_round_end(self, breakdown: object) -> None: ...
@@ -103,12 +112,7 @@ def drive_round(
         bid: Suit | None = None
 
         if bidder == Seat.SOUTH:
-            # We don't have a direct prompt here, we assume the caller
-            # (main.py) handled South's choice or we default to Pass
-            # Actually in drive_round we might need a callback for human input
-            # but BelAtro drive_round is usually automated for testing or
-            # the UI loop handles it. For now, we'll assume South passes if not handled.
-            pass
+            bid = ui_callbacks.prompt_bid(state)
         elif (
             bidder == Seat.NORTH
             and partner is not None
@@ -159,9 +163,7 @@ def drive_round(
         card: Card | None = None
 
         if player == Seat.SOUTH:
-            # Caller must provide card via some mechanism?
-            # In a truly automated drive_round, we might need a callback.
-            break  # Wait for human in main loop
+            card, state = ui_callbacks.prompt_card(state)
         else:
             # AI Play
             card = ai_players[player].decide_card(state)
@@ -172,7 +174,7 @@ def drive_round(
         state = play_card(state, card)
         ui_callbacks.on_card_played(state, player, card)
 
-        if is_last_in_trick:
+        if is_last_in_trick(state):
             last_trick = state.completed_tricks[-1]
 
             winner = trick_winner_seat(
@@ -203,11 +205,14 @@ def drive_round(
                 TrickWonEvent(
                     winner=winner,
                     cards=cards,
-                    card_points=points,
+                    trick_number=len(state.completed_tricks),
                     is_last=is_last,
+                    card_points=points,
+                    trump=state.trump,
                 ),
                 state
             )
+            ui_callbacks.on_trick_end(state, winner, points)
 
     # Round End / Scoring
     if state.phase == Phase.SCORING:
@@ -228,7 +233,6 @@ def drive_round(
     return state
 
 
-@property
 def is_last_in_trick(state: GameState) -> bool:
     """Helper to check if a trick just ended."""
     return len(state.current_trick) == 0 and len(state.completed_tricks) > 0

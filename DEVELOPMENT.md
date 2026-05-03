@@ -37,6 +37,7 @@ Or via python:
 ```bash
 python -m belote.main
 python -m belote.belatro.main
+PYTHONPATH=src python3 -m belote.main
 ```
 
 ## Testing

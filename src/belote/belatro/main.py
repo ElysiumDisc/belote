@@ -196,7 +196,7 @@ class BelAtroGame:
             bus=bus,
             partner=self.run.partner,
             boss=boss,
-            deck_id=self.run.deck_id,
+            target_score=self.run.target_score,
             ui_callbacks=UICallbacks(self.reader),
             acc=acc,
         )

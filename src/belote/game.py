@@ -449,6 +449,7 @@ def clear_legal_cards_cache() -> None:
     _trick_winner_seat_impl.cache_clear()
 
 
+@lru_cache(maxsize=2048)
 def _calculate_legal_cards_impl(
     hand_ids: tuple[int, ...],
     trump: Suit | None,
