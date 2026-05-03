@@ -38,7 +38,10 @@ class LeFanatique(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        # DEFERRED: Needs contract check (Tout Atout)
+        # Only activates on Tout Atout
+        if state.get("contract") != "tout":
+            return None
+
         if event.winner == Seat.SOUTH:
             wins = state.get(f"{self.id}_wins", 0) + 1
             state[f"{self.id}_wins"] = wins

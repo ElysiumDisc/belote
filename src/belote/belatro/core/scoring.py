@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..items.base import Joker, JokerResult
 
 from belote.deck import Rank
-from belote.game import Seat
+from belote.game import GameState, Seat
 
 from ..engine.event_bus import (
     BeloteAnnouncedEvent,
@@ -38,6 +38,7 @@ class ScoreAccumulator:
 
     def trigger_round_start(self, state: GameState) -> GameState:
         """Initialize joker state at the beginning of a round."""
+        self._log.clear()  # FIX: Reset log between rounds
         joker_state = dict(state._joker_state)
         for joker in self._jokers:
             result = joker.on_round_start(joker_state)
@@ -81,6 +82,8 @@ class ScoreAccumulator:
                         _apply(result, source=joker.name)
                         # Double trigger for partner jokers if trust is high
                         if self.partner_jokers_double and getattr(joker, "is_partner_joker", False):
+                            # FIX: Apply a fresh copy/re-calculated result if possible
+                            # For simple results, applying again is fine as long as we don't mutate the result object
                             _apply(result, source=f"{joker.name} (Double)")
 
         if isinstance(event, TrickWonEvent):
@@ -124,12 +127,6 @@ class ScoreAccumulator:
             _bonus_money=new_money,
             _joker_state=joker_state,
         )
-
-    @property
-    def total(self) -> int:
-        # Note: This is now a bit disconnected from GameState unless called with correct values
-        # For UI, we might need to pass the chips/mult
-        return 0  # Re-implement or remove if unused
 
     def get_total(self, state: GameState) -> int:
         # Avoid float precision issues for large integers if mult is effectively an int

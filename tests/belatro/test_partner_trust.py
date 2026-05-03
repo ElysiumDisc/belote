@@ -36,14 +36,15 @@ class TestPartnerTrust:
         """Verify partner always passes when _partner_forced_pass is set."""
         state = GameState(hands=((), (), (), ()))
         # Manually set the flag (usually injected by BossModifier)
-        state = replace(state, _partner_forced_pass=True)
-        
-        # Partner of South is North
+        state = replace(state, boss_modifiers=replace(state.boss_modifiers, partner_forced_pass=True))
+
+        partner_state = PartnerState()
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
+
+        # Should return None regardless of hand
         bid = ai.decide_bid(state)
         assert bid is None
 
-    # 26. AI agent double (L'Agent Double boss)
     def test_ai_agent_double_sabotage(self) -> None:
         """Verify partner plays worst card when _agent_double_active is set."""
         # We need a hand for the AI
@@ -55,8 +56,7 @@ class TestPartnerTrust:
         # North is partner of South
         hands = [(), (), list(cards), ()]  # S, E, N, W
         state = GameState(hands=tuple(tuple(h) for h in hands))
-        state = replace(state, trump=Suit.SPADES, _agent_double_active=True, turn=Seat.NORTH)
-        
+        state = replace(state, trump=Suit.SPADES, boss_modifiers=replace(state.boss_modifiers, agent_double_active=True), turn=Seat.NORTH)
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
         played = ai.decide_card(state)
         

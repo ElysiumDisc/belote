@@ -20,7 +20,9 @@ class LeBanquier(Joker):
             if event.taker_seat in (Seat.SOUTH, Seat.NORTH)
             else event.breakdown.defender_total
         )
-        bonus = max(0, (points - 80) // 10)
+        # Use a dynamic threshold from state or default to 80
+        threshold = state.get("target_score", 80)
+        bonus = max(0, (points - threshold) // 10)
         if bonus > 0:
             return JokerResult(add_money=bonus)
         return None

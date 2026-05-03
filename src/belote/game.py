@@ -143,10 +143,33 @@ class RoundScore:
 
 
 @dataclass(frozen=True, slots=True)
+class BossModifiers:
+    """Boss-modifier flags injected by drive_round when a boss blind is active."""
+    no_belote: bool = False
+    dynamic_trump: bool = False
+    no_consecutive_team_wins: bool = False
+    seven_eight_trump: bool = False
+    invert_scoring: bool = False
+    kings_zero: bool = False
+    auto_coinche: bool = False
+    queen_spades_penalty: bool = False
+    hide_hud: bool = False
+    ban_clubs: bool = False
+    no_dix_de_der: bool = False
+    tens_zero: bool = False
+    hide_partner_hand: bool = False
+    agent_double_active: bool = False
+    partner_forced_pass: bool = False
+    lock_trust_zero: bool = False
+    separate_scoring: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class GameState:
     hands: tuple[tuple[Card, ...], ...]
     initial_hands: tuple[tuple[Card, ...], ...] = field(default_factory=lambda: ((), (), (), ()))
     trump: Suit | None = None
+    contract: str | None = None
     dealer: Seat = Seat.SOUTH
     leader: Seat = Seat.SOUTH
     turn: Seat = Seat.SOUTH
@@ -171,29 +194,48 @@ class GameState:
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
     litige_points: int = 0
-    # Boss-modifier flags injected by drive_round when a boss blind is active.
-    # All default to False so the classic game is unaffected.
-    _no_belote: bool = False
-    _dynamic_trump: bool = False
-    _no_consecutive_team_wins: bool = False
-    _seven_eight_trump: bool = False
-    _invert_scoring: bool = False
-    _kings_zero: bool = False
-    _auto_coinche: bool = False
-    _queen_spades_penalty: bool = False
-    _hide_hud: bool = False
-    _ban_clubs: bool = False
-    _no_dix_de_der: bool = False
-    _tens_zero: bool = False
-    _hide_partner_hand: bool = False
-    _agent_double_active: bool = False
-    _partner_forced_pass: bool = False
-    _lock_trust_zero: bool = False
-    _separate_scoring: bool = False
+    
+    boss_modifiers: BossModifiers = field(default_factory=BossModifiers)
+    
     _joker_state: dict[str, object] = field(default_factory=dict)
     _chips: int = 0
     _mult: float = 1.0
     _bonus_money: int = 0
+
+    @property
+    def _no_belote(self) -> bool: return self.boss_modifiers.no_belote
+    @property
+    def _dynamic_trump(self) -> bool: return self.boss_modifiers.dynamic_trump
+    @property
+    def _no_consecutive_team_wins(self) -> bool: return self.boss_modifiers.no_consecutive_team_wins
+    @property
+    def _seven_eight_trump(self) -> bool: return self.boss_modifiers.seven_eight_trump
+    @property
+    def _invert_scoring(self) -> bool: return self.boss_modifiers.invert_scoring
+    @property
+    def _kings_zero(self) -> bool: return self.boss_modifiers.kings_zero
+    @property
+    def _auto_coinche(self) -> bool: return self.boss_modifiers.auto_coinche
+    @property
+    def _queen_spades_penalty(self) -> bool: return self.boss_modifiers.queen_spades_penalty
+    @property
+    def _hide_hud(self) -> bool: return self.boss_modifiers.hide_hud
+    @property
+    def _ban_clubs(self) -> bool: return self.boss_modifiers.ban_clubs
+    @property
+    def _no_dix_de_der(self) -> bool: return self.boss_modifiers.no_dix_de_der
+    @property
+    def _tens_zero(self) -> bool: return self.boss_modifiers.tens_zero
+    @property
+    def _hide_partner_hand(self) -> bool: return self.boss_modifiers.hide_partner_hand
+    @property
+    def _agent_double_active(self) -> bool: return self.boss_modifiers.agent_double_active
+    @property
+    def _partner_forced_pass(self) -> bool: return self.boss_modifiers.partner_forced_pass
+    @property
+    def _lock_trust_zero(self) -> bool: return self.boss_modifiers.lock_trust_zero
+    @property
+    def _separate_scoring(self) -> bool: return self.boss_modifiers.separate_scoring
 
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
@@ -224,6 +266,7 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "announced": None,
         "belote_tracker": (False, False),
         "first_trick_done": False,
+        "boss_modifiers": BossModifiers(),
     }
     reset_values.update(kwargs)
     return replace(state, **reset_values)  # type: ignore[arg-type]
@@ -406,7 +449,6 @@ def clear_legal_cards_cache() -> None:
     _trick_winner_seat_impl.cache_clear()
 
 
-@lru_cache(maxsize=2048)
 def _calculate_legal_cards_impl(
     hand_ids: tuple[int, ...],
     trump: Suit | None,
@@ -526,7 +568,7 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand = state.hand_of(seat)
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
-    se_trump = getattr(state, "_seven_eight_trump", False)
+    se_trump = state.boss_modifiers.seven_eight_trump
 
     res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value, se_trump)
 
@@ -626,7 +668,7 @@ def play_card(state: GameState, card: Card) -> GameState:
     announced = None
     trump = state.trump  # always set during PLAYING phase
     belote_tracker = list(state.belote_tracker)
-    if trump and state.belote_holders.get(trump) == state.turn and not state._no_belote:
+    if trump and state.belote_holders.get(trump) == state.turn and not state.boss_modifiers.no_belote:
         is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
 
         if is_k_q:
@@ -639,11 +681,11 @@ def play_card(state: GameState, card: Card) -> GameState:
 
     # Check if trick is complete (4 cards)
     if len(new_trick) == 4:
-        se_trump = getattr(state, "_seven_eight_trump", False)
+        se_trump = state.boss_modifiers.seven_eight_trump
         winner = trick_winner_seat(new_trick, trump, se_trump)
 
         # Boss: La Rupture (No consecutive team wins)
-        if getattr(state, "_no_consecutive_team_wins", False) and state.completed_tricks:
+        if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
             last_winner = trick_winner_seat(state.completed_tricks[-1], trump, se_trump)
             if last_winner and winner and team_of(winner) == team_of(last_winner):
                 # Force the other team to win if they had any card in the trick
@@ -674,14 +716,14 @@ def play_card(state: GameState, card: Card) -> GameState:
             else 0
         )
         # Boss: Les Clubs Bannis – club-led tricks score 0
-        if state._ban_clubs and new_trick and new_trick[0].card.suit == Suit.CLUBS:
+        if state.boss_modifiers.ban_clubs and new_trick and new_trick[0].card.suit == Suit.CLUBS:
             trick_pts = 0
         # Boss: Le Roi Mort / Les Dix Maudits – Kings/10s worth 0
-        if state._kings_zero or state._tens_zero:
+        if state.boss_modifiers.kings_zero or state.boss_modifiers.tens_zero:
             trick_pts = sum(
                 0
-                if (state._kings_zero and tc.card.rank == Rank.KING)
-                or (state._tens_zero and tc.card.rank == Rank.TEN)
+                if (state.boss_modifiers.kings_zero and tc.card.rank == Rank.KING)
+                or (state.boss_modifiers.tens_zero and tc.card.rank == Rank.TEN)
                 else card_points(tc.card, trump, se_trump)
                 for tc in new_trick
             ) if trump is not None else 0
@@ -692,7 +734,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             ew_pts += trick_pts
 
         # Last trick bonus (suppressed by Le Zéro Final boss)
-        if tricks_count == 8 and not state._no_dix_de_der:
+        if tricks_count == 8 and not state.boss_modifiers.no_dix_de_der:
             if team_of(winner) == 0:
                 ns_pts += 10
             else:
@@ -702,9 +744,7 @@ def play_card(state: GameState, card: Card) -> GameState:
 
         # Boss: L'Anarchie (Trump changes every 2 tricks)
         current_trump = trump
-        if getattr(state, "_dynamic_trump", False) and tricks_count % 2 == 0 and tricks_count < 8:
-            import random
-
+        if state.boss_modifiers.dynamic_trump and tricks_count % 2 == 0 and tricks_count < 8:
             possible = [s for s in Suit if s != trump]
             current_trump = random.choice(possible)
             # Use set_announced to notify user?
@@ -770,49 +810,52 @@ def clear_announced(state: GameState) -> GameState:
     return replace(state, announced=None)
 
 
+_SUITS_ORDER: Final = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
+_TRUMP_RANK_IDX: Final = {
+    r: i
+    for i, r in enumerate(
+        [
+            Rank.JACK,
+            Rank.NINE,
+            Rank.ACE,
+            Rank.TEN,
+            Rank.KING,
+            Rank.QUEEN,
+            Rank.EIGHT,
+            Rank.SEVEN,
+        ]
+    )
+}
+_NORMAL_RANK_IDX: Final = {
+    r: i
+    for i, r in enumerate(
+        [
+            Rank.ACE,
+            Rank.TEN,
+            Rank.KING,
+            Rank.QUEEN,
+            Rank.JACK,
+            Rank.NINE,
+            Rank.EIGHT,
+            Rank.SEVEN,
+        ]
+    )
+}
+
+
 def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
     """Sort hand by suit and rank (trump first, then others, honors together)."""
-    suits_order = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
+    suits_order = list(_SUITS_ORDER)
     if trump:
         suits_order.remove(trump)
         suits_order.insert(0, trump)
 
     suit_idx = {s: i for i, s in enumerate(suits_order)}
-    trump_rank_idx: dict[Rank, int] = {
-        r: i
-        for i, r in enumerate(
-            [
-                Rank.JACK,
-                Rank.NINE,
-                Rank.ACE,
-                Rank.TEN,
-                Rank.KING,
-                Rank.QUEEN,
-                Rank.EIGHT,
-                Rank.SEVEN,
-            ]
-        )
-    }
-    normal_rank_idx: dict[Rank, int] = {
-        r: i
-        for i, r in enumerate(
-            [
-                Rank.ACE,
-                Rank.TEN,
-                Rank.KING,
-                Rank.QUEEN,
-                Rank.JACK,
-                Rank.NINE,
-                Rank.EIGHT,
-                Rank.SEVEN,
-            ]
-        )
-    }
 
     def sort_key(c: Card) -> tuple[int, int]:
         return (
             suit_idx[c.suit],
-            trump_rank_idx[c.rank] if c.suit == trump else normal_rank_idx[c.rank],
+            _TRUMP_RANK_IDX[c.rank] if c.suit == trump else _NORMAL_RANK_IDX[c.rank],
         )
 
     return tuple(sorted(hand, key=sort_key))
@@ -830,3 +873,4 @@ def sort_south_hand(state: GameState) -> GameState:
         )
 
     return replace(state, hands=tuple(new_hands), initial_hands=tuple(new_initial))
+

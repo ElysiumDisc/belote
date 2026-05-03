@@ -18,6 +18,7 @@ class Key(Enum):
     UP = "UP"
     DOWN = "DOWN"
     ENTER = "ENTER"
+    TAB = "TAB"
     ESC = "ESC"
     SPACE = "SPACE"
     CHAR = "CHAR"
@@ -49,82 +50,42 @@ class _UnixKeyReader:
             self._old_termios = termios.tcgetattr(self._stdin_fd)
             tty.setraw(self._stdin_fd)
         except termios.error:
-            # Fallback if not a TTY (e.g. testing)
             self._old_termios = None
         return self
 
-    def __exit__(self, *exc: object) -> None:
+    def __exit__(self, *args: Any) -> None:
         self.restore()
 
     def restore(self) -> None:
-        if not self._restored and self._old_termios is not None:
+        if self._old_termios and not self._restored:
+            termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._old_termios)
             self._restored = True
-            with contextlib.suppress(Exception):
-                termios.tcsetattr(
-                    self._stdin_fd,
-                    termios.TCSAFLUSH,
-                    self._old_termios,
-                )
 
     def read(self) -> KeyEvent:
-        """Blocking read of a single key event."""
-        result = self.read_timeout(None)
-        return result if result is not None else KeyEvent(Key.QUIT)
-
-    def read_timeout(self, timeout: float | None = None) -> KeyEvent | None:
-        """Read a single key event with an optional timeout."""
-        ready = select.select([self._stdin_fd], [], [], timeout)
-        if not ready[0]:
-            return None
-
-        # Read first byte
-        try:
-            buf = os.read(self._stdin_fd, 1)
-        except (EOFError, OSError):
-            return KeyEvent(Key.QUIT)
-
+        """Read a single key (handling escape sequences and multi-byte UTF-8)."""
+        # Read the first byte
+        buf = os.read(self._stdin_fd, 1)
         if not buf:
-            return KeyEvent(Key.QUIT)
+            return KeyEvent(Key.ESC)
 
         byte = buf[0]
 
-        # Accumulate remaining bytes for multi-byte UTF-8 sequences
-        # 0xC0-0xDF → 2-byte, 0xE0-0xEF → 3-byte, 0xF0-0xF7 → 4-byte
-        if byte >= 0xC0:
-            if byte < 0xE0:
-                extra = 1
-            elif byte < 0xF0:
-                extra = 2
-            else:
-                extra = 3
-            for _ in range(extra):
-                ready = select.select([self._stdin_fd], [], [], 0.05)
-                if ready[0]:
-                    try:
-                        buf += os.read(self._stdin_fd, 1)
-                    except (EOFError, OSError):
-                        break
-
-        # ESC sequence
+        # Escape sequence
         if byte == 0x1B:
-            # Peek with timeout to distinguish ESC alone vs ESC sequence
-            ready = select.select([self._stdin_fd], [], [], 0.1)
-            if ready[0]:
-                second = os.read(self._stdin_fd, 1)
-                if second and second[0] == 0x5B:  # '['
-                    ready = select.select([self._stdin_fd], [], [], 0.1)
-                    if ready[0]:
-                        third = os.read(self._stdin_fd, 1)
-                        if third:
-                            code = third[0]
-                            if code == 0x41:  # 'A'
-                                return KeyEvent(Key.UP)
-                            if code == 0x42:  # 'B'
-                                return KeyEvent(Key.DOWN)
-                            if code == 0x43:  # 'C'
-                                return KeyEvent(Key.RIGHT)
-                            if code == 0x44:  # 'D'
-                                return KeyEvent(Key.LEFT)
+            # Check if more data is available immediately (for sequences)
+            r, _, _ = select.select([sys.stdin], [], [], 0.01)
+            if not r:
+                return KeyEvent(Key.ESC)
+            
+            next_byte = os.read(self._stdin_fd, 1)
+            if next_byte == b"[":
+                # Likely an arrow key
+                code_byte = os.read(self._stdin_fd, 1)
+                match code_byte:
+                    case b"A": return KeyEvent(Key.UP)
+                    case b"B": return KeyEvent(Key.DOWN)
+                    case b"C": return KeyEvent(Key.RIGHT)
+                    case b"D": return KeyEvent(Key.LEFT)
             return KeyEvent(Key.ESC)
 
         # Enter
@@ -133,115 +94,113 @@ class _UnixKeyReader:
 
         # Tab
         if byte == 0x09:
-            return KeyEvent(Key.ENTER)
+            return KeyEvent(Key.TAB)
 
         # Space
         if byte == 0x20:
             return KeyEvent(Key.SPACE)
 
+        # Multi-byte UTF-8 handling
+        if byte >= 0x80:
+            # Determine how many bytes to read based on UTF-8 encoding
+            if (byte & 0xE0) == 0xC0: n = 1
+            elif (byte & 0xF0) == 0xE0: n = 2
+            elif (byte & 0xF8) == 0xF0: n = 3
+            else: return KeyEvent(Key.ESC)
+            
+            full_buf = bytes([byte])
+            while len(full_buf) < n + 1:
+                chunk = os.read(self._stdin_fd, n + 1 - len(full_buf))
+                if not chunk: break
+                full_buf += chunk
+
+            try:
+                ch = full_buf.decode("utf-8")
+                return KeyEvent(Key.CHAR, ch)
+            except Exception:
+                return KeyEvent(Key.ESC)
+
         # Printable character
         try:
-            ch = buf.decode("utf-8", errors="replace")
+            ch = chr(byte)
             if ch.lower() == "q":
                 return KeyEvent(Key.QUIT)
-            if ch == "?":
-                return KeyEvent(Key.HELP)
-            if ch == "T":
-                return KeyEvent(Key.THEME)
-            if ch == "t":
-                return KeyEvent(Key.HIST)
             if ch.lower() == "h":
                 return KeyEvent(Key.HELP)
-            if ch.lower() == "o":
+            if ch.lower() == "s":
                 return KeyEvent(Key.SORT)
             if ch.lower() == "m":
                 return KeyEvent(Key.MUTE)
-            if ch.lower() == "i":
+            if ch.lower() == "t":
+                return KeyEvent(Key.HIST)
+            if ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
+
             return KeyEvent(Key.CHAR, ch)
         except Exception:
-            return KeyEvent(Key.CHAR, chr(byte))
+            return KeyEvent(Key.ESC)
 
 
-def interruptible_sleep(duration: float, reader: KeyReader) -> bool:
-    """Sleep for duration, but return True if interrupted by Space/Esc."""
-    if duration <= 0:
-        return False
-
-    end = time.time() + duration
-    while True:
-        remaining = end - time.time()
-        if remaining <= 0:
-            break
-        event = reader.read_timeout(remaining)
-        if event:
-            if event.key in (Key.SPACE, Key.ESC):
-                return True
-            # Non-interrupt key: stop sleeping so further input is not consumed
-            break
+def interruptible_sleep(seconds: float, reader: KeyReader | None = None) -> KeyEvent | None:
+    """Sleep for some time, but return immediately if a key is pressed."""
+    start = time.time()
+    while time.time() - start < seconds:
+        if reader:
+            # Check if input is available
+            r, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if r:
+                return reader.read()
         else:
-            # Timeout reached
-            break
-    return False
+            time.sleep(0.05)
+    return None
 
 
-# OS-specific reader selection
-if sys.platform == "win32":
-    import msvcrt  # type: ignore[import-not-found]
+class KeyReader:
+    """Stub for type hinting."""
 
-    class _WindowsKeyReader:  # noqa: N801
+    def __enter__(self) -> KeyReader: ...
+    def __exit__(self, *args: Any) -> None: ...
+    def read_key(self) -> KeyEvent: ...
+
+
+if os.name == "nt":
+
+    class _WindowsKeyReader:
         def __enter__(self) -> _WindowsKeyReader:
             return self
 
-        def __exit__(self, *exc: object) -> None:
+        def __exit__(self, *args: Any) -> None:
             pass
 
-        def restore(self) -> None:
-            pass
+        def read_key(self) -> KeyEvent:
+            import msvcrt  # type: ignore[import-not-found]
 
-        def read(self) -> KeyEvent:
-            return self.read_timeout(None)  # type: ignore[return-value]
-
-        def read_timeout(self, timeout: float | None = None) -> KeyEvent | None:
-            if timeout is not None:
-                end = time.time() + timeout
-                while time.time() < end:
-                    if msvcrt.kbhit():
-                        break
-                    time.sleep(0.01)
-                else:
-                    return None
-
-            # Blocking read or key is ready
-            try:
-                ch = msvcrt.getwch()
-            except (EOFError, KeyboardInterrupt):
-                return KeyEvent(Key.QUIT)
-
-            if ch in ("\x00", "\xe0"):
-                try:
-                    ch2 = msvcrt.getwch()
-                except (EOFError, KeyboardInterrupt):
-                    return KeyEvent(Key.QUIT)
-                match ch2:
-                    case "H":
+            ch = msvcrt.getch()
+            if ch in (b"\x00", b"\xe0"):
+                ch = msvcrt.getch()
+                match ch:
+                    case b"H":
                         return KeyEvent(Key.UP)
-                    case "P":
+                    case b"P":
                         return KeyEvent(Key.DOWN)
-                    case "K":
-                        return KeyEvent(Key.LEFT)
-                    case "M":
+                    case b"M":
                         return KeyEvent(Key.RIGHT)
-                return KeyEvent(Key.CHAR, ch2)
-            if ch == "\r":
+                    case b"K":
+                        return KeyEvent(Key.LEFT)
+            if ch in (b"\r", b"\n"):
                 return KeyEvent(Key.ENTER)
-            if ch == "\x1b":
-                return KeyEvent(Key.ESC)
-            if ch == " ":
+            if ch == b"\t":
+                return KeyEvent(Key.TAB)
+            if ch == b" ":
                 return KeyEvent(Key.SPACE)
-            if ch.lower() == "q":
+            if ch.lower() == b"q":
                 return KeyEvent(Key.QUIT)
-            return KeyEvent(Key.CHAR, ch)
+
+            try:
+                char = ch.decode("utf-8")
+                return KeyEvent(Key.CHAR, char)
+            except Exception:
+                return KeyEvent(Key.ESC)
 
     KeyReader = _WindowsKeyReader  # type: ignore[misc, assignment]
 else:

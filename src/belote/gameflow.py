@@ -153,7 +153,7 @@ def run_play(
         if len(display_state.current_trick) == 4:
             play_sound("trick")
             if len(current.completed_tricks) == 7:  # This was the 8th trick
-                se_trump = getattr(current, "_seven_eight_trump", False)
+                se_trump = current.boss_modifiers.seven_eight_trump
                 winner = trick_winner_seat(display_state.current_trick, current.trump, se_trump)
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"

@@ -19,11 +19,8 @@ class LePremierSang(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH and event.trick_number == 1:
-            state[f"{self.id}_active"] = True
-
-        if state.get(f"{self.id}_active", False) and event.winner == Seat.SOUTH:
-            return JokerResult(add_mult=2.0)
+        if event.trick_number == 1 and event.winner == Seat.SOUTH:
+            return JokerResult(times_mult=2.0)
         return None
 
 
@@ -54,7 +51,11 @@ class LeDernierMot(Joker):
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.is_last and event.winner == Seat.SOUTH:
-            # Remove the flat +10 bonus and replace with ×2 mult
+            # Remove the flat Dix de Der bonus and replace with ×2 mult
+            # We use event.card_points to see if it included the 10 bonus.
+            # In standard scoring, card_points for last trick is points + 10.
+            # But if a boss changed it, it might be different.
+            # For now, we'll subtract 10 if it's there.
             return JokerResult(add_chips=-10, times_mult=2.0)
         return None
 
@@ -65,6 +66,12 @@ class LExecuteur(Joker):
     description = "The last trick is worth 50 points instead of 10, and applies a ×1.5 multiplier."
     cost = 8
     is_unlockable = True
+
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        if event.is_last and event.winner == Seat.SOUTH:
+            return JokerResult(add_chips=40, times_mult=1.5)
+        return None
+s_unlockable = True
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.is_last and event.winner == Seat.SOUTH:

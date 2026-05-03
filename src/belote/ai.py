@@ -62,6 +62,7 @@ class AIPlayer:
         # Partner's hand is visible (for NS team, South sees North's plays)
         # In this implementation, AI tracks what it can see
         p = partner(self.seat)
+        self.memory.partner_hand.clear()
         if state.phase in (Phase.PLAYING, Phase.SCORING):
             # Partner's remaining cards
             for card in state.hand_of(p):
@@ -70,7 +71,7 @@ class AIPlayer:
     def decide_bid(self, state: GameState) -> Suit | None:
         """Decide whether to bid and which suit."""
         # Boss: La Solitude (Partner forced pass)
-        if getattr(state, "_partner_forced_pass", False) and self.seat == partner(Seat.SOUTH):
+        if state.boss_modifiers.partner_forced_pass and self.seat == partner(Seat.SOUTH):
             return None
 
         hand = state.hand_of(self.seat)
@@ -229,7 +230,15 @@ class AIPlayer:
         # Void - must trump or discard
         my_trumps = [c for c in legal if c.suit == trump]
         if my_trumps:
-            return max(my_trumps, key=lambda c: trick_rank(c, trump))
+            # Optimized: pick the lowest trump that wins the trick
+            # (or the lowest trump if we can't win)
+            highest_in_trick = max(
+                (trick_rank(tc.card, trump) for tc in trick), default=-1
+            )
+            winners = [c for c in my_trumps if trick_rank(c, trump) > highest_in_trick]
+            if winners:
+                return min(winners, key=lambda c: trick_rank(c, trump))
+            return min(my_trumps, key=lambda c: trick_rank(c, trump))
 
         return min(legal, key=lambda c: card_points_fn(c, trump))
 

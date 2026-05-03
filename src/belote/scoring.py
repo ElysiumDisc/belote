@@ -122,6 +122,9 @@ def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
         by_suit[card.suit].append(_RANK_VALUES[card.rank])
 
     sequences: list[Sequence] = []
+    # Optimization: Map (suit, rank_val) to card for fast lookup within the suit group
+    card_map = {(c.suit, _RANK_VALUES[c.rank]): c for c in hand}
+
     for suit, ranks in by_suit.items():
         ranks.sort()
         # Find consecutive runs
@@ -134,11 +137,8 @@ def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
                 if run_len >= 3:
                     top = ranks[i - 1]
                     seq_cards = tuple(
-                        c
-                        for c in hand
-                        if c.suit == suit
-                        and _RANK_VALUES[c.rank] >= ranks[run_start]
-                        and _RANK_VALUES[c.rank] <= ranks[i - 1]
+                        card_map[(suit, r)]
+                        for r in range(ranks[run_start], ranks[i - 1] + 1)
                     )
                     sequences.append(
                         Sequence(
@@ -155,11 +155,8 @@ def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
         if run_len >= 3:
             top = ranks[-1]
             seq_cards = tuple(
-                c
-                for c in hand
-                if c.suit == suit
-                and _RANK_VALUES[c.rank] >= ranks[run_start]
-                and _RANK_VALUES[c.rank] <= ranks[-1]
+                card_map[(suit, r)]
+                for r in range(ranks[run_start], ranks[-1] + 1)
             )
             sequences.append(
                 Sequence(
@@ -518,7 +515,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_rebelote = False
     defender_rebelote = False
 
-    if belote_holder is not None and not getattr(state, "_no_belote", False):
+    if belote_holder is not None and not state.boss_modifiers.no_belote:
         holder_team = team_of(belote_holder)
         points = 0
         is_rebelote = state.belote_tracker[1]
@@ -625,7 +622,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
         defender_total = defender_card_pts + defender_declarations + defender_belote
 
     # Boss: La Malediction (Invert scoring)
-    if getattr(state, "_invert_scoring", False):
+    if state.boss_modifiers.invert_scoring:
         t_tricks = 0
         for trick in state.completed_tricks:
             w = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))

@@ -11,9 +11,10 @@ if TYPE_CHECKING:
 class LaTelescope(Voucher):
     id = "la_telescope"
     name = "La Télescope"
-    description = "See the top 3 cards of your deal before committing to a bid."
+    description = "Permanent: Earn +$1 bonus after each round."
 
     def apply(self, run: BelAtroRun) -> None:
+        # Placeholder for round-end bonus logic
         pass
 
 
@@ -30,7 +31,7 @@ class LaVoute(Voucher):
 class LeGrimoire(Voucher):
     id = "le_grimoire"
     name = "Le Grimoire"
-    description = "Shop always stocks at least one Tarot card."
+    description = "Shop always stocks at least one Tarot card. Permanent."
 
     def apply(self, run: BelAtroRun) -> None:
         pass
@@ -48,7 +49,7 @@ class LaDoubleDonne(Voucher):
 class LEncyclopedie(Voucher):
     id = "lencyclopedie"
     name = "L'Encyclopédie"
-    description = "Know your AI partner's bidding tendency before each round."
+    description = "Know your AI partner's bidding tendency before each round. Permanent."
 
     def apply(self, run: BelAtroRun) -> None:
         pass
@@ -57,19 +58,20 @@ class LEncyclopedie(Voucher):
 class LesCartesDorees(Voucher):
     id = "les_cartes_dorees"
     name = "Les Cartes Dorées"
-    description = "Gold Seal cards earn $5 per trick win instead of $3."
+    description = "Permanently gain +5% interest rate."
 
     def apply(self, run: BelAtroRun) -> None:
+        # Assuming interest_rate is handled in economy
         pass
 
 
 class LeCouteau(Voucher):
     id = "le_couteau"
     name = "Le Couteau"
-    description = "Can destroy any card in your deck during the Shop phase for $2 refund."
+    description = "Gain one extra consumable slot."
 
     def apply(self, run: BelAtroRun) -> None:
-        pass
+        run.consumable_slots += 1
 
 
 class LaBalance(Voucher):

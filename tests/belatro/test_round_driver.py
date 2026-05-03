@@ -134,8 +134,8 @@ def test_boss_modifier_patch_persistence():
             return state_proxy
     
     MockBoss().apply(proxy)
-    
+
     assert proxy._invert_scoring is True
     patches = dict(object.__getattribute__(proxy, "_patches"))
-    assert "_invert_scoring" in patches
-    assert patches["_invert_scoring"] is True
+    assert "boss_modifiers" in patches
+    assert patches["boss_modifiers"].invert_scoring is True

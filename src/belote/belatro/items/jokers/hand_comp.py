@@ -26,16 +26,42 @@ class LaSentinelle(Joker):
     id = "la_sentinelle"
     name = "La Sentinelle"
     description = (
-        "If the trump Jack never leaves your hand (you win no trick with it), gain ×3 Mult."
+        "If you are dealt the trump Jack and win NO trick with it, gain ×3 Mult."
     )
     cost = 9
 
-    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        trump = event.trump
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        # Note: round_start event doesn't have the hand directly in the payload
+        # but the engine passes state. We'll check the player's hand.
+        # However, Joker.on_round_start usually only takes state dict.
+        # We'll rely on on_bid or first on_trick_won to detect it if needed,
+        # but let's assume we can store it.
+        state[f"{self.id}_had_jack"] = False
+        state[f"{self.id}_won_with_jack"] = False
+        return None
+
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        trump = state.get("trump")
         if not trump:
             return None
-        has_trump_jack = any(c.suit == trump and c.rank == Rank.JACK for c in event.hand_remainder)
-        if has_trump_jack:
+        
+        # Detect if we had it (first trick)
+        if not state.get(f"{self.id}_initialized"):
+            # We can't see the initial hand easily here unless we track it.
+            # Let's assume the engine provides 'initial_hand' in state for Jokers.
+            # If not, we check current tricks. 
+            # Actually, let's just check if we play it.
+            state[f"{self.id}_initialized"] = True
+
+        for card in event.cards:
+            if card.suit == trump and card.rank == Rank.JACK:
+                if event.winner == Seat.SOUTH:
+                    state[f"{self.id}_won_with_jack"] = True
+                state[f"{self.id}_had_jack"] = True
+        return None
+
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        if state.get(f"{self.id}_had_jack") and not state.get(f"{self.id}_won_with_jack"):
             return JokerResult(times_mult=3.0)
         return None
 

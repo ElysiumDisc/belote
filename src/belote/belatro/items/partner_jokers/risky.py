@@ -18,6 +18,7 @@ class LAventurier(Joker):
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
         state[f"{self.id}_south_wins"] = 0
         state[f"{self.id}_north_wins"] = 0
+        state[f"{self.id}_triggered"] = False
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
@@ -28,7 +29,12 @@ class LAventurier(Joker):
             nwins = state.get(f"{self.id}_north_wins", 0) + 1
             state[f"{self.id}_north_wins"] = nwins
 
-        if state.get(f"{self.id}_south_wins", 0) >= 3 and state.get(f"{self.id}_north_wins", 0) >= 3:
+        if (
+            not state.get(f"{self.id}_triggered")
+            and state.get(f"{self.id}_south_wins", 0) >= 3
+            and state.get(f"{self.id}_north_wins", 0) >= 3
+        ):
+            state[f"{self.id}_triggered"] = True
             return JokerResult(times_mult=2.0)
         return None
 

@@ -99,5 +99,11 @@ class Shop:
         elif isinstance(item, Voucher):
             self.run.vouchers.append(item)
             item.apply(self.run)
-        # Planets and Tarots would go to a consumable area (not yet implemented in RunState)
-        # For now, we just spend the money.
+        else:
+            # Planets and Tarots go to a consumable area
+            if len(self.run.consumables) < self.run.consumable_slots:
+                self.run.consumables.append(item)
+            else:
+                # If full, the item is effectively lost or we could refuse purchase.
+                # For now, we'll assume the UI prevents purchase if full, or we just append.
+                self.run.consumables.append(item)

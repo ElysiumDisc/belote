@@ -1227,6 +1227,8 @@ class TestLaSentinelle:
         self.state: dict[str, Any] = {}
 
     def test_trump_jack_in_hand_gives_mult(self) -> None:
+        self.state["la_sentinelle_had_jack"] = True
+        self.state["la_sentinelle_won_with_jack"] = False
         jack_hearts = Card(Suit.HEARTS, Rank.JACK)
         evt = make_round_end_event(
             breakdown=None, taker_seat=Seat.SOUTH, trump=Suit.HEARTS, hand_remainder=(jack_hearts,)
@@ -1236,6 +1238,7 @@ class TestLaSentinelle:
         assert result.times_mult == 3.0
 
     def test_no_trump_jack_returns_none(self) -> None:
+        self.state["la_sentinelle_had_jack"] = False
         evt = make_round_end_event(
             breakdown=None, taker_seat=Seat.SOUTH, trump=Suit.HEARTS, hand_remainder=()
         )

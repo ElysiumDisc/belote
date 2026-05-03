@@ -43,15 +43,17 @@ class Config:
         else:
             base = Path.home() / ".local" / "share" / "belote"
 
+        # Create stats directory if it doesn't exist (avoiding recursive call)
+        import contextlib
+        with contextlib.suppress(OSError):
+            base.mkdir(parents=True, exist_ok=True)
+            
         return base / "stats.json"
 
     def ensure_stats_dir(self) -> None:
         """Create stats directory if it doesn't exist."""
-        path = self.stats_path.parent
-        import contextlib
-
-        with contextlib.suppress(OSError):
-            path.mkdir(parents=True, exist_ok=True)
+        # Already handled in stats_path getter, but keeping for compatibility
+        pass
 
 
 GLOBAL_CONFIG = Config()

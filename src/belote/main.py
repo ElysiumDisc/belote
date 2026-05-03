@@ -179,8 +179,8 @@ def main() -> None:
 
                 # Seed AI random for reproducibility
                 if args.seed is not None:
-                    for ai in ai_players.values():
-                        ai._rng = random.Random(args.seed)
+                    for i, ai in enumerate(ai_players.values()):
+                        ai._rng = random.Random(args.seed + i)
 
                 # Initialize game
                 state = new_game(target=target)

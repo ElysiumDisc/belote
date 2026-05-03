@@ -403,7 +403,7 @@ def _render_middle_section(state: GameState, term_w: int) -> list[str]:
 
 def _build_hud(state: GameState, term_w: int) -> str:
     """Build the top HUD bar, padded to term_w visible chars."""
-    if getattr(state, "_hide_hud", False):
+    if state.boss_modifiers.hide_hud:
         left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
         mid = f"{DIM} [HUD HIDDEN BY BOSS] {RESET}"
         theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
@@ -556,6 +556,16 @@ def display(state: GameState, selection: int | None = None, show_north_hand: boo
     sys.stdout.flush()
 
 
+def _calculate_base_row(term_h: int) -> int:
+    """Calculate the base row for the trick mat mat dynamically."""
+    base_row = 4  # HUD (1) + Divider (1) + North (1) + 1 (alignment)
+    if term_h > 40:
+        base_row += 1
+    if term_h > 38:
+        base_row += 1
+    return base_row
+
+
 def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     """Incrementally render a single card on the trick mat."""
     term_w, term_h = get_term_size()
@@ -563,13 +573,7 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
 
     # Coordinates (1-indexed for terminal)
     # Calculate base_row dynamically to match render() logic
-    base_row = 4  # HUD (1) + Divider (1) + North (1) + 1 (alignment)
-    if term_h > 40:
-        base_row += 1
-    if term_h > 38:
-        base_row += 1
-    # Middle section starts at row (base_row - 1) if we count from 1.
-    # Actually, base_row + row_offsets[seat] should give the correct terminal row.
+    base_row = _calculate_base_row(term_h)
 
     # Vertical offsets from _render_trick_mat
     row_offsets = _TRICK_ROW_OFFSETS
