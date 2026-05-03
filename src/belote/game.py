@@ -662,7 +662,7 @@ def play_card(state: GameState, card: Card) -> GameState:
                         winner = best_other
 
         if winner is None:
-            winner = state.turn
+            winner = state.turn.prev_seat()
 
         new_completed = state.completed_tricks + (new_trick,)
         tricks_count = len(new_completed)

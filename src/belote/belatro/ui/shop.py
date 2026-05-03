@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from belote.ansi import (
@@ -55,8 +56,8 @@ class ShopScreen:
                 break
             self._render()
 
-    def _card_col(self, i: int, num_items: int) -> int:
-        spacing = max(18, (80 - 2) // (num_items + 1))
+    def _card_col(self, i: int, num_items: int, term_w: int) -> int:
+        spacing = max(18, (term_w - 2) // (num_items + 1))
         return 2 + i * spacing
 
     def _render_planet_card(self, item: object, row: int, col: int, is_sel: bool) -> None:
@@ -98,12 +99,18 @@ class ShopScreen:
         print(move(row + 4, col) + bc + "└────────────────┘" + ac)
 
     def _render(self) -> None:
+        from belote.ui.render import get_term_size
+
         from ..items.base import Planet
 
-        clear_screen()
-        print(move(2, 1) + ansi_center(gold_fg() + BOLD + "=== THE SHOP ===" + RESET, 80))
+        term_w, term_h = get_term_size()
+
+        sys.stdout.write(clear_screen())
+        sys.stdout.flush()
+
+        print(move(1, 1) + ansi_center(gold_fg() + BOLD + "=== THE SHOP ===" + RESET, term_w))
         print(
-            move(4, 1)
+            move(3, 1)
             + white_fg()
             + "  Money: "
             + green_fg()
@@ -112,10 +119,10 @@ class ShopScreen:
         )
 
         num_items = len(self.shop.inventory)
-        card_start_row = 6
+        card_start_row = 5
 
         for i, item in enumerate(self.shop.inventory):
-            col = self._card_col(i, num_items)
+            col = self._card_col(i, num_items, term_w)
             is_sel = i == self.selected
             if isinstance(item, Planet):
                 self._render_planet_card(item, card_start_row, col, is_sel)
@@ -124,7 +131,7 @@ class ShopScreen:
 
         # Reroll option
         reroll_idx = num_items
-        reroll_col = self._card_col(reroll_idx, num_items)
+        reroll_col = self._card_col(reroll_idx, num_items, term_w)
         is_reroll_sel = self.selected == reroll_idx
         bc = REVERSE if is_reroll_sel else ""
         reroll_label = f"Reroll ${self.shop.reroll_cost}"
@@ -134,9 +141,9 @@ class ShopScreen:
         if self.selected < num_items:
             item = self.shop.inventory[self.selected]
             desc = getattr(item, "description", "")
-            print(move(18, 1) + ansi_center(white_fg() + desc[:78] + RESET, 80))
+            print(move(18, 1) + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w))
 
         print(
             move(20, 1)
-            + ansi_center(gold_fg() + "← → Navigate   Enter: Buy   Esc: Continue" + RESET, 80)
+            + ansi_center(gold_fg() + "← → Navigate   Enter: Buy   Esc: Continue" + RESET, term_w)
         )

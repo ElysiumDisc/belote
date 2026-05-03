@@ -82,15 +82,15 @@ PYTHONPATH=src mypy .
 
 # Linting (0 violations expected)
 ruff check .
-
-# Full test suite (302 tests expected)
+# Full test suite (305 tests expected)
 PYTHONPATH=src pytest
-```
+
+# ...
 
 Current baseline:
 - **mypy**: 0 errors (strict mode)
 - **ruff**: 0 violations
-- **pytest**: 302 tests, 0 failures
+- **pytest**: 305 tests, 0 failures
 
 
 ## Benchmarking

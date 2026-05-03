@@ -50,6 +50,7 @@ class BelAtroGame:
             self.run = menu.run()
 
             if self.run:
+                self.save_manager.save_profile(self.profile)
                 self._run_loop()
         except KeyboardInterrupt:
             # Catch exit signals to return to the Belote main menu
@@ -74,6 +75,7 @@ class BelAtroGame:
                 shop = Shop(self.run, self.profile)
                 screen = ShopScreen(shop, self.reader)
                 screen.run()
+                self.save_manager.save_profile(self.profile)
 
                 # 3. Advance
                 self.run.advance_blind()
@@ -95,7 +97,7 @@ class BelAtroGame:
         acc = ScoreAccumulator()
         acc.deck_id = self.run.deck_id
         acc.carnet_active = self.run.show_north_hand
-        acc.attach_jokers(self.run.jokers)
+        acc.attach_jokers(self.run.jokers + self.run.partner.jokers)
 
         # UI Implementation of callbacks
         from .ui.announce import BelAtroAnnounce
@@ -104,7 +106,7 @@ class BelAtroGame:
 
         hud = BelAtroHUD(self.run)
         trust_bar = TrustBar(self.run.partner.trust)
-        show_north = self.run.show_north_hand
+        show_north = self.run.show_north_hand or self.run.partner.trust.shares_void_info
 
         last_display_state: list[GameState | None] = [None]  # mutable cell for closure
 
@@ -187,6 +189,9 @@ class BelAtroGame:
             boss = boss_cls()
             BelAtroAnnounce.boss_reveal(boss, self.reader)
 
+        # B4: Reset round-specific trust flags
+        self.run.partner.trust.auto_capot_used = False
+
         final_state = drive_round(
             bus=bus,
             partner=self.run.partner,
@@ -196,15 +201,32 @@ class BelAtroGame:
             acc=acc,
         )
 
-        # Check win/loss
+        # Check win/loss and update trust
         total = acc.get_total(final_state)
+        from belote.scoring import score_round
+        bd = score_round(final_state)
+        trust = self.run.partner.trust
+
         if total < self.run.target_score:
             self.run.run_over = True
-            print("RUN OVER - Failed to meet target.")
+            print(f"RUN OVER - Failed to meet target {self.run.target_score} (scored {total}).")
+            trust.blind_failed()
         else:
             self.run.economy.process_round_end(total - self.run.target_score)
             if final_state._bonus_money > 0:
                 self.run.economy.add_money(final_state._bonus_money)
+            
+            # Trust: blind beaten
+            if total >= self.run.target_score * 1.5:
+                trust.big_margin_win()
+            else:
+                trust.blind_beaten()
+        
+        # Partner-specific trust events
+        if bd.taker_team == 0 and bd.is_failed:
+            trust.chute()
+        elif bd.is_capot and bd.taker_team == 0:
+            trust.capot_together()
 
 
 def main() -> None:

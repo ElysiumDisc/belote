@@ -93,6 +93,10 @@ def drive_round(
         _patches = dict(object.__getattribute__(_proxy, "_patches"))
         state = replace(state, **_patches)  # type: ignore[arg-type]
 
+        # Ensure boss modifiers don't use stale cached logic/values
+        from belote.game import clear_legal_cards_cache
+        clear_legal_cards_cache()
+
     # B4: Use partner trust-based difficulty for the North (partner) AI seat
     _north_diff_str = partner.difficulty_for(Seat.NORTH)
     _north_diff = Difficulty.EASY if _north_diff_str == "easy" else Difficulty.MEDIUM
@@ -110,6 +114,26 @@ def drive_round(
         bidder = state.turn
         if bidder == Seat.SOUTH:
             bid = ui_callbacks.prompt_bid(state)
+        elif (
+            bidder == Seat.NORTH
+            and partner is not None
+            and not partner.trust.ai_degraded
+        ):
+            # Use personality for the partner if trust is maintained
+            if getattr(state, "_partner_forced_pass", False):
+                bid = None
+            elif partner.personality.should_bid(state):
+                p_bid = partner.personality.bid_value(state)
+                # Ensure the bid is legal for the current round
+                forbidden = state.up_card.suit if state.up_card else None
+                if state.bidding_round == 1:
+                    # Round 1: Only taking the up-card's suit is legal
+                    bid = forbidden if p_bid == forbidden else None
+                else:
+                    # Round 2: Only other suits are legal
+                    bid = p_bid if p_bid != forbidden else None
+            else:
+                bid = None
         else:
             bid = ai_players[bidder].decide_bid(state)
 
@@ -137,10 +161,11 @@ def drive_round(
             ai.update_memory(state)
             card = ai.decide_card(state)
 
-        ui_callbacks.on_card_played(state, player, card)
-
         is_last_in_trick = len(state.current_trick) == 3
+        old_pts_total = sum(state.current_round_points)
         state = play_card(state, card)
+
+        ui_callbacks.on_card_played(state, player, card)
 
         if is_last_in_trick:
             last_trick = state.completed_tricks[-1]
@@ -149,37 +174,27 @@ def drive_round(
             winner = trick_winner_seat(
                 last_trick, state.trump, state._seven_eight_trump
             )
-            # Boss-aware card points: Kings/10s may be 0, clubs tricks may score 0
-            from belote.deck import Suit as _Suit
-            if state._ban_clubs and last_trick and last_trick[0].card.suit == _Suit.CLUBS:
-                points = 0
-            else:
-                points = sum(
-                    0
-                    if (state._kings_zero and c.card.rank == Rank.KING)
-                    or (state._tens_zero and c.card.rank == Rank.TEN)
-                    else card_points(c.card, state.trump, state._seven_eight_trump)
-                    for c in last_trick
-                )
+            # Use state diff to get points; perfectly handles all boss-aware points and Dix de Der
+            points = sum(state.current_round_points) - old_pts_total
 
             # Emit declarations first if it's the first trick
             if len(state.completed_tricks) == 1:
+                from belote.scoring import get_declaration_points
                 for decl in state.declarations:
-                    # In a full implementation, you'd get actual points, simplified here
+                    pts = 0
+                    if decl.detail and decl.kind in ("sequence", "carre"):
+                        # Correctly calculate declaration points using scoring utility
+                        pts = get_declaration_points([decl.detail])
                     state = _emit(
                         DeclarationScoredEvent(
                             seat=decl.seat,
                             declaration_type=decl.kind,
-                            points=0,  # Would need proper point calculation
+                            points=pts,
                         ),
                         state
                     )
 
             is_last = len(state.completed_tricks) == 8
-            # Boss: Le Zéro Final – dix de der suppressed
-            if is_last and not state._no_dix_de_der:
-                points += 10  # Dix de Der
-
             cards = tuple(tc.card for tc in last_trick)
             state = _emit(
                 TrickWonEvent(

@@ -22,6 +22,9 @@ class BelAtroHUD:
 
     def render(self, acc: ScoreAccumulator, state: GameState) -> None:
         """Render HUD elements."""
+        from belote.ui.render import get_term_size
+
+        term_w, term_h = get_term_size()
         run = self.run
         # Row 2: Ante and blind info
         target_str = str(run.target_score)
@@ -52,11 +55,10 @@ class BelAtroHUD:
 
         # Row 3: Score
         score_str = f"{state._chips} x {state._mult:.1f} = {acc.get_total(state)}"
-        width = 80
-        score_col = max(2, width - len(score_str) - 2)
+        score_col = max(2, term_w - len(score_str) - 2)
         print(move(3, score_col) + red_fg() + BOLD + score_str + RESET)
 
         # Show jokers on row 2 right side as compact list
         if run.jokers:
             names = "  ".join(j.name for j in run.jokers)
-            print(move(2, max(2, 40)) + gold_fg() + names[:38] + RESET)
+            print(move(2, max(2, term_w // 2)) + gold_fg() + names[: term_w // 2 - 2] + RESET)

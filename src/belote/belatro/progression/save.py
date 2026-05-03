@@ -28,7 +28,6 @@ class Profile:
         """Returns True if the item was newly unlocked."""
         if item_id not in self.unlocked_ids:
             self.unlocked_ids.append(item_id)
-            self.discover(item_id)
             return True
         return False
 

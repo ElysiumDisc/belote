@@ -17,11 +17,12 @@ def visible_len(s: str) -> int:
 
 
 def ansi_center(s: str, width: int) -> str:
-    """Center a string by visible width, ignoring ANSI escape codes."""
+    """Center a string by visible width, padding both sides."""
     vlen = visible_len(s)
     pad = max(0, width - vlen)
     left = pad // 2
-    return " " * left + s
+    right = width - vlen - left
+    return " " * left + s + " " * right
 
 
 def ansi_ljust(s: str, width: int) -> str:
@@ -53,7 +54,8 @@ def move(row: int, col: int) -> str:
 
 
 def clear_screen() -> str:
-    return "\x1b[2J" + move(1, 1)
+    """Clear screen and move to top-left."""
+    return "\x1b[H\x1b[2J"
 
 
 def clear_line() -> str:

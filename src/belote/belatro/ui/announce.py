@@ -37,26 +37,33 @@ class BelAtroAnnounce:
     @staticmethod
     def boss_reveal(boss: BossModifier, reader: KeyReader) -> None:
         """Dramatically reveal a boss blind."""
-        clear_screen()
+        from belote.ui.render import get_term_size
+
+        term_w, term_h = get_term_size()
+
+        print(clear_screen(), end="")
         for i in range(1, 10):
             print(move(i, 1) + " ")
-        print(move(10, 1) + ansi_center(red_fg() + BOLD + "! BOSS BLIND REVEALED !" + RESET, 80))
+        print(move(10, 1) + ansi_center(red_fg() + BOLD + "! BOSS BLIND REVEALED !" + RESET, term_w))
         interruptible_sleep(1.0, reader)
-        print(move(13, 1) + ansi_center(gold_fg() + BOLD + boss.name.upper() + RESET, 80))
+        print(move(13, 1) + ansi_center(gold_fg() + BOLD + boss.name.upper() + RESET, term_w))
         interruptible_sleep(1.0, reader)
-        print(move(15, 1) + ansi_center(white_fg() + boss.description + RESET, 80))
-        print(move(20, 1) + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, 80))
+        print(move(15, 1) + ansi_center(white_fg() + boss.description + RESET, term_w))
+        print(move(20, 1) + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, term_w))
         interruptible_sleep(2.0, reader)
 
     @staticmethod
     def score_popup(lines: list[str], reader: KeyReader) -> None:
         """Show a temporary score breakdown popup."""
+        from belote.ui.render import get_term_size
+
+        term_w, term_h = get_term_size()
         if not lines:
             return
         toggle_overlay()
         start_row = 24
         for i, line in enumerate(lines):
-            print(move(start_row + i, 1) + ansi_center(gold_fg() + line + RESET, 80))
+            print(move(start_row + i, 1) + ansi_center(gold_fg() + line + RESET, term_w))
         end = time.time() + 1.5
         remaining = end - time.time()
         while remaining > 0:
