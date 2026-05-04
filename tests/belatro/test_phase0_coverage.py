@@ -197,6 +197,46 @@ def test_boss_dynamic_trump_is_seed_deterministic() -> None:
     assert state_a._rng.random() == state_b._rng.random()
 
 
+def test_boss_dynamic_trump_changes_trump_every_two_tricks() -> None:
+    """L'Anarchie: trump must rotate after every 2 completed tricks (game.py:750-756),
+    but NOT after the 8th (final) trick. The new trump must be a different valid suit,
+    and play must continue without legal_cards going stale."""
+    from dataclasses import replace
+
+    from belote.game import legal_cards, new_game, place_bid, play_card, start_round
+
+    rng = random.Random(7)
+    state = start_round(new_game(), rng)
+    assert state.up_card is not None
+    state = place_bid(state, state.up_card.suit)
+    assert state.phase == Phase.PLAYING
+
+    state = replace(state, boss_modifiers=BossModifiers(dynamic_trump=True))
+    initial_trump = state.trump
+    assert initial_trump is not None
+
+    trumps_seen: list[Suit] = [initial_trump]
+
+    for trick_no in range(1, 9):
+        for _ in range(4):
+            legal = legal_cards(state, state.turn)
+            assert legal, f"legal_cards empty mid-play (trick {trick_no})"
+            state = play_card(state, legal[0])
+        assert state.trump is not None
+        trumps_seen.append(state.trump)
+
+    for swap_after in (2, 4, 6):
+        assert trumps_seen[swap_after] != trumps_seen[swap_after - 2], (
+            f"trump did not change after trick {swap_after}: "
+            f"before={trumps_seen[swap_after - 2]} after={trumps_seen[swap_after]}"
+        )
+        assert trumps_seen[swap_after].is_card_suit
+
+    assert trumps_seen[8] == trumps_seen[6], (
+        f"trump unexpectedly changed on final trick: {trumps_seen[6]} -> {trumps_seen[8]}"
+    )
+
+
 def test_boss_no_dix_de_der_disables_last_trick_bonus() -> None:
     # NS wins the last trick with low card points; without no_dix_de_der they'd
     # get +10. With it on, last_trick_bonus must NOT be added to NS card points.

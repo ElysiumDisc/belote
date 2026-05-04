@@ -203,41 +203,6 @@ class GameState:
     _bonus_money: int = 0
     _rng: random.Random = field(default_factory=random.Random, compare=False, repr=False)
 
-    @property
-    def _no_belote(self) -> bool: return self.boss_modifiers.no_belote
-    @property
-    def _dynamic_trump(self) -> bool: return self.boss_modifiers.dynamic_trump
-    @property
-    def _no_consecutive_team_wins(self) -> bool: return self.boss_modifiers.no_consecutive_team_wins
-    @property
-    def _seven_eight_trump(self) -> bool: return self.boss_modifiers.seven_eight_trump
-    @property
-    def _invert_scoring(self) -> bool: return self.boss_modifiers.invert_scoring
-    @property
-    def _kings_zero(self) -> bool: return self.boss_modifiers.kings_zero
-    @property
-    def _auto_coinche(self) -> bool: return self.boss_modifiers.auto_coinche
-    @property
-    def _queen_spades_penalty(self) -> bool: return self.boss_modifiers.queen_spades_penalty
-    @property
-    def _hide_hud(self) -> bool: return self.boss_modifiers.hide_hud
-    @property
-    def _ban_clubs(self) -> bool: return self.boss_modifiers.ban_clubs
-    @property
-    def _no_dix_de_der(self) -> bool: return self.boss_modifiers.no_dix_de_der
-    @property
-    def _tens_zero(self) -> bool: return self.boss_modifiers.tens_zero
-    @property
-    def _hide_partner_hand(self) -> bool: return self.boss_modifiers.hide_partner_hand
-    @property
-    def _agent_double_active(self) -> bool: return self.boss_modifiers.agent_double_active
-    @property
-    def _partner_forced_pass(self) -> bool: return self.boss_modifiers.partner_forced_pass
-    @property
-    def _lock_trust_zero(self) -> bool: return self.boss_modifiers.lock_trust_zero
-    @property
-    def _separate_scoring(self) -> bool: return self.boss_modifiers.separate_scoring
-
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
 

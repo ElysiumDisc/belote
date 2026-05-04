@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-05-04
+
+Audit follow-up: cleared the last `getattr(state, "_X", False)` boss-flag reads, removed the now-redundant property aliases on `GameState`, and closed three coverage gaps the v2.7 audit flagged.
+
+### Changed
+
+- **`src/belote/scoring.py`** — replaced 12 `getattr(state, "_kings_zero" / "_seven_eight_trump" / "_separate_scoring" / …, False)` reads with direct `state.boss_modifiers.X` access. mypy can now type-check these branches; renaming a flag will surface as an error instead of silently returning `False`. `_calculate_base_points`, `_apply_scoring_modifiers`, and the 10-de-der branch in `score_round` are all migrated.
+- **`src/belote/game.py`** — deleted the 17 underscore property aliases on `GameState` (`_no_belote` … `_separate_scoring`) that previously delegated to `boss_modifiers.*`. `PatchedGameState` keeps its `__getattr__` fallback so `state.patch("_kings_zero", True)` style boss applications and the existing tests at `tests/belatro/test_belatro.py:1496+` continue to work unchanged.
+
+### Added
+
+- **`tests/belatro/test_phase0_coverage.py::test_boss_dynamic_trump_changes_trump_every_two_tricks`** — plays a full 8-trick round under L'Anarchie and asserts trump rotates after tricks 2/4/6 and stays put after trick 8 (`game.py:752`'s `tricks_count < 8` guard). Pairs with the existing seed-determinism test.
+- **`tests/belatro/test_progression.py`** — five endless-mode tests: 2.2× per-offset target scaling (`ante.py:26`), `advance_blind` ante-8 → endless transition, `run_won` flip when not in endless, and `current_blind` dispatch to `endless_ante()` vs the static `ANTE_TABLE`.
+- **`tests/test_undo.py`** (new file, 3 tests) — pins the gameflow history-stack contract: snapshot/pop equality, `stack_base` round-boundary semantics, and round-to-round isolation. Exercises the rollback logic at `src/belote/gameflow.py:264-299` without booting the interactive input layer.
+
+### Audit claims explicitly rejected
+
+The v2.7 audit also recommended five changes that turned out to be wrong or already done; documenting here so future reviewers don't reopen them:
+
+- `@cached_property` on the 17 boss-flag properties — **infeasible**: `GameState` is `@dataclass(frozen=True, slots=True)`; `cached_property` requires `__dict__`, which `slots=True` removes. Verified locally (`TypeError: No '__dict__' attribute…`).
+- "Stale legal-cards cache when `dynamic_trump` swaps trump mid-round" — **not a bug**: `_calculate_legal_cards_impl` (`game.py:457`) takes `trump` as a key parameter, so trump changes naturally produce a different cache entry.
+- "Phantom card fallback in `ai.py:128`" — **already fixed** (the fallback is `legal = hand`).
+- "Cache key uses `Seat` object directly at `game.py:461`" — **wrong**: parameter is `seat_val: int` and `legal_cards()` passes `seat.value`.
+- `belatro/main.py:248` "f-string consistency" — **bogus**: that line is a literal string with no interpolation.
+
+### Test count
+
+381 → **390** (+9: 1 dynamic-trump, 5 endless, 3 undo).
+
 ## [2.7.0] - 2026-05-04
 
 A responsive-layout overhaul: the game now adapts to any terminal between **80×32** (compact) and arbitrarily large (spacious), picking the largest preset that fits and re-detecting on every render so resize-during-play just works.

@@ -369,9 +369,9 @@ def _calculate_base_points(state: GameState, trump: Suit) -> tuple[int, int]:
     taker_pts = 0
     defender_pts = 0
 
-    kings_zero = getattr(state, "_kings_zero", False)
-    tens_zero = getattr(state, "_tens_zero", False)
-    ban_clubs = getattr(state, "_ban_clubs", False)
+    kings_zero = state.boss_modifiers.kings_zero
+    tens_zero = state.boss_modifiers.tens_zero
+    ban_clubs = state.boss_modifiers.ban_clubs
 
     def get_points(card: Card, t: Suit) -> int:
         if kings_zero and card.rank == Rank.KING:
@@ -383,7 +383,7 @@ def _calculate_base_points(state: GameState, trump: Suit) -> tuple[int, int]:
         return card_points_fn(card, t)
 
     for trick in state.completed_tricks:
-        winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+        winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
         if winner is None:
             continue
 
@@ -409,11 +409,11 @@ def _apply_scoring_modifiers(
     taker_team = team_of(state.taker) if state.taker is not None else 0
 
     # Boss: La Competition (Separate scoring)
-    if getattr(state, "_separate_scoring", False) and trump is not None:
+    if state.boss_modifiers.separate_scoring and trump is not None:
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
-        kings_zero = getattr(state, "_kings_zero", False)
-        tens_zero = getattr(state, "_tens_zero", False)
-        ban_clubs = getattr(state, "_ban_clubs", False)
+        kings_zero = state.boss_modifiers.kings_zero
+        tens_zero = state.boss_modifiers.tens_zero
+        ban_clubs = state.boss_modifiers.ban_clubs
 
         def get_p(card: Card, t: Suit) -> int:
             if kings_zero and card.rank == Rank.KING:
@@ -425,7 +425,7 @@ def _apply_scoring_modifiers(
             return card_points_fn(card, t)
 
         for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
             if winner is None:
                 continue
             tp = 0 if (ban_clubs and trick[0].card.suit == Suit.CLUBS) else sum(get_p(tc.card, trump) for tc in trick)
@@ -444,10 +444,10 @@ def _apply_scoring_modifiers(
         messages.append("Compétition: Higher individual score used!")
 
     # Boss: La Reine Noire (Queen of Spades penalty)
-    if getattr(state, "_queen_spades_penalty", False):
+    if state.boss_modifiers.queen_spades_penalty:
         qs = Card(Suit.SPADES, Rank.QUEEN)
         for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
             if winner is not None and any(tc.card == qs for tc in trick):
                 if team_of(winner) == taker_team:
                     taker_pts -= 25
@@ -491,7 +491,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # 2. Last trick bonus
     last_trick_winner = state.last_trick_winner
     last_trick_team: int | None = None
-    if last_trick_winner is not None and not getattr(state, "_no_dix_de_der", False):
+    if last_trick_winner is not None and not state.boss_modifiers.no_dix_de_der:
         last_trick_team = team_of(last_trick_winner)
         if last_trick_team == taker_team:
             taker_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
