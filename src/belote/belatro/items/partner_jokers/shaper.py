@@ -33,11 +33,14 @@ class LaSentinelleP(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.NORTH and event.trump is not None:
-            for card in event.cards:
-                if card.suit == event.trump:
-                    state[f"{self.id}_trump_led"] = True
-                    break
+        # Set flag if North led trump (leader_seat == NORTH and first card was trump)
+        if (
+            event.leader_seat == Seat.NORTH
+            and event.trump is not None
+            and event.cards
+            and event.cards[0].suit == event.trump
+        ):
+            state[f"{self.id}_trump_led"] = True
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:

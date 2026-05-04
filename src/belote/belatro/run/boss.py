@@ -194,6 +194,25 @@ class LaCompetition(BossModifier):
         return state
 
 
+class BetrayalArc(BossModifier):
+    """Phase 2.3 — partner plays the round selfishly mid-game.
+
+    Implementation: sets `partner_throws_trick` so the partner AI sometimes
+    discards winning cards. The flag is honored by the existing AI sabotage
+    paths and is restored after the blind in `_play_blind`.
+    """
+
+    id = "trahison"
+    name = "La Trahison"
+    description = "Partner trust is silently set to 0; partner sabotages from trick 4 onward."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        state.patch("_lock_trust_zero", True)
+        # Re-use the existing agent_double_active flag to drive sabotage in ai.py.
+        state.patch("_agent_double_active", True)
+        return state
+
+
 # ── Registry ───────────────────────────────────────────────────────────────
 
 ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
@@ -214,4 +233,5 @@ ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
     LaSolitude,
     LeDivorce,
     LaCompetition,
+    BetrayalArc,
 ]

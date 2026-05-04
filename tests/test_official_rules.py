@@ -79,9 +79,13 @@ def test_litige_detection() -> None:
     assert breakdown.litige_points_awarded == 81
 
 
-def test_chute_declaration_transfer() -> None:
-    # Taker (South) has a quinte (100) and tierce (20), but loses round.
-    # Defense should get 162 + 120 = 282.
+def test_capot_against_taker_transfers_declarations() -> None:
+    # Taker (South) has a quinte (100) and tierce (20) but the defense (EW)
+    # captures all 8 tricks → capot against the taker. Per official rules,
+    # the taker's declarations transfer to the defense.
+    # Defense should get CAPOT_BASE + transferred decls = 252 + 120 = 372.
+    from belote.config import GLOBAL_CONFIG
+
     south_hand = (
         Card(Suit.HEARTS, Rank.ACE),
         Card(Suit.HEARTS, Rank.KING),
@@ -93,7 +97,6 @@ def test_chute_declaration_transfer() -> None:
         Card(Suit.SPADES, Rank.TEN),  # quinte
     )
 
-    # Give all tricks to East
     tricks = []
     for i in range(8):
         tricks.append(
@@ -117,11 +120,20 @@ def test_chute_declaration_transfer() -> None:
         )
     )
 
-    # Taker (NS) wins round, but Defender (EW) has Belote
-    # NS points: 100 card pts
-    # EW points: 52 card pts + 10 de der + 20 Belote = 82
-    # Since NS(100) > EW(62), NS wins.
-    # But EW should still get their 20 Belote.
+    assert breakdown.is_capot is True
+    assert breakdown.is_failed is True
+    assert breakdown.taker_total == 0
+    # 252 (capot base) + 120 (NS quinte+tierce transferred) = 372
+    assert breakdown.defender_total == GLOBAL_CONFIG.CAPOT_BASE + 120
+
+
+def test_defender_belote_kept_on_taker_success() -> None:
+    # Taker (NS) wins the round, but Defender (EW) holds belote (K-Q of trump).
+    # EW should still receive their 20 belote points even though they lost the round.
+    #
+    # NS points: 101 card pts
+    # EW points: 51 card pts + 10 de der + 20 Belote = 81
+    # NS(101) > EW(51) so NS wins; EW keeps belote.
 
     # Simple tricks to get 100 for NS
     ns_tricks = [

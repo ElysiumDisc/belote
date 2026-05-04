@@ -71,10 +71,13 @@ class SaveManager:
         try:
             with self._save_path.open() as f:
                 data = json.load(f)
+            _default_stats = dict.fromkeys(
+                ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
+            )
             return Profile(
                 unlocked_ids=data.get("unlocked_ids", []),
                 discovered_items=data.get("discovered_items", []),
-                stats=data.get("stats", {}),
+                stats={**_default_stats, **data.get("stats", {})},
             )
         except (FileNotFoundError, json.JSONDecodeError):
             return Profile()

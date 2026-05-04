@@ -52,12 +52,10 @@ class LeDernierMot(Joker):
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.is_last and event.winner == Seat.SOUTH:
-            # Remove the flat Dix de Der bonus and replace with ×2 mult
-            # We use event.card_points to see if it included the 10 bonus.
-            # In standard scoring, card_points for last trick is points + 10.
-            # But if a boss changed it, it might be different.
-            # For now, we'll subtract 10 if it's there.
-            return JokerResult(add_chips=-10, times_mult=2.0)
+            # Remove the flat Dix de Der bonus and replace with ×2 mult.
+            # If no_dix_de_der boss is active the bonus was already 0, so don't subtract.
+            dix_de_der = 0 if state.get("no_dix_de_der", False) else 10
+            return JokerResult(add_chips=-dix_de_der, times_mult=2.0)
         return None
 
 

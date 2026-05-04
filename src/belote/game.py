@@ -194,13 +194,14 @@ class GameState:
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
     litige_points: int = 0
-    
+
     boss_modifiers: BossModifiers = field(default_factory=BossModifiers)
-    
+
     _joker_state: dict[str, object] = field(default_factory=dict)
     _chips: int = 0
     _mult: float = 1.0
     _bonus_money: int = 0
+    _rng: random.Random = field(default_factory=random.Random, compare=False, repr=False)
 
     @property
     def _no_belote(self) -> bool: return self.boss_modifiers.no_belote
@@ -297,6 +298,7 @@ def start_round(state: GameState, rng: random.Random) -> GameState:
         remaining_cards=remaining,
         bidding_round=1,
         belote_holders={},
+        _rng=rng,
     )
 
 
@@ -376,6 +378,8 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
             hand = new_hands[s_idx]
             hand_set = {(c.rank, c.suit) for c in hand}
             for suit in Suit:
+                if not suit.is_card_suit:
+                    continue
                 if (Rank.KING, suit) in hand_set and (Rank.QUEEN, suit) in hand_set:
                     belote_holders[suit] = seat
 
@@ -746,8 +750,8 @@ def play_card(state: GameState, card: Card) -> GameState:
         # Boss: L'Anarchie (Trump changes every 2 tricks)
         current_trump = trump
         if state.boss_modifiers.dynamic_trump and tricks_count % 2 == 0 and tricks_count < 8:
-            possible = [s for s in Suit if s != trump]
-            current_trump = random.choice(possible)
+            possible = [s for s in Suit if s != trump and s.is_card_suit]
+            current_trump = state._rng.choice(possible)
             # Use set_announced to notify user?
             # For now we'll just update it quietly, maybe add a message.
 

@@ -10,6 +10,7 @@ class Economy:
     money: int = 0
     interest_rate: int = 0  # default 0, becomes 1 with La Voute voucher
     max_interest: int = 0  # default 0, becomes 5 with La Voute voucher
+    bonus_per_round: int = 0  # flat bonus paid each round end (La Télescope)
 
     def add_money(self, amount: int) -> None:
         self.money += amount
@@ -27,9 +28,9 @@ class Economy:
         return min(interest, self.max_interest)
 
     def process_round_end(self, points_over_target: int) -> int:
-        """Calculate payout: $1 per 10pts over target + interest."""
+        """Calculate payout: $1 per 10pts over target + interest + flat bonus."""
         base_payout = max(0, points_over_target // 10)
         interest = self.calculate_interest()
-        total = base_payout + interest
+        total = base_payout + interest + self.bonus_per_round
         self.add_money(total)
         return total

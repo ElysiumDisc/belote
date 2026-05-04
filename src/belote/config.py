@@ -27,11 +27,15 @@ class Config:
     def SPEED_TIMINGS(self) -> dict[str, tuple[float, float, float]]:  # noqa: N802
         return dict(self._SPEED_TIMINGS)
 
-    # UI Dimensions
+    # UI Dimensions — kept for backward compatibility with code that hasn't been
+    # migrated to the layout system yet. New code should read from
+    # `belote.ui.layout.choose_layout(cols, rows)` instead.
     CARD_W: int = 9
     CARD_H: int = 7
     CARD_GAP: int = 1
-    MIN_TERM_W: int = 90
+    # Hard floor — `belote.ui.layout.MIN_COLS/MIN_ROWS` is the canonical source;
+    # these mirror it for the startup-time check in main.py.
+    MIN_TERM_W: int = 80
     MIN_TERM_H: int = 32
     THEME_NAME: str = "classic_green"
 
@@ -47,7 +51,7 @@ class Config:
         import contextlib
         with contextlib.suppress(OSError):
             base.mkdir(parents=True, exist_ok=True)
-            
+
         return base / "stats.json"
 
     def ensure_stats_dir(self) -> None:

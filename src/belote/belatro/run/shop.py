@@ -36,8 +36,9 @@ class Shop:
                 if self.profile:
                     self.profile.discover(j_id)
 
-        # 1 Tarot or Planet
-        if random.random() < 0.5:
+        # 1 Tarot or Planet (Le Grimoire guarantees a tarot)
+        force_tarot = getattr(self.run, "guarantee_tarot_in_shop", False)
+        if force_tarot or random.random() < 0.5:
             tarot_ids = list(registry.tarots.keys())
             if tarot_ids:
                 t_id = random.choice(tarot_ids)
@@ -96,14 +97,9 @@ class Shop:
         if isinstance(item, Joker):
             if len(self.run.jokers) < self.run.joker_slots:
                 self.run.jokers.append(item)
+                item.on_purchase(self.run)
         elif isinstance(item, Voucher):
             self.run.vouchers.append(item)
             item.apply(self.run)
-        else:
-            # Planets and Tarots go to a consumable area
-            if len(self.run.consumables) < self.run.consumable_slots:
-                self.run.consumables.append(item)
-            else:
-                # If full, the item is effectively lost or we could refuse purchase.
-                # For now, we'll assume the UI prevents purchase if full, or we just append.
-                self.run.consumables.append(item)
+        elif len(self.run.consumables) < self.run.consumable_slots:
+            self.run.consumables.append(item)

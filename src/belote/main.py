@@ -110,11 +110,17 @@ def main() -> None:
 
     theme_manager.load_selection()
 
-    # Setup terminal
+    # Setup terminal — check against the layout system's compact-preset floor.
+    from .ui.layout import MIN_COLS, MIN_ROWS
+
     cols, rows = shutil.get_terminal_size()
-    if cols < GLOBAL_CONFIG.MIN_TERM_W or rows < GLOBAL_CONFIG.MIN_TERM_H:
+    if cols < MIN_COLS or rows < MIN_ROWS:
         print(f"Error: Terminal too small ({cols}x{rows}).")
-        print(f"Minimum required: {GLOBAL_CONFIG.MIN_TERM_W}x{GLOBAL_CONFIG.MIN_TERM_H}")
+        print(f"Minimum required: {MIN_COLS}x{MIN_ROWS}")
+        print(
+            "Tip: at this resolution the game uses a compact layout. "
+            "For the best experience, resize to 96x38 or larger."
+        )
         sys.exit(1)
 
     guard = TerminalGuard()
@@ -130,6 +136,11 @@ def main() -> None:
     try:
         with KeyReader() as reader:
             guard.enter(reader)
+
+            # Enter alt-screen mode for the entire app session (menu + game).
+            # Without this, every menu frame pollutes the terminal scrollback.
+            sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
+            sys.stdout.flush()
 
             target = args.target
             speed = args.speed
@@ -168,10 +179,10 @@ def main() -> None:
                     if choice != "Start Game":
                         continue
 
-                # Start Game / Rematch
+                # Start Game / Rematch — already in alt-screen, just clear.
                 rematch = False
                 ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[speed]
-                sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
+                sys.stdout.write(clear_screen() + hide_cursor())
                 sys.stdout.flush()
 
                 # Create AI players
@@ -253,8 +264,9 @@ def main() -> None:
                     if rematch:
                         continue
 
-                # Back to menu
-                sys.stdout.write(alt_screen_off())
+                # Back to menu — stay in alt-screen, just clear before the menu
+                # loop starts redrawing.
+                sys.stdout.write(clear_screen())
                 sys.stdout.flush()
 
     except KeyboardInterrupt:

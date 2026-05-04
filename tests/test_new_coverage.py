@@ -296,8 +296,8 @@ def test_failed_bid_taker_declarations_transferred() -> None:
     assert breakdown.defender_total == 252 + 100
 
 
-def test_sort_south_hand_persists_across_plays() -> None:
-    """Sorting via sort_south_hand produces a stable ordering that survives card removal."""
+def test_sort_south_hand_orders_trump_first_and_is_idempotent() -> None:
+    """sort_south_hand puts trump cards first; running it twice yields the same order."""
     trump = Suit.HEARTS
     south_hand = (
         Card(Suit.SPADES, Rank.ACE),

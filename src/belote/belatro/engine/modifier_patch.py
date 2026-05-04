@@ -23,7 +23,7 @@ class PatchedGameState:
         if attr.startswith("_"):
             # Strip leading underscore if it was from the old system
             attr = attr[1:]
-        
+
         # We'll treat all these flat patches as boss_modifiers fields
         boss_fields = {
             "no_belote", "dynamic_trump", "no_consecutive_team_wins", "seven_eight_trump",
@@ -31,7 +31,7 @@ class PatchedGameState:
             "hide_hud", "ban_clubs", "no_dix_de_der", "tens_zero", "hide_partner_hand",
             "agent_double_active", "partner_forced_pass", "lock_trust_zero", "separate_scoring"
         }
-        
+
         if attr in boss_fields:
             current_bm = self.boss_modifiers
             from belote.game import replace
@@ -50,7 +50,7 @@ class PatchedGameState:
         patches = object.__getattribute__(self, "_patches")
         if name in patches:
             return patches[name]
-        
+
         # Backward compatibility for old underscored names
         if name.startswith("_"):
             stripped = name[1:]

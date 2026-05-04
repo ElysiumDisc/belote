@@ -41,23 +41,15 @@ class LaSentinelle(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        trump = state.get("trump")
+        trump = event.trump
         if not trump:
             return None
-        
-        # Detect if we had it (first trick)
-        if not state.get(f"{self.id}_initialized"):
-            # We can't see the initial hand easily here unless we track it.
-            # Let's assume the engine provides 'initial_hand' in state for Jokers.
-            # If not, we check current tricks. 
-            # Actually, let's just check if we play it.
-            state[f"{self.id}_initialized"] = True
 
         for card in event.cards:
             if card.suit == trump and card.rank == Rank.JACK:
+                state[f"{self.id}_had_jack"] = True
                 if event.winner == Seat.SOUTH:
                     state[f"{self.id}_won_with_jack"] = True
-                state[f"{self.id}_had_jack"] = True
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:

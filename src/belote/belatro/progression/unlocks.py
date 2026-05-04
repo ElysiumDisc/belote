@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from belote.game import Seat
+
 from ..engine.event_bus import RoundEndEvent
 from .save import Profile, SaveManager
 
@@ -45,15 +47,29 @@ class UnlockTracker:
             if self.profile.unlock("l_executeur"):
                 print("\n[!] UNLOCKED: L'Exécuteur Joker (Scored a Capot)")
 
-        if event.trump is None:  # Sans Atout
+        # Sans Atout win: NS declared it and succeeded
+        if (
+            event.trump is None
+            and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
+            and not getattr(event.breakdown, "is_failed", False)
+        ):
             self.profile.stats["sans_atout_wins"] += 1
             dirty = True
             if self.profile.unlock("l_ideologue"):
                 print("\n[!] UNLOCKED: L'Idéologue Joker (Won a Sans Atout round)")
 
-        # TODO: Unlock Le Fanatique when Tout Atout is added as a contract type.
-        # Suit enum has no TOUT value, so event.trump.name == "TOUT" can never be True.
-        # Skipped until tout_atout is implemented in the game engine.
+        # Tout Atout win: NS declared it and succeeded.
+        from belote.deck import Suit
+
+        if (
+            event.trump == Suit.TOUT_ATOUT
+            and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
+            and not getattr(event.breakdown, "is_failed", False)
+        ):
+            self.profile.stats["tout_atout_wins"] += 1
+            dirty = True
+            if self.profile.unlock("le_fanatique"):
+                print("\n[!] UNLOCKED: Le Fanatique Joker (Won a Tout Atout round)")
 
         return dirty
 

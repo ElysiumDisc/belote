@@ -97,6 +97,10 @@ class BelAtroGame:
         acc = ScoreAccumulator()
         acc.deck_id = self.run.deck_id
         acc.carnet_active = self.run.show_north_hand
+        acc.target_score = self.run.target_score
+        acc.contract_levels = self.run.contract_levels
+        acc.permanent_chips = self.run.permanent_chips
+        acc.permanent_mult = self.run.permanent_mult
         acc.attach_jokers(self.run.jokers + self.run.partner.jokers)
 
         # UI Implementation of callbacks
@@ -189,6 +193,20 @@ class BelAtroGame:
             boss = boss_cls()
             BelAtroAnnounce.boss_reveal(boss, self.reader)
 
+        # Boss-specific pre-round setup
+        auto_coinche_active = boss is not None and boss.id == "l_avocat"
+        divorce_active = boss is not None and boss.id == "le_divorce"
+
+        if boss is not None and boss.id == "le_fantome_partenaire":
+            show_north = False  # partner hand hidden for this round
+
+        if auto_coinche_active:
+            acc.target_score *= 2  # L'Avocat: target doubles
+
+        if divorce_active:
+            _saved_trust = self.run.partner.trust.value
+            self.run.partner.trust.value = 0  # Le Divorce: freeze trust at 0
+
         # B4: Reset round-specific trust flags
         self.run.partner.trust.auto_capot_used = False
 
@@ -201,40 +219,77 @@ class BelAtroGame:
             acc=acc,
         )
 
+        if divorce_active:
+            self.run.partner.trust.value = _saved_trust  # restore after round
+
         # Check win/loss and update trust
         total = acc.get_total(final_state)
         from belote.scoring import score_round
         bd = score_round(final_state)
         trust = self.run.partner.trust
 
-        if total < self.run.target_score:
-            self.run.run_over = True
-            print(f"RUN OVER - Failed to meet target {self.run.target_score} (scored {total}).")
-            trust.blind_failed()
+        # Phase 2.2: drain pending Tierce charges into the run state.
+        pending = final_state._joker_state.get("_pending_tierce_charge", 0)
+        if isinstance(pending, int) and pending > 0:
+            self.run.tierce_charges += pending
+
+        # Phase 2.3: refresh partner_mood for HUD display.
+        self.run.partner_mood = trust.mood()
+
+        effective_target = acc.target_score  # doubled for L'Avocat, normal otherwise
+        if total < effective_target:
+            # Phase 2.1: Capot Insurance halves the chute loss (one-shot).
+            failure_softened = False
+            if bd.is_failed and self.run.capot_insurance:
+                self.run.capot_insurance = False
+                failure_softened = True
+                # Defer run-over by one blind: the player paid for a safety net.
+                # We treat the round as a survived chute (no run-over flag).
+                print("[Assurance Capot] Chute pénalité divisée par deux — round survived.")
+            if not failure_softened:
+                self.run.run_over = True
+                print(f"RUN OVER - Failed to meet target {effective_target} (scored {total}).")
+            if not divorce_active:
+                trust.blind_failed()
         else:
-            self.run.economy.process_round_end(total - self.run.target_score)
+            payout = self.run.economy.process_round_end(total - self.run.target_score)
+            if auto_coinche_active:
+                self.run.economy.add_money(payout * 2)  # L'Avocat: triple total payout
             if final_state._bonus_money > 0:
                 self.run.economy.add_money(final_state._bonus_money)
-            
-            # Trust: blind beaten
-            if total >= self.run.target_score * 1.5:
-                trust.big_margin_win()
-            else:
-                trust.blind_beaten()
-        
-        # Partner-specific trust events
-        if bd.taker_team == 0 and bd.is_failed:
-            trust.chute()
-        elif bd.is_capot and bd.taker_team == 0:
-            trust.capot_together()
+            if final_state._joker_state.get("puriste_triggered"):
+                extra = max(0, (total - self.run.target_score) // 10)
+                self.run.economy.add_money(extra)  # Le Puriste: double base payout
+
+            if not divorce_active:
+                if total >= self.run.target_score * 1.5:
+                    trust.big_margin_win()
+                else:
+                    trust.blind_beaten()
+
+        # Partner-specific trust events (skipped under Le Divorce)
+        if not divorce_active:
+            if bd.taker_team == 0 and bd.is_failed:
+                trust.chute()
+            elif bd.is_capot and bd.taker_team == 0:
+                trust.capot_together()
 
 
 def main() -> None:
+    import sys
+
+    from ..ansi import alt_screen_off, alt_screen_on, clear_screen, hide_cursor, show_cursor
     from ..input import KeyReader
 
     with KeyReader() as reader:
-        game = BelAtroGame()
-        game.start(reader)
+        sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
+        sys.stdout.flush()
+        try:
+            game = BelAtroGame()
+            game.start(reader)
+        finally:
+            sys.stdout.write(alt_screen_off() + show_cursor())
+            sys.stdout.flush()
 
 
 if __name__ == "__main__":

@@ -41,18 +41,20 @@ class ItemRegistry:
     def get_voucher(self, item_id: str) -> type[Voucher] | None:
         return self.vouchers.get(item_id)
 
-    def get_available_jokers(self, profile: Profile) -> dict[str, type[Joker]]:
+    def get_available_jokers(self, profile: Profile | None) -> dict[str, type[Joker]]:
         return {
             k: v
             for k, v in self.jokers.items()
-            if profile.is_unlocked(k) or not getattr(v, "is_unlockable", False)
+            if not getattr(v, "is_unlockable", False)
+            or (profile is not None and profile.is_unlocked(k))
         }
 
-    def get_available_vouchers(self, profile: Profile) -> dict[str, type[Voucher]]:
+    def get_available_vouchers(self, profile: Profile | None) -> dict[str, type[Voucher]]:
         return {
             k: v
             for k, v in self.vouchers.items()
-            if profile.is_unlocked(k) or not getattr(v, "is_unlockable", False)
+            if not getattr(v, "is_unlockable", False)
+            or (profile is not None and profile.is_unlocked(k))
         }
 
 
@@ -62,11 +64,30 @@ registry = ItemRegistry()
 
 def register_all_items() -> None:
     from . import planets, tarots, vouchers
-    from .jokers import contract, corrupted, economy, hand_comp, trick_timing
+    from .jokers import (
+        annonces,
+        coinche,
+        contract,
+        corrupted,
+        economy,
+        hand_comp,
+        trick_timing,
+    )
     from .partner_jokers import passive, risky, shaper
 
     # Jokers
-    for mod in [trick_timing, hand_comp, contract, economy, corrupted, passive, shaper, risky]:
+    for mod in [
+        trick_timing,
+        hand_comp,
+        contract,
+        economy,
+        corrupted,
+        passive,
+        shaper,
+        risky,
+        coinche,
+        annonces,
+    ]:
         for attr_name in dir(mod):
             attr = getattr(mod, attr_name)
             if isinstance(attr, type) and issubclass(attr, Joker) and attr is not Joker:

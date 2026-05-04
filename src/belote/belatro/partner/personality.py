@@ -78,7 +78,7 @@ class LeFlambeur(PartnerPersonality):
         hand = state.hand_of(Seat.NORTH)
         if not hand:
             return None
-        return random.choice(list(Suit))
+        return random.choice([s for s in Suit if s.is_card_suit])
 
     def should_coinche(self, state: GameState) -> bool:
         return random.random() < 0.2

@@ -68,3 +68,31 @@ class TrustTrack:
     def partner_passes_all(self) -> None:
         """Called when partner deliberately passes every bid (full breakdown)."""
         self.value = 0
+
+    @property
+    def tier(self) -> int:
+        """Five-tier bucketing for partner-joker effect scaling.
+
+        0 (degraded, value 0–2) — partner-joker effects halved
+        1 (base, value 3–4)     — baseline
+        2 (boost, value 5–6)    — +25%
+        3 (strong, value 7–8)   — +50%
+        4 (elite, value 9–10)   — +100%
+
+        Used by partner_jokers/* to scale their JokerResult payloads. The
+        legacy `partner_jokers_double` flag (value≥7) still exists for backward
+        compatibility but tier_for is the new path.
+        """
+        if self.value <= 2:
+            return 0
+        if self.value <= 4:
+            return 1
+        if self.value <= 6:
+            return 2
+        if self.value <= 8:
+            return 3
+        return 4
+
+    def mood(self) -> str:
+        """Single-word descriptor for HUD display: degraded/sulking/neutral/eager/elated."""
+        return ["degraded", "sulking", "neutral", "eager", "elated"][self.tier]

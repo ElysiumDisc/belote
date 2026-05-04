@@ -123,4 +123,31 @@ STARTING_DECKS: list[StartingDeck] = [
             "   Chaos  is  the path  ",
         ),
     ),
+    StartingDeck(
+        id="marseille",
+        name="Le Marseillais",
+        description="Annonces (Tierce/Quarte/Quinte) score x2. Belote/Rebelote disabled.",
+        deck_modifications={"announce_x2": True, "no_belote_rebelote": True},
+        ascii_art=(
+            "  ╔════════════════════╗ ",
+            "  ║  ANNONCES   ×2     ║ ",
+            "  ║  Belote disabled    ║",
+            "  ╚════════════════════╝ ",
+            "   Old-school Marseille ",
+        ),
+    ),
+    StartingDeck(
+        id="coinche",
+        name="Le Coincheur",
+        description="Every round starts pre-coinched. +50 starting Chips, $8 starting cash.",
+        initial_money=8,
+        deck_modifications={"start_coinched": True, "start_chips_bonus": 50},
+        ascii_art=(
+            "    ★  COINCHE!  ★      ",
+            "  ┌──────────────────┐  ",
+            "  │  +50 Chips +$4   │  ",
+            "  └──────────────────┘  ",
+            "   Pre-coinched rounds  ",
+        ),
+    ),
 ]

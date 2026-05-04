@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import TYPE_CHECKING
 
 from .base import Tarot
@@ -23,10 +24,7 @@ class LaRoue(Tarot):
     description = "Gain +1.0 Mult for the remainder of the run (permanently)."
 
     def use(self, run: BelAtroRun, context: object) -> None:
-        # We can't easily store permanent mult on run without a field,
-        # but we can increase base mult if it exists.
-        # For now, let's assume it adds to a permanent_mult field.
-        pass
+        run.permanent_mult += 1.0
 
 
 class LeJugement(Tarot):
@@ -36,8 +34,7 @@ class LeJugement(Tarot):
 
     def use(self, run: BelAtroRun, context: object) -> None:
         from .registry import registry
-        from .base import Joker
-        avail = registry.get_available_jokers(None)
+        avail = registry.get_available_jokers(run.profile)
         if avail:
             j_id = random.choice(list(avail.keys()))
             joker = avail[j_id]()
@@ -64,7 +61,8 @@ class LaPretresse(Tarot):
         planets = list(registry.planets.values())
         for _ in range(2):
             p_cls = random.choice(planets)
-            run.consumables.append(p_cls())
+            if len(run.consumables) < run.consumable_slots:
+                run.consumables.append(p_cls())
 
 
 class LaLune(Tarot):
@@ -92,10 +90,10 @@ class LeFou(Tarot):
     description = "Create a copy of the last Tarot or Planet card used."
 
     def use(self, run: BelAtroRun, context: object) -> None:
-        # Requires tracking last used; for now just give a random Tarot.
         from .registry import registry
-        tarots = list(registry.tarots.values())
-        run.consumables.append(random.choice(tarots)())
+        tarots = [t for t in registry.tarots.values() if t is not type(self)]
+        if tarots and len(run.consumables) < run.consumable_slots:
+            run.consumables.append(random.choice(tarots)())
 
 
 class LaForce(Tarot):
@@ -104,8 +102,7 @@ class LaForce(Tarot):
     description = "Immediately gain +20 Chips permanently."
 
     def use(self, run: BelAtroRun, context: object) -> None:
-        # Similar to La Roue, needs a permanent chips field.
-        pass
+        run.permanent_chips += 20
 
 
 class LeSoleil(Tarot):
@@ -115,3 +112,26 @@ class LeSoleil(Tarot):
 
     def use(self, run: BelAtroRun, context: object) -> None:
         run.economy.money += 10
+
+
+class LaMaisonDieu(Tarot):
+    """Wipes one active boss modifier for the next round."""
+
+    id = "la_maison_dieu"
+    name = "La Maison-Dieu"
+    description = "Disable the active boss modifier for one round."
+
+    def use(self, run: BelAtroRun, context: object) -> None:
+        # The flag is read by _play_blind to skip boss application this blind.
+        run.card_enhancements["disable_next_boss"] = True
+
+
+class LeDiable(Tarot):
+    """Forces the partner to always over-trump for one round."""
+
+    id = "le_diable"
+    name = "Le Diable"
+    description = "Partner always over-cuts the trick (sometimes great, sometimes ruinous) for one round."
+
+    def use(self, run: BelAtroRun, context: object) -> None:
+        run.card_enhancements["partner_overcut_round"] = True

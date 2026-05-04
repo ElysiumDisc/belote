@@ -5,6 +5,156 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-05-04
+
+A responsive-layout overhaul: the game now adapts to any terminal between **80×32** (compact) and arbitrarily large (spacious), picking the largest preset that fits and re-detecting on every render so resize-during-play just works.
+
+### Added
+
+- **Layout system** (`src/belote/ui/layout.py` — new): `LayoutPreset` dataclass and three presets (`COMPACT` 80×32 / `STANDARD` 96×38 / `SPACIOUS` 120×48). `choose_layout(cols, rows)` picks the largest fitting preset. Each preset drives card dimensions, side-column widths, HUD verbosity, and whether the W/E "Last Trick" sidebar is shown.
+- **Adaptive card art** in `render.py`: `_card_face_internal` now keys its cache on `(card_w, card_h)`. Standard / spacious render the full Art Nouveau face art; compact (5-row cards) drops to a clean rank-corners-and-suit design that fits the tighter inner area.
+- **Per-tier HUD formatter**: spacious widths get the verbose form (full labels + help hints + theme name on the right). Compact and standard widths get an abbreviated single-line bar (`BELOTE  T:♥  NS:200(+50)  EW:80(+30)  5/8  Tk:S`) — fits cleanly in 80 cols. The previous unconditional ~132-char HUD was already overflowing at 96 cols pre-2.7.
+- **BelAtro HUD compact mode** (`belatro/ui/hud.py`): drops the joker-name list for `J:N/M [J]` placeholder, abbreviates Ante/Blind/Target labels, adds a partner-mood glyph (`✗ · ○ ● ★`).
+- **Vertical centering**: when the terminal is taller than the rendered content, `render()` pads top + bottom equally so the game centres vertically instead of clinging to the top.
+- **Tests** (`tests/test_layout.py`, 20 tests): preset-selection boundaries, fits-minimum gate, card-cache layout separation, HUD verbosity per tier, vertical centering math, trick-mat dimension consistency, KeyReader factory regression.
+
+### Changed
+
+- **Minimum terminal size**: 90×32 → **80×32**. A 1366×768 monitor at default font (~150×40) now uses the compact preset comfortably; the previous 90-col floor cut off the bottom rows on many practical setups.
+- **Layout-aware redraw**: `render()` clears the screen on layout flavour change (`compact` → `standard`, etc.) so a mid-game resize doesn't leak stale artifacts from the previous layout.
+- **`patch_trick_card` and trick-mat row offsets** are now computed from the active layout (`_trick_row_offsets(layout)` returns the seat→row map), instead of being baked-in at standard-preset dimensions.
+- **Alt-screen mode is entered before the menu loop**, not when "Start Game" is picked. Without this, every menu redraw frame wrote to the regular terminal scrollback; on exit the user saw a wall of cup-template frames in their shell history. Game-start and BelAtro-mode entry points now stay in alt-screen and just clear when transitioning.
+
+### Fixed
+
+- **`KeyReader()` constructor regression** introduced in 2.6.0's `input.py` refactor. The `__new__`-based factory returned a `_UnixKeyReader` instance via `cls.__new__(cls)`, which Python treats as "not a `KeyReader` subclass" and therefore skips `__init__`. Result: `_stdin_fd` was never set and `__enter__` crashed with `AttributeError`. Factory now calls the concrete reader as a normal constructor (`_UnixKeyReader()`), so its `__init__` always runs.
+- **"Infinite main menu" cosmetic bug**: the menu's animation loop was redrawing 3× per second outside of alt-screen mode, so each `clear_screen() + redraw` cycle pushed the previous frame into the terminal scrollback. By the time the user quit the menu, their shell history was filled with overlapping cup templates. Fixed by entering alt-screen mode at the start of the `KeyReader` context, not at game-start.
+
+### Migration notes
+
+- Code that imported `CARD_W`, `CARD_H`, `CARD_GAP`, or `SIDE_COL_W` directly from `belote.ui.render` still works — those constants are now derived from the `STANDARD` preset for back-compat. New code should call `belote.ui.layout.choose_layout(cols, rows)` and read dimensions from the returned `LayoutPreset`.
+- The legacy `partner_jokers_double` flag still forces +1 apply for back-compat with tests setting it directly. New partner-joker scaling reads `ScoreAccumulator.partner_tier` (set from `TrustTrack.tier`).
+
+## [2.6.0] - 2026-05-04
+
+A large BelAtro expansion landed in one release: a Phase 0 audit pass plus six feature areas (see `plans/let-do-all-of-radiant-pizza.md`).
+
+### Fixed
+
+**Critical bugs (audit Phase 0.1)**
+
+- `game.py:750` — `random.choice(possible)` for L'Anarchie's `dynamic_trump` boss used the global RNG, ignoring `--seed`. `GameState` now carries a private `_rng: random.Random` field that `start_round` populates from the seeded RNG, and the dynamic-trump branch reads from it. L'Anarchie rounds are now seed-deterministic.
+- `gameflow.py:125–126` — `if not isinstance(card, Card): return "UNDO"` silently coerced every non-Card return value (including `"OVERLAY"` from the info-toggle key) into UNDO, restarting the round when the user pressed `I`. `run_play` now handles `"OVERLAY"` explicitly (re-prompts; classic mode has no overlay UI). Same bug existed in `run_bidding` — pressing `I` during bidding hit `if isinstance(res, str): return None` and quit the game; now also handled explicitly.
+- `scoring.py:616` — chute scoring hardcoded `162` instead of using `GLOBAL_CONFIG.TOTAL_POINTS + GLOBAL_CONFIG.LAST_TRICK_BONUS`. Replaced; tweaks to either config constant now propagate.
+- `scoring.py:319, 326, 628` — `getattr(state, "_seven_eight_trump", False)` silently returned False if the property got renamed. All three sites now read `state.boss_modifiers.seven_eight_trump` directly (matches the boss-flag pattern).
+- `ai.py:110–112` — `current_trick in sabotage_tricks` operated on an `object`-typed value pulled from `_joker_state` (mypy errored), and `trick_rank(c, state.trump)` could be called with `trump=None`. Now reads `state.boss_modifiers.agent_double_active` (consistent with the rest), narrows `sabotage_tricks` to `frozenset[int]`, and guards on `trump is not None`.
+- `input.py:106–109` — UTF-8 multi-byte handler used `n` for the count of *continuation* bytes, then read `n + 1` bytes. Behaviour was correct but naming was misleading; renamed to `continuation_bytes` / `total_bytes`.
+
+**Test suite hygiene (audit Phase 0.2)**
+
+- `tests/test_official_rules.py::test_chute_declaration_transfer` — first scenario's `breakdown` was overwritten before any assertion, making it dead code. Split into two real tests (one for capot+declaration-transfer, one for defender-belote on taker success).
+- `tests/belatro/test_boss_modifiers_integration.py::test_boss_invert_scoring` — body was just `pass`. Now actually tests La Malédiction zeroing the taker's total when NS wins more tricks.
+- Same file — `(TrickCard(...),) * 4` patterns built four-identical-cards tricks (invalid). Helper `_trick_won_by_south` builds proper four-seat tricks instead.
+- `tests/test_belote.py::test_must_trump_when_void_partner_not_winning` actually tested the partner-winning *exception*. Renamed to `test_void_can_discard_when_partner_winning`.
+- `tests/test_belote.py::test_card_points_sum_152` was a duplicate of `test_total_points_consistency`. Dropped.
+- `tests/test_new_coverage.py::test_sort_south_hand_persists_across_plays` never called `play_card`. Renamed to `test_sort_south_hand_orders_trump_first_and_is_idempotent`.
+- `tests/test_properties.py::test_legal_moves_never_empty` silently `break`-ed on empty hands instead of failing. Now asserts the invariant explicitly.
+
+**Lint/types (audit Phase 0.3)**
+
+- `ruff check`: 72 → 0 errors.
+- `mypy --strict`: 15 → 0 errors. Notably refactored `input.py::KeyReader` from a stub-class with runtime `KeyReader = _UnixKeyReader` reassignment to a polymorphic `__new__`-dispatching base, eliminating attribute-error and type-assignment errors and exposing `_restored` / `restore()` cleanly to callers.
+
+### Added
+
+**Phase 0.4 — Coverage backstop** (`tests/belatro/test_phase0_coverage.py`, 13 tests)
+
+Happy-path tests for jokers, partner personalities, and boss modifiers that subsequent Phase 1+ refactors touch: `LeFanatique`, `LeDiplomate`, `LEconome`, `LeFlambeur`, `LeSacrifie`, `LeFantome`, `LeStratege`, `seven_eight_trump`, `dynamic_trump` seed determinism, `no_dix_de_der`, `agent_double_active`, plus a regression guard on `RoundEndEvent` payload.
+
+**Phase 1 — Plumbing foundations** (`tests/belatro/test_phase1_plumbing.py`, 10 tests)
+
+- `Suit.TOUT_ATOUT` is now a real enum value alongside the four card suits, with an `is_card_suit` property and a `CARD_SUITS` tuple. Every `for suit in Suit:` iteration in `game.py`, `ai.py`, and `belatro/partner/personality.py` is gated on `is_card_suit` so cards/decks are never built with TOUT_ATOUT. Under TOUT_ATOUT every card is treated as trump (`card_points` and `trick_rank` updated). `_SUIT_TO_CONTRACT` includes the new suit. `LeFanatique`'s unlock path is re-enabled in `unlocks.py` (was deferred in 2.5.6).
+- Player-facing **coinche / surcoinche**. After bidding, if the taker is on the EW team, `RoundUICallbacks.prompt_coinche` is called; the AI rolls a seeded 30% surcoinche on top. `BidMadeEvent` and `RoundEndEvent` now carry `coinche_level: int` and `contract: str`; jokers and the economy can react to it.
+- `BeloteAnnouncedEvent` is now actually *emitted* in `round_driver` whenever `state.belote_tracker` flips, with `is_rebelote` set correctly. The event class existed since 2.5.x but was never fired.
+- `Rarity` enum on item base (`COMMON / UNCOMMON / RARE / LEGENDARY`); `Joker` gains `fusable: bool = True` for Phase 3 fusion gating. All existing items default to `Rarity.COMMON`.
+- New `BelAtroRun` fields: `tierce_charges`, `legendary_unlocked`, `endless`, `endless_ante_offset`, `ante_theme`, `capot_insurance`, `partner_mood`.
+
+**Phase 2 — Content** (`tests/belatro/test_phase2_content.py`, 20 tests)
+
+- *Contract jokers* (`items/jokers/coinche.py`): `CoincheStack` (+4 Mult/coinche level on win), `ToutStreak` (consecutive Tout-Atout wins ramp Mult by ×0.5/streak; resets on Tout failure).
+- *Annonce jokers* (`items/jokers/annonces.py`): `TierceCharger` (+5 chips and +1 charge per sequence announced), `RebeloteEcho` (×3 Mult on Rebelote play), `QuinteRoyale` (Legendary — quinte arms a ×4 round multiplier).
+- *Vouchers* (`items/vouchers.py`): `CapotInsurance` (one-shot — chute next round survived without run-over), `TierceForge` (placeholder for shop-side charge spending).
+- *Tarots* (`items/tarots.py`): `LaMaisonDieu` (sets `disable_next_boss` flag), `LeDiable` (sets `partner_overcut_round` flag).
+- *Decks* (`run/decks.py`): `marseille` (annonces ×2, no Belote/Rebelote), `coinche` (+50 starting chips, pre-coinched rounds).
+- *Trust as a real second axis* (`partner/trust.py`): `TrustTrack.tier` (0–4 buckets), `TrustTrack.mood()` returning HUD strings. `ScoreAccumulator.partner_tier` replaces the binary `partner_jokers_double` for partner-joker effect scaling — extra applies follow `(0,0,1,1,2)[tier]`. Legacy `partner_jokers_double` still forces +1 apply for back-compat.
+- *Betrayal Arc boss* (`run/boss.py::BetrayalArc`): forces `lock_trust_zero` and `agent_double_active` for the round, registered in `ALL_BOSS_MODIFIERS`.
+- `_play_blind` (`belatro/main.py`) wires Capot Insurance consumption (one-shot halve on chute) and drains pending Tierce charges into `run.tierce_charges`. `run.partner_mood` is refreshed each blind from `trust.mood()`.
+
+**Phase 3 — Meta** (`tests/belatro/test_phase3_meta.py`, 15 tests)
+
+- *Ante themes* (`run/ante_themes.py`): `AnteTheme` base + `CafeAnte` (+25 chips at ante start, +1 trust on blind-1 win, target 5% softer on boss blind) and `TournoiAnte` (always offers coinche, +money per blind win). `roll_theme(rng_value)` picks one with 30% probability.
+- *Endless mode (La Belote Infinie)*: `BelAtroRun.advance_blind` no longer terminates at ante 8 / blind 2 when `run.endless` is True — instead increments `endless_ante_offset` and restarts the blind cycle. `BelAtroRun.enter_endless()` toggles the flag and clears `run_won`. `calculate_target` accepts `endless_offset` for ×2.2-per-loop super-exponential scaling. `BelAtroRun.current_blind` returns dynamically-built `endless_ante` instances when offset > 0.
+- *Joker fusion* (`items/base.py::fuse_jokers`): two jokers → one with rarity bumped one tier (clamped at RARE — never auto-promotes to LEGENDARY), `fusable=False` on the result so fused jokers can't be re-fused, names concatenated. Rejects legendary inputs and `fusable=False` inputs with `FusionError`.
+
+### Changed
+
+- `GameState` gains a private `_rng: random.Random` field (`compare=False, repr=False`) so seeded randomness is reachable mid-play. Existing call sites that don't pass an RNG continue to work — the field defaults to a fresh `random.Random()`.
+- `BidMadeEvent` and `RoundEndEvent` payload extensions (`coinche_level`, `contract`, `trump`).
+- `make_deck()` builds from `CARD_SUITS` instead of `list(Suit)`; `deck.py` exposes `CARD_SUITS` for clean iteration in BelAtro code.
+- Test count: 303 → 361 (+58 across Phase 0.4, Phase 1, Phase 2, and Phase 3 suites).
+
+## [2.5.6] - 2026-05-03
+
+### Fixed
+
+**Critical crashes (BelAtro module)**
+- `belatro/items/tarots.py`: `random` was never imported — `NameError` on any use of `LeJugement`, `LaPretresse`, or `LeFou`.
+- `belatro/core/run_state.py`: `BelAtroRun` had no `consumables` list — `AttributeError` whenever tarots or the shop tried to add a Planet or Tarot to the player's inventory.
+- `belatro/run/shop.py`: `run.consumables` crash removed; the double-append fallback in the overflow branch also removed.
+- `belatro/items/registry.py`: `get_available_jokers(None)` and `get_available_vouchers(None)` crashed with `AttributeError` — both now accept `Profile | None` and treat `None` as "show all non-unlockable items".
+- `belatro/engine/round_driver.py`: `Suit` was referenced in type annotations but never imported — `NameError` on module load.
+- `belatro/progression/save.py`: `stats=data.get("stats", {})` returned an empty dict on profiles missing any stat key, causing `KeyError` when `unlocks.py` accessed `stats["total_capots"]`. Load now merges against the full default dict.
+- `belatro/engine/event_bus.py`: `EventBus.unsubscribe` called `list.remove` unconditionally — `ValueError` if the handler was never subscribed. Now uses `contextlib.suppress(ValueError)`.
+
+**Logic bugs (jokers / progression)**
+- `LaSentinelle` (`hand_comp.py`): detection loop read `state.get("trump")` which is never written to the joker state dict, so it was always `None` and the joker never fired. Fixed to use `event.trump`.
+- `LeFanatique` (`contract.py`): checked `state.get("contract") != "tout"` but `"contract"` was never injected into joker state, so the joker never activated. `ScoreAccumulator` now injects `event.contract` into joker state on every `BidMadeEvent`. Key corrected to `"tout_atout"` to match actual contract identifiers.
+- `sans_atout_wins` stat (`unlocks.py`): incremented on every Sans Atout round regardless of outcome. Now only counts rounds where the NS team declared Sans Atout and succeeded.
+- `LePuriste` (`contract.py`): `getattr(event.breakdown, "is_failed", True)` — wrong default (`True` = assume failed) silently blocked the joker from ever triggering. Default changed to `False`.
+- `LaSentinelleP` (`shaper.py`): fired `trump_led = True` whenever North won any trick containing trump, including when North was *following* suit. `TrickWonEvent` now carries `leader_seat: Seat` (default `Seat.SOUTH` for backwards compatibility); the joker correctly sets the flag only when `leader_seat == Seat.NORTH` and the lead card was trump.
+- `LeBanquier` (`economy.py`): `state.get("target_score", 80)` hardcoded to 80 because the key was never injected. `ScoreAccumulator.trigger_round_start` now writes `target_score` into the joker state dict.
+- `LeDernierMot` (`trick_timing.py`): hard-coded `add_chips=-10` to cancel the Dix de Der bonus regardless of whether the `no_dix_de_der` boss modifier was active. Now reads `state.get("no_dix_de_der", False)` (injected at round start) and only subtracts when the bonus was actually applied.
+
+**Boss modifier enforcement gaps**
+- `LAvocat` (`l_avocat`): `auto_coinche` flag was set on `BossModifiers` but never read. `_play_blind` now doubles `acc.target_score` before the round; if the player wins, the base payout is tripled (2× added on top of `economy.process_round_end`).
+- `LeDivorce` (`le_divorce`): `lock_trust_zero` flag was set but `TrustTrack` was never frozen. Trust is now temporarily set to 0 before `drive_round` (suppressing partner joker doubling and AI difficulty bonuses), restored to its original value after, and all post-round trust updates (`blind_beaten`, `big_margin_win`, `blind_failed`, `chute`, `capot_together`) are skipped.
+- `LAgentDoubleBoss` (`l_agent_double_boss`): `_agent_double_active` caused North to sabotage for all 8 tricks despite the description stating "a random 3 tricks". `round_driver.drive_round` now picks 3 random trick numbers via the round RNG and stores them in `_joker_state["agent_double_tricks"]`; `ai.py` gates the sabotage behavior on the current trick number.
+- `LeBrouillard` (`le_brouillard`): `hide_hud` flag was set but `BelAtroHUD.render` always drew the chips×mult score line. The score row is now skipped when `state.boss_modifiers.hide_hud` is True.
+- `LeFantomePartenaire` (`le_fantome_partenaire`): `hide_partner_hand` flag was set but `show_north` in `_play_blind` was computed only from `run.show_north_hand` and `trust.shares_void_info`. `show_north` is now forced to `False` when this boss is active, overriding both.
+
+**Joker accuracy**
+- `LePuriste` (`contract.py`): `on_round_end` returned a hard-coded `add_money=10` regardless of the actual round payout. It now sets `joker_state["puriste_triggered"] = True` instead; `_play_blind` reads the flag after `economy.process_round_end` and adds an equal extra amount, correctly doubling the base payout.
+
+### Added
+
+**Incomplete features now implemented**
+- `BelAtroRun` new fields: `permanent_chips`, `permanent_mult`, `guarantee_tarot_in_shop`, `show_partner_bid_tendency`, `tie_breaks_for_taker`, `partner_throws_trick`.
+- `Economy.bonus_per_round`: flat per-round cash bonus, incremented by vouchers.
+- `Joker.on_purchase(run)`: lifecycle hook called once at buy time for permanent run-level effects. `Shop._apply_item` now calls it after adding a joker.
+- `Planet.use(run)`: applies `level_up_reward()` into `run.contract_levels`, stacking numerically on repeated use.
+- **Tarot cards**: `LaRoue` (`+1.0 permanent Mult`) and `LaForce` (`+20 permanent chips`) fully implemented.
+- **Vouchers**: `LaTelescope` (`+$1/round via bonus_per_round`), `LeGrimoire` (sets `guarantee_tarot_in_shop`), `LEncyclopedie` (sets `show_partner_bid_tendency`), `LesCartesDorees` (`+1 interest rate, +5 interest cap`), and `LaBalance` (sets `tie_breaks_for_taker`) all implemented.
+- **Corrupted joker negative effects**: `LeTraitre.on_purchase` sets `run.partner_throws_trick = True`; `LeDemon.on_purchase` reduces partner trust by 3; `LAgentDouble` tracks a per-round sabotage window in joker state.
+- **Planet contract bonuses consumed**: `ScoreAccumulator` now applies `contract_levels` rewards during play — per-trick chip bonuses (Saturn), per-trick Mult bonuses (Venus), Jack/9 capture bonuses (Jupiter), honor bonuses in Sans Atout (The Moon), capot chip bonus (Pluto), and round-win money bonus (Mercury).
+- **Permanent Tarot bonuses applied**: `ScoreAccumulator.trigger_round_start` applies `permanent_chips` and `permanent_mult` from the run to the initial `GameState` before the round begins.
+- `ScoreAccumulator` wired in `BelAtroGame._play_blind`: `target_score`, `contract_levels`, `permanent_chips`, and `permanent_mult` are now set from the active run before each blind.
+
+### Changed
+- `TrickWonEvent` gains `leader_seat: Seat = Seat.SOUTH` field. `round_driver.drive_round` populates it from `last_trick[0].seat`. All existing event construction and tests remain compatible via the keyword-argument default.
+- `round_driver.py` import cleanup: removed unused `Rank`, `card_points`, `clear_announced`, and `BeloteAnnouncedEvent`; added the missing `Suit`.
+- `Shop.generate_inventory` respects the `guarantee_tarot_in_shop` flag set by `LeGrimoire`.
+- `LeFou` (tarot) no longer adds a copy of itself to consumables; also respects the consumable slot limit.
+
 ## [2.5.5] - 2026-05-03
 
 ### Fixed

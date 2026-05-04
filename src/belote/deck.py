@@ -10,6 +10,10 @@ class Suit(Enum):
     HEARTS = "♥"
     DIAMONDS = "♦"
     CLUBS = "♣"
+    # TOUT_ATOUT is a *contract* identifier, not a card suit. No card carries this
+    # value; iterators over Suit that build cards / decks must filter on
+    # `is_card_suit`.
+    TOUT_ATOUT = "🃏"
 
     @property
     def symbol(self) -> str:
@@ -18,6 +22,14 @@ class Suit(Enum):
     @property
     def is_red(self) -> bool:
         return self in (Suit.HEARTS, Suit.DIAMONDS)
+
+    @property
+    def is_card_suit(self) -> bool:
+        """True if this Suit can appear on a physical card."""
+        return self is not Suit.TOUT_ATOUT
+
+
+CARD_SUITS: tuple[Suit, ...] = (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS)
 
 
 class Rank(Enum):
@@ -42,9 +54,8 @@ class Card:
 
 def make_deck() -> tuple[Card, ...]:
     """Return 32 cards in deterministic order: suits in S/H/D/C, ranks 7→A."""
-    suits = list(Suit)
     ranks = list(Rank)
-    return tuple(Card(s, r) for s in suits for r in ranks)
+    return tuple(Card(s, r) for s in CARD_SUITS for r in ranks)
 
 
 def shuffle(deck: tuple[Card, ...], rng: random.Random) -> tuple[Card, ...]:
@@ -112,15 +123,28 @@ _NONTRUMP_ORDER: dict[Rank, int] = {
 
 def trick_rank(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
     """Higher value = stronger card. Returns 0-15 (trump cards get 8-15)."""
-    is_trump = (card.suit == trump) or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    is_trump = (
+        trump == Suit.TOUT_ATOUT
+        or card.suit == trump
+        or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    )
     if is_trump:
         return 8 + _TRUMP_ORDER[card.rank]
     return _NONTRUMP_ORDER[card.rank]
 
 
 def card_points(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
-    """Point value of a card. Sum over all 32 cards = 152."""
-    is_trump = (card.suit == trump) or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    """Point value of a card.
+
+    Sum over all 32 cards = 152 in the four standard contracts. In TOUT_ATOUT,
+    every card uses the trump scale, which sums to a different total (the
+    BelAtro layer accounts for this in its scoring).
+    """
+    is_trump = (
+        trump == Suit.TOUT_ATOUT
+        or card.suit == trump
+        or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    )
     if is_trump:
         match card.rank:
             case Rank.JACK:

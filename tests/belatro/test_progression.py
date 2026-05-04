@@ -1,6 +1,7 @@
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.items.planets import Saturn
 
+
 def test_planet_level_up():
     """39. Planet level-up - Verify planet level increments and reward applies."""
     run = BelAtroRun()
@@ -16,17 +17,17 @@ def test_ante_progression():
     # Ante 1: Small -> Big -> Boss
     assert run.ante_number == 1
     assert run.blind_index == 0
-    
+
     run.advance_blind() # -> Big
     assert run.blind_index == 1
-    
+
     run.advance_blind() # -> Boss
     assert run.blind_index == 2
-    
+
     run.advance_blind() # -> Ante 2, Small
     assert run.ante_number == 2
     assert run.blind_index == 0
-    
+
     # Verify final progression to win
     run.ante_number = 8
     run.blind_index = 2

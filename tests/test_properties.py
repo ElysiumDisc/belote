@@ -20,7 +20,11 @@ def test_point_conservation_property() -> None:
         shuffled = shuffle(deck, rng)
         hands, up_card, remaining = deal(shuffled)
 
-        for trump in list(up_card.suit.__class__):  # All suits
+        # Iterate over standard card-suit trumps only; TOUT_ATOUT scores every
+        # card as trump and intentionally breaks the 152 invariant.
+        for trump in up_card.suit.__class__:
+            if not trump.is_card_suit:
+                continue
             total = card_points(up_card, trump)
             for hand in hands:
                 total += sum(card_points(c, trump) for c in hand)
@@ -42,9 +46,12 @@ def test_legal_moves_never_empty() -> None:
         while state.phase == Phase.PLAYING:
             seat = state.turn
             hand = state.hand_of(seat)
-            if not hand:
-                # This should not happen in PLAYING before 8 tricks
-                break
+            # An empty hand mid-PLAYING is a deal/play bug; surface it loudly
+            # rather than silently bailing.
+            assert hand, (
+                f"Empty hand for {seat} mid-PLAYING at trick "
+                f"{len(state.completed_tricks)} — invariant violation"
+            )
 
             legal = legal_cards(state, seat)
             assert len(legal) > 0, (

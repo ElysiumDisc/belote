@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import pytest
 from dataclasses import replace
+
 from belote.ai import AIPlayer, Difficulty
 from belote.belatro.core.scoring import ScoreAccumulator
 from belote.belatro.engine.event_bus import TrickWonEvent
@@ -38,7 +38,6 @@ class TestPartnerTrust:
         # Manually set the flag (usually injected by BossModifier)
         state = replace(state, boss_modifiers=replace(state.boss_modifiers, partner_forced_pass=True))
 
-        partner_state = PartnerState()
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
 
         # Should return None regardless of hand
@@ -59,7 +58,7 @@ class TestPartnerTrust:
         state = replace(state, trump=Suit.SPADES, boss_modifiers=replace(state.boss_modifiers, agent_double_active=True), turn=Seat.NORTH)
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
         played = ai.decide_card(state)
-        
+
         # Agent Double makes partner play the worst card (lowest trick rank)
         # For SPADES trump, JACK is highest, SEVEN is lowest.
         assert played.rank == Rank.SEVEN
@@ -68,23 +67,23 @@ class TestPartnerTrust:
     def test_partner_joker_double_trust(self) -> None:
         """Verify partner joker effects fire twice when partner_jokers_double is True."""
         acc = ScoreAccumulator(partner_jokers_double=True)
-        
+
         class MockPartnerJoker(Joker):
             name = "Mock Partner Joker"
             is_partner_joker = True
             def on_trick_won(self, event: object, joker_state: dict[str, object]) -> JokerResult | None:
                 return JokerResult(add_chips=10)
-        
+
         joker = MockPartnerJoker()
         acc.attach_jokers([joker])
-        
+
         state = GameState(hands=((), (), (), ()))
         # Initial chips 0
         state = replace(state, _chips=0, _mult=1.0)
-        
+
         evt = make_trick_event(winner=Seat.SOUTH)
         new_state = acc.update_state(state, evt)
-        
+
         # 10 chips from original + 10 chips from double trigger = 20
         assert new_state._chips == 20
 
@@ -95,10 +94,10 @@ class TestPartnerTrust:
         trust = TrustTrack(value=3)
         partner_state = PartnerState(trust=trust)
         assert partner_state.difficulty_for(Seat.NORTH) == "medium"
-        
+
         # Test 2: Trust <= 2 -> easy
         trust.value = 2
         assert partner_state.difficulty_for(Seat.NORTH) == "easy"
-        
+
         trust.value = 0
         assert partner_state.difficulty_for(Seat.NORTH) == "easy"

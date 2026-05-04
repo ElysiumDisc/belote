@@ -103,12 +103,15 @@ class AIPlayer:
         hand = state.hand_of(self.seat)
         legal = legal_cards(state, self.seat)
 
-        # Boss: L'Agent Double (Partner sabotages)
-        if getattr(state, "_agent_double_active", False) and self.seat == partner(Seat.SOUTH):
-            # For simplicity, if active, partner picks the 'worst' card (lowest score)
-            # Designing it as 'optimal for opponents' usually means discarding honors or ducking.
+        # Boss: L'Agent Double (Partner sabotages on 3 random tricks)
+        if state.boss_modifiers.agent_double_active and self.seat == partner(Seat.SOUTH):
+            current_trick = len(state.completed_tricks) + 1
+            raw_tricks = state._joker_state.get("agent_double_tricks", frozenset())
+            sabotage_tricks: frozenset[int] = (
+                raw_tricks if isinstance(raw_tricks, frozenset) else frozenset()
+            )
             trump = state.trump
-            if trump:
+            if current_trick in sabotage_tricks and trump is not None:
                 return min(legal, key=lambda c: trick_rank(c, trump))
 
         if not hand:
@@ -136,7 +139,7 @@ class AIPlayer:
         """Bid if hand has >= 2 trump honors (J, 9, A) in any suit."""
         honors = {Rank.JACK, Rank.NINE, Rank.ACE}
         for suit in Suit:
-            if suit == exclude:
+            if suit == exclude or not suit.is_card_suit:
                 continue
             count = sum(1 for c in hand if c.suit == suit and c.rank in honors)
             if count >= 2:
@@ -173,7 +176,7 @@ class AIPlayer:
         if state.bidding_round == 2 and state.bidder_index == 3:
             aggression = 1.0
 
-        avail = [s for s in Suit if s != exclude]
+        avail = [s for s in Suit if s != exclude and s.is_card_suit]
         best_suit = max(avail, key=lambda s: suit_scores[s])
         if suit_scores[best_suit] + personality + aggression >= 4:
             return best_suit
@@ -263,7 +266,11 @@ class AIPlayer:
         # 2. Lead from longest non-trump suit (to establish it)
         non_trumps = [c for c in legal if c.suit != trump]
         if non_trumps:
-            suit_counts = {s: sum(1 for c in non_trumps if c.suit == s) for s in Suit if s != trump}
+            suit_counts = {
+                s: sum(1 for c in non_trumps if c.suit == s)
+                for s in Suit
+                if s != trump and s.is_card_suit
+            }
             best_suit = max(suit_counts, key=lambda s: suit_counts[s])
             if suit_counts[best_suit] > 1:
                 suit_cards = [c for c in non_trumps if c.suit == best_suit]
@@ -290,10 +297,11 @@ class AIPlayer:
         self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None
     ) -> Suit | None:
         """Monte-Carlo-lite bidding evaluation with personality."""
-        suit_scores: dict[Suit, float] = dict.fromkeys(Suit, 0.0)
+        card_suits = [s for s in Suit if s.is_card_suit]
+        suit_scores: dict[Suit, float] = dict.fromkeys(card_suits, 0.0)
         personality = self._rng.uniform(-0.8, 0.8)
 
-        for suit in Suit:
+        for suit in card_suits:
             trump_cards = [c for c in hand if c.suit == suit]
             honor_count = sum(1 for c in trump_cards if c.rank in (Rank.JACK, Rank.NINE, Rank.ACE))
             point_total = sum(card_points_fn(c, suit) for c in trump_cards)
@@ -306,7 +314,7 @@ class AIPlayer:
             if state.bidding_round == 2 and state.bidder_index >= 2:
                 suit_scores[suit] += 1.5
 
-            for other in Suit:
+            for other in card_suits:
                 if other != suit:
                     other_count = sum(1 for c in hand if c.suit == other)
                     if other_count == 0:
@@ -314,7 +322,7 @@ class AIPlayer:
                     elif other_count == 1:
                         suit_scores[suit] += 1
 
-        avail = [s for s in Suit if s != exclude]
+        avail = [s for s in card_suits if s != exclude]
         best_suit = max(avail, key=lambda s: suit_scores[s])
         if suit_scores[best_suit] + personality >= 6:
             return best_suit

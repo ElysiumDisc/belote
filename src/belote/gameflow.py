@@ -75,6 +75,9 @@ def run_bidding(
                 return None
             if res == "UNDO":
                 return "UNDO"
+            if res == "OVERLAY":
+                # Classic mode has no separate score overlay; re-prompt for a real bid.
+                continue
             if isinstance(res, str):
                 return None
             bid: Suit | None = res
@@ -122,6 +125,9 @@ def run_play(
                 return None
             if card == "UNDO":
                 return "UNDO"
+            if card == "OVERLAY":
+                # Classic mode has no separate score overlay; re-prompt for a real card.
+                continue
             if not isinstance(card, Card):
                 return "UNDO"
         else:

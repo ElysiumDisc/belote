@@ -35,6 +35,10 @@ belatro
 | **Le Carnet** | See partner's full hand every round. +1 Mult each time South wins a trick |
 | La Voûte | Earn $1 interest per $5 held, up to $5/round |
 | La Double Donne | +1 Joker slot |
+| **La Télescope** | +$1 flat bonus after every round |
+| **Le Grimoire** | Shop always stocks at least one Tarot card |
+| **Les Cartes Dorées** | +1 interest rate and +5 interest cap permanently |
+| **La Balance** | Your team wins automatically on a card-point tie |
 | La Surcoinche | Unlocks the Surcoinche contract *(unlockable)* |
 
 ## Showcase
@@ -91,7 +95,7 @@ belatro
 
 - Python >= 3.10
 - No third-party dependencies (stdlib only)
-- Terminal with >= 90 columns x 32 rows
+- Terminal with >= **80 columns × 32 rows** (compact preset). Recommended: 96×38 (standard) or 120×48 (spacious) for the full Art Nouveau card art and verbose HUD. The game auto-selects the best fit and adapts on resize.
 - UTF-8 support (for card symbols: ♠♥♦♣)
 
 ## Quick Start
@@ -144,7 +148,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 ## Features
 
-- **BelAtro Roguelite Mode:** A massive expansion featuring 50+ Jokers, 15+ Tarot cards, and permanent upgrades.
+- **BelAtro Roguelite Mode:** A massive expansion featuring 50+ Jokers, 10 Tarot cards, and permanent upgrades.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
 - **Full Boss Blind Suite:** All 17 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
@@ -157,8 +161,8 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
 - **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
 - **Statistics:** unified global tracking of games played, win rates, best rounds, and BelAtro expansion milestones.
-- **Dynamic Adaptive UI:** Menu art and text automatically center based on terminal width.
-- **Alternate Screen Buffer:** BelAtro uses a dedicated terminal buffer for a clean, non-overlapping interface.
+- **Responsive Layout (3 tiers):** Three preset layouts — **compact** (80×32, fits 1366×768), **standard** (96×38), **spacious** (120×48+). The game picks the largest preset that fits your terminal on every render, so resizing mid-game adapts automatically; cards, side columns, and HUD verbosity all scale with the preset. Vertical centering pads tall terminals so the game never clings to the top.
+- **Alternate Screen Buffer:** Both classic Belote and BelAtro run in a dedicated terminal buffer for a clean, non-overlapping interface — your shell scrollback stays untouched after you quit.
 - **Sound Effects:** Enhanced auditory feedback for trick wins, Belote, and Capot, with a built-in mute toggle.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
@@ -214,14 +218,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **305 tests** passing with 100% coverage on core logic.
+Currently **303 tests** passing with 100% coverage on core logic.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 305/305 passed
+- **pytest**: 303/303 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

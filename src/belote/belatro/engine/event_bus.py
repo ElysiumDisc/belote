@@ -18,6 +18,7 @@ class TrickWonEvent:
     is_last: bool
     card_points: int  # raw card pts in this trick
     trump: Suit | None
+    leader_seat: Seat = Seat.SOUTH  # who led this trick
 
 
 @dataclass(frozen=True)
@@ -40,13 +41,16 @@ class RoundEndEvent:
     trump: Suit | None
     capot: bool
     hand_remainder: tuple[Card, ...] = ()
+    contract: str = "normal"
+    coinche_level: int = 0  # 0=none, 1=coinche, 2=surcoinche
 
 
 @dataclass(frozen=True)
 class BidMadeEvent:
     seat: Seat
     trump: Suit | None  # None = pass
-    contract: str  # "normal" | "tout" | "sans" | "coinche" | "surcoinche"
+    contract: str  # "normal" | "tout_atout" | "sans_atout" | "coinche" | "surcoinche"
+    coinche_level: int = 0  # 0=none, 1=coinche, 2=surcoinche
 
 
 # ── Bus ────────────────────────────────────────────────────────────────────
@@ -65,7 +69,10 @@ class EventBus:
         self._handlers.append(handler)
 
     def unsubscribe(self, handler: Handler) -> None:
-        self._handlers.remove(handler)
+        import contextlib
+
+        with contextlib.suppress(ValueError):
+            self._handlers.remove(handler)
 
     def emit(self, event: AnyEvent) -> None:
         for h in list(self._handlers):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import pytest
 from dataclasses import replace
+
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.core.scoring import ScoreAccumulator
 from belote.belatro.engine.event_bus import TrickWonEvent
@@ -34,7 +34,7 @@ class TestDeckVariants:
         acc = ScoreAccumulator(deck_id="republicain")
         state = GameState(hands=((), (), (), ()))
         state = replace(state, _chips=0, _mult=1.0)
-        
+
         # Trick with a 7 and an 8
         cards = (
             Card(Suit.SPADES, Rank.SEVEN),
@@ -44,9 +44,9 @@ class TestDeckVariants:
         )
         # card_points is what the trick itself scored (e.g. from Ace and King)
         evt = make_trick_event(cards=cards, card_points=15)
-        
+
         new_state = acc.update_state(state, evt)
-        
+
         # Base chips (15) + 2 wild cards * 5 chips = 25
         assert new_state._chips == 25
 

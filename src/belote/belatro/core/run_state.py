@@ -29,8 +29,28 @@ class BelAtroRun:
     # ── Collectibles ───────────────────────────────────────
     jokers: list[Joker] = field(default_factory=list)
     vouchers: list[Voucher] = field(default_factory=list)
+    consumables: list[Any] = field(default_factory=list)  # Tarot/Planet instances
     joker_slots: int = MAX_JOKER_SLOTS
     consumable_slots: int = DEFAULT_CONSUMABLE_SLOTS
+
+    # ── Permanent run bonuses (from Tarot cards) ───────────
+    permanent_chips: int = 0
+    permanent_mult: float = 1.0
+
+    # ── Voucher flags ───────────────────────────────────────
+    guarantee_tarot_in_shop: bool = False
+    show_partner_bid_tendency: bool = False
+    tie_breaks_for_taker: bool = False
+    partner_throws_trick: bool = False
+    capot_insurance: bool = False  # one-shot: halve a chute loss
+
+    # ── Phase 1+ feature flags ──────────────────────────────
+    tierce_charges: int = 0
+    legendary_unlocked: set[str] = field(default_factory=set)
+    endless: bool = False
+    endless_ante_offset: int = 0
+    ante_theme: str | None = None
+    partner_mood: str = "neutral"
 
     # ── Economy ────────────────────────────────────────────
     economy: Economy = field(default_factory=Economy)
@@ -74,11 +94,23 @@ class BelAtroRun:
                         planet_instance = planet_cls()
                         self.contract_levels[planet_instance.contract_id] = planet_instance.level_up_reward()
 
+            # Phase 2.4 deck mods
+            if deck.deck_modifications.get("start_chips_bonus"):
+                self.permanent_chips += int(deck.deck_modifications["start_chips_bonus"])
+            if deck.deck_modifications.get("start_coinched"):
+                self.card_enhancements["start_coinched"] = True
+            if deck.deck_modifications.get("announce_x2"):
+                self.card_enhancements["announce_x2"] = True
+            if deck.deck_modifications.get("no_belote_rebelote"):
+                self.card_enhancements["no_belote_rebelote"] = True
+
     # ── Current blind target ───────────────────────────────
     @property
     def current_blind(self) -> Ante:
-        from ..run.ante import ANTE_TABLE
+        from ..run.ante import ANTE_TABLE, endless_ante
 
+        if self.endless and self.endless_ante_offset > 0:
+            return endless_ante(self.ante_number, self.blind_index, self.endless_ante_offset)
         return ANTE_TABLE[self.ante_number - 1][self.blind_index]
 
     @property
@@ -88,8 +120,22 @@ class BelAtroRun:
     def advance_blind(self) -> None:
         if self.blind_index < 2:
             self.blind_index += 1
-        elif self.ante_number < 8:
+            return
+        # End of an ante.
+        if self.ante_number < 8:
             self.ante_number += 1
             self.blind_index = 0
-        else:
-            self.run_won = True
+            return
+        # End of ante 8.
+        if self.endless:
+            # Stay at ante 8, increment endless offset, restart blind cycle.
+            self.endless_ante_offset += 1
+            self.blind_index = 0
+            return
+        # Standard run completion.
+        self.run_won = True
+
+    def enter_endless(self) -> None:
+        """Toggle endless mode after beating ante 8."""
+        self.endless = True
+        self.run_won = False  # endless overrides run-won state

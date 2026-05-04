@@ -38,8 +38,8 @@ class LeFanatique(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        # Only activates on Tout Atout
-        if state.get("contract") != "tout":
+        # Only activates on Tout Atout (contract set in joker_state via BidMadeEvent)
+        if state.get("contract") != "tout_atout":
             return None
 
         if event.winner == Seat.SOUTH:
@@ -106,15 +106,13 @@ class LePuriste(Joker):
     cost = 7
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        # Sans Atout means trump is None.
+        # Sans Atout means trump is None. Flag triggers double payout in _play_blind.
         if (
             event.trump is None
-            and not getattr(event.breakdown, "is_failed", True)
+            and not getattr(event.breakdown, "is_failed", False)
             and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
         ):
-            return JokerResult(
-                add_money=10
-            )  # Using a fixed $10 as a stand-in for "double cash payout"
+            state["puriste_triggered"] = True
         return None
 
 

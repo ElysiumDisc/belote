@@ -315,15 +315,14 @@ def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None
     if not all_tricks or len(all_tricks) < 8:
         return None
 
-    first_winner = trick_winner_seat(
-        all_tricks[0], state.trump, getattr(state, "_seven_eight_trump", False)
-    )
+    se_trump = state.boss_modifiers.seven_eight_trump
+    first_winner = trick_winner_seat(all_tricks[0], state.trump, se_trump)
     if first_winner is None:
         return None
     winning_team = team_of(first_winner)
 
     for trick in all_tricks[1:]:
-        winner = trick_winner_seat(trick, state.trump, getattr(state, "_seven_eight_trump", False))
+        winner = trick_winner_seat(trick, state.trump, se_trump)
         if winner is None or team_of(winner) != winning_team:
             return None
     return winning_team
@@ -485,7 +484,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     trump = state.trump
     taker_team = team_of(state.taker)
     defender_team = 1 - taker_team
-    
+
     # 1. Base Card Points
     taker_card_pts, defender_card_pts = _calculate_base_points(state, trump)
 
@@ -613,7 +612,12 @@ def score_round(state: GameState) -> ScoringBreakdown:
         is_failed = True
         messages.append("Chute! (bid failed)")
         defender_total = (
-            162 + defender_declarations + taker_declarations + defender_belote + state.litige_points
+            GLOBAL_CONFIG.TOTAL_POINTS
+            + GLOBAL_CONFIG.LAST_TRICK_BONUS
+            + defender_declarations
+            + taker_declarations
+            + defender_belote
+            + state.litige_points
         )
         taker_total = taker_belote
     else:
@@ -624,8 +628,9 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # Boss: La Malediction (Invert scoring)
     if state.boss_modifiers.invert_scoring:
         t_tricks = 0
+        se_trump = state.boss_modifiers.seven_eight_trump
         for trick in state.completed_tricks:
-            w = trick_winner_seat(trick, trump, getattr(state, "_seven_eight_trump", False))
+            w = trick_winner_seat(trick, trump, se_trump)
             if w is not None and team_of(w) == taker_team:
                 t_tricks += 1
 

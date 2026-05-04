@@ -47,26 +47,27 @@ class TestDeckIntegrity:
         deck = make_deck()
         suits = {c.suit for c in deck}
         ranks = {c.rank for c in deck}
-        assert suits == set(Suit)
+        # The deck contains exactly the four card-bearing suits (TOUT_ATOUT is
+        # a contract identifier, not a card suit).
+        assert suits == {s for s in Suit if s.is_card_suit}
         assert ranks == set(Rank)
 
     def test_total_points_consistency(self) -> None:
-        """TOTAL_POINTS (152) + LAST_TRICK_BONUS (10) must equal 162."""
+        """TOTAL_POINTS (152) + LAST_TRICK_BONUS (10) must equal 162.
+
+        Also verifies card_points over the full deck sums to TOTAL_POINTS for every
+        standard trump. Tout Atout (every card scored as trump) sums higher and is
+        not part of this invariant.
+        """
         assert GLOBAL_CONFIG.TOTAL_POINTS == 152
         assert GLOBAL_CONFIG.LAST_TRICK_BONUS == 10
 
-        # Verify card points sum to TOTAL_POINTS for all trumps
         for trump in Suit:
+            if not trump.is_card_suit:
+                continue
             deck = make_deck()
             total = sum(card_points(c, trump) for c in deck)
-            assert total == GLOBAL_CONFIG.TOTAL_POINTS
-
-    def test_card_points_sum_152(self) -> None:
-        """Sum of card_points over all 32 cards must equal 152 for any trump suit."""
-        deck = make_deck()
-        for trump in Suit:
-            total = sum(card_points(c, trump) for c in deck)
-            assert total == 152, f"Sum for trump {trump} = {total}"
+            assert total == GLOBAL_CONFIG.TOTAL_POINTS, f"Sum for trump {trump} = {total}"
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +226,8 @@ class TestLegalMoves:
         assert Card(Suit.HEARTS, Rank.QUEEN) in legal
         assert Card(Suit.SPADES, Rank.JACK) not in legal
 
-    def test_must_trump_when_void_partner_not_winning(self) -> None:
-        """Void in led suit + partner not winning → must trump."""
+    def test_void_can_discard_when_partner_winning(self) -> None:
+        """Void in led suit + partner currently winning → may discard or trump (not forced)."""
         trump = Suit.SPADES
         state = _make_play_state(
             hands={
@@ -241,10 +242,10 @@ class TestLegalMoves:
             ],
         )
         # North is partner of South (who's winning). North is void in hearts.
-        # Partner (South) IS winning → can discard
+        # Partner (South) IS winning → North can discard a non-trump.
         legal = legal_cards(state, Seat.NORTH)
         assert Card(Suit.DIAMONDS, Rank.ACE) in legal
-        # But trump should also be legal (not forced to trump when partner winning)
+        # And trump is also legal (not forced when partner is winning).
         assert Card(Suit.SPADES, Rank.JACK) in legal
 
     def test_must_overtrump(self) -> None:
@@ -428,17 +429,17 @@ class TestSequences:
 
 class TestCarres:
     def test_carre_jacks(self) -> None:
-        hand = tuple(Card(s, Rank.JACK) for s in Suit)
+        hand = tuple(Card(s, Rank.JACK) for s in Suit if s.is_card_suit)
         carres = detect_carres(hand)
         assert len(carres) == 1
 
     def test_carre_nines(self) -> None:
-        hand = tuple(Card(s, Rank.NINE) for s in Suit)
+        hand = tuple(Card(s, Rank.NINE) for s in Suit if s.is_card_suit)
         carres = detect_carres(hand)
         assert len(carres) == 1
 
     def test_carre_sevens_no_count(self) -> None:
-        hand = tuple(Card(s, Rank.SEVEN) for s in Suit)
+        hand = tuple(Card(s, Rank.SEVEN) for s in Suit if s.is_card_suit)
         carres = detect_carres(hand)
         assert len(carres) == 1  # detected but worth 0 points
 
@@ -463,7 +464,7 @@ class TestDeclarationPriority:
         from belote.scoring import Carre, Sequence
 
         trump = Suit.SPADES
-        jack_carre = Carre(rank=5, cards=tuple(Card(s, Rank.JACK) for s in Suit))
+        jack_carre = Carre(rank=5, cards=tuple(Card(s, Rank.JACK) for s in Suit if s.is_card_suit))
         seq = Sequence(length=5, top_rank=8, suit=Suit.HEARTS, is_trump=False, cards=())
 
         decls = {

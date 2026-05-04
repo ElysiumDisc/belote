@@ -38,6 +38,7 @@ def make_trick_event(
     card_points: int = 0,
     cards: tuple[Card, ...] = (),
     trump: Suit | None = None,
+    leader_seat: Seat = Seat.SOUTH,
 ) -> TrickWonEvent:
     from belote.belatro.engine.event_bus import TrickWonEvent
 
@@ -48,6 +49,7 @@ def make_trick_event(
         is_last=is_last,
         card_points=card_points,
         trump=trump,
+        leader_seat=leader_seat,
     )
 
 
@@ -942,6 +944,7 @@ class TestLaSentinelleP:
             trick_number=trick_number,
             cards=(trump_card,),
             trump=self.trump,
+            leader_seat=Seat.NORTH,  # North leads trump
         )
 
     def _make_plain_win(self, trick_number: int = 1) -> TrickWonEvent:
@@ -1072,7 +1075,7 @@ class TestLePuriste:
         self.joker = LePuriste()
         self.state: dict[str, Any] = {}
 
-    def test_sans_atout_win_gives_money(self) -> None:
+    def test_sans_atout_win_sets_flag(self) -> None:
         from belote.scoring import ScoringBreakdown
 
         breakdown = ScoringBreakdown(
@@ -1095,8 +1098,8 @@ class TestLePuriste:
         )
         evt = make_round_end_event(breakdown=breakdown, taker_seat=Seat.SOUTH, trump=None)
         result = self.joker.on_round_end(evt, self.state)
-        assert result is not None
-        assert result.add_money == 10
+        assert result is None
+        assert self.state.get("puriste_triggered") is True
 
     def test_atout_win_returns_none(self) -> None:
         from belote.scoring import ScoringBreakdown

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import select
 import sys
@@ -9,7 +8,7 @@ import time
 import tty
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 
 class Key(Enum):
@@ -82,10 +81,14 @@ class _UnixKeyReader:
                 # Likely an arrow key
                 code_byte = os.read(self._stdin_fd, 1)
                 match code_byte:
-                    case b"A": return KeyEvent(Key.UP)
-                    case b"B": return KeyEvent(Key.DOWN)
-                    case b"C": return KeyEvent(Key.RIGHT)
-                    case b"D": return KeyEvent(Key.LEFT)
+                    case b"A":
+                        return KeyEvent(Key.UP)
+                    case b"B":
+                        return KeyEvent(Key.DOWN)
+                    case b"C":
+                        return KeyEvent(Key.RIGHT)
+                    case b"D":
+                        return KeyEvent(Key.LEFT)
             return KeyEvent(Key.ESC)
 
         # Enter
@@ -102,16 +105,22 @@ class _UnixKeyReader:
 
         # Multi-byte UTF-8 handling
         if byte >= 0x80:
-            # Determine how many bytes to read based on UTF-8 encoding
-            if (byte & 0xE0) == 0xC0: n = 1
-            elif (byte & 0xF0) == 0xE0: n = 2
-            elif (byte & 0xF8) == 0xF0: n = 3
-            else: return KeyEvent(Key.ESC)
+            # Number of UTF-8 continuation bytes that follow the leading byte.
+            if (byte & 0xE0) == 0xC0:
+                continuation_bytes = 1
+            elif (byte & 0xF0) == 0xE0:
+                continuation_bytes = 2
+            elif (byte & 0xF8) == 0xF0:
+                continuation_bytes = 3
+            else:
+                return KeyEvent(Key.ESC)
 
+            total_bytes = continuation_bytes + 1
             full_buf = bytes([byte])
-            while len(full_buf) < n + 1:
-                chunk = os.read(self._stdin_fd, n + 1 - len(full_buf))
-                if not chunk: break
+            while len(full_buf) < total_bytes:
+                chunk = os.read(self._stdin_fd, total_bytes - len(full_buf))
+                if not chunk:
+                    break
                 full_buf += chunk
 
             try:
@@ -162,29 +171,71 @@ def interruptible_sleep(seconds: float, reader: KeyReader | None = None) -> KeyE
 
 
 class KeyReader:
-    """Stub for type hinting."""
+    """Polymorphic base + factory.
 
-    def __enter__(self) -> KeyReader: ...
-    def __exit__(self, *args: Any) -> None: ...
-    def read(self) -> KeyEvent: ...
-    def read_timeout(self, timeout: float) -> KeyEvent | None: ...
+    `KeyReader()` returns a fully-constructed concrete platform reader
+    (`_UnixKeyReader` or `_WindowsKeyReader`). The concrete classes don't
+    inherit from `KeyReader` (they were defined that way historically); we
+    therefore call them as plain factories and skip the `KeyReader.__init__`
+    machinery entirely. Type-checks treat the result as `KeyReader`.
+    """
 
+    _restored: bool = False
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> KeyReader:
+        if cls is KeyReader:
+            # Construct the concrete reader fully (its own __new__ + __init__
+            # run); cast for the caller's type narrowing.
+            if os.name == "nt":
+                return cast(KeyReader, _WindowsKeyReader())
+            return cast(KeyReader, _UnixKeyReader())
+        return super().__new__(cls)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        # When __new__ returned a concrete reader (not a KeyReader instance),
+        # Python skips this __init__ — the concrete class's __init__ already ran.
+        # When called on a real KeyReader subclass, this is a no-op.
+        return
+
+    def __enter__(self) -> KeyReader:
+        raise NotImplementedError
+
+    def __exit__(self, *args: Any) -> None:
+        raise NotImplementedError
+
+    def read(self) -> KeyEvent:
+        raise NotImplementedError
+
+    def read_timeout(self, timeout: float) -> KeyEvent | None:
+        raise NotImplementedError
+
+    def restore(self) -> None:
+        """Restore terminal state. No-op on platforms that don't need it."""
+
+
+# `_UnixKeyReader` and `_WindowsKeyReader` are structurally compatible with
+# `KeyReader`; we don't make them subclass it to avoid `__new__` recursion.
 
 if os.name == "nt":
 
     class _WindowsKeyReader:
+        _restored: bool = False
+
         def __enter__(self) -> _WindowsKeyReader:
             return self
 
         def __exit__(self, *args: Any) -> None:
             pass
 
-        def read(self) -> KeyEvent:
-            import msvcrt  # type: ignore[import-not-found]
+        def restore(self) -> None:
+            self._restored = True
 
-            ch = msvcrt.getch()
+        def read(self) -> KeyEvent:
+            import msvcrt
+
+            ch: bytes = msvcrt.getch()  # type: ignore[attr-defined]
             if ch in (b"\x00", b"\xe0"):
-                ch = msvcrt.getch()
+                ch = msvcrt.getch()  # type: ignore[attr-defined]
                 match ch:
                     case b"H":
                         return KeyEvent(Key.UP)
@@ -220,15 +271,11 @@ if os.name == "nt":
                 return KeyEvent(Key.ESC)
 
         def read_timeout(self, timeout: float) -> KeyEvent | None:
-            import msvcrt  # type: ignore[import-not-found]
+            import msvcrt
 
             start = time.time()
             while time.time() - start < timeout:
-                if msvcrt.kbhit():
+                if msvcrt.kbhit():  # type: ignore[attr-defined]
                     return self.read()
                 time.sleep(0.01)
             return None
-
-    KeyReader = _WindowsKeyReader  # type: ignore[misc, assignment]
-else:
-    KeyReader = _UnixKeyReader

@@ -6,12 +6,11 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from belote.ai import AIPlayer, Difficulty
-from belote.deck import Card, Rank, card_points
+from belote.deck import Card, Suit
 from belote.game import (
     GameState,
     Phase,
     Seat,
-    clear_announced,
     clear_legal_cards_cache,
     new_game,
     play_card,
@@ -32,7 +31,6 @@ from .event_bus import (
 
 if TYPE_CHECKING:
     from ..core.scoring import ScoreAccumulator
-    from ..items.base import Voucher
     from ..partner.partner_state import PartnerState
     from ..run.boss import BossModifier
 
@@ -54,6 +52,13 @@ class RoundUICallbacks(ABC):
 
     @abstractmethod
     def on_round_end(self, breakdown: object) -> None: ...
+
+    def prompt_coinche(self, state: GameState, taker: Seat) -> bool:
+        """Ask the player whether to coinche the AI's bid.
+
+        Default no-op returns False. Override in concrete UI (e.g. BelAtro main).
+        """
+        return False
 
 
 def drive_round(
@@ -84,10 +89,16 @@ def drive_round(
         _proxy = PatchedGameState(state)
         boss.apply(_proxy)
         _patches = dict(object.__getattribute__(_proxy, "_patches"))
-        state = replace(state, **_patches)  # type: ignore[arg-type]
+        state = replace(state, **_patches)
 
         # Ensure boss modifiers don't use stale cached logic/values
         clear_legal_cards_cache()
+
+        # L'Agent Double: pick 3 random tricks where sabotage is active
+        if boss.id == "l_agent_double_boss":
+            sabotage_tricks = frozenset(rng.sample(range(1, 9), 3))
+            new_jstate = {**state._joker_state, "agent_double_tricks": sabotage_tricks}
+            state = replace(state, _joker_state=new_jstate)
 
     # B4: Use partner trust-based difficulty for the North (partner) AI seat
     _north_diff_str = partner.difficulty_for(Seat.NORTH)
@@ -100,6 +111,7 @@ def drive_round(
 
     if acc is not None:
         acc.partner_jokers_double = partner.trust.partner_jokers_double
+        acc.partner_tier = partner.trust.tier
 
     def _emit(event: object, s: GameState) -> GameState:
         if acc is not None:
@@ -141,6 +153,38 @@ def drive_round(
             state
         )
 
+    # ── Coinche / surcoinche player flow ─────────────────────────────────
+    # If a taker emerged on the opposing (EW) team, give the player a chance
+    # to coinche; if they coinche, give the AI taker a chance to surcoinche.
+    coinche_level = 0
+    if (
+        state.taker is not None
+        and state.taker in (Seat.EAST, Seat.WEST)
+        and state.phase == Phase.PLAYING
+    ):
+        if ui_callbacks.prompt_coinche(state, state.taker):
+            coinche_level = 1
+            # AI surcoinche: simple heuristic — 30% under the seeded RNG.
+            if rng.random() < 0.3:
+                coinche_level = 2
+            # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
+        if state.boss_modifiers.auto_coinche:
+            coinche_level = max(coinche_level, 1)
+        # Re-emit the final BidMadeEvent so jokers/HUD see the coinche level.
+        if coinche_level > 0:
+            state = _emit(
+                BidMadeEvent(
+                    seat=state.taker,
+                    trump=state.trump,
+                    contract=state.contract or "normal",
+                    coinche_level=coinche_level,
+                ),
+                state,
+            )
+    elif state.boss_modifiers.auto_coinche and state.phase == Phase.PLAYING:
+        # Boss forces coinche even if taker is on NS team.
+        coinche_level = 1
+
     # If round ended early (everyone passed), emit RoundEndEvent
     if state.phase == Phase.DEAL and len(state.bids) == 0:
         # Everyone passed; state moved back to DEAL by process_bid
@@ -153,6 +197,8 @@ def drive_round(
                 trump=None,
                 capot=False,
                 hand_remainder=tuple(state.hand_of(Seat.SOUTH)),
+                contract=state.contract or "normal",
+                coinche_level=coinche_level,
             ),
             state
         )
@@ -170,9 +216,21 @@ def drive_round(
 
         # Before playing, track points to emit TrickWonEvent with diff
         old_pts_total = sum(state.current_round_points)
+        old_belote_tracker = state.belote_tracker
 
         state = play_card(state, card)
         ui_callbacks.on_card_played(state, player, card)
+
+        # If this play flipped the belote tracker, emit the announce event.
+        # belote_tracker = (belote_played, rebelote_played); compare old vs new.
+        if state.belote_tracker != old_belote_tracker:
+            became_belote = state.belote_tracker[0] and not old_belote_tracker[0]
+            became_rebelote = state.belote_tracker[1] and not old_belote_tracker[1]
+            if became_belote or became_rebelote:
+                state = _emit(
+                    BeloteAnnouncedEvent(seat=player, is_rebelote=became_rebelote),
+                    state,
+                )
 
         if is_last_in_trick(state):
             last_trick = state.completed_tricks[-1]
@@ -188,7 +246,6 @@ def drive_round(
                 for decl in state.declarations:
                     pts = 0
                     if decl.detail and decl.kind in ("sequence", "carre"):
-                        # Correctly calculate declaration points using scoring utility
                         pts = get_declaration_points([decl.detail])
                     state = _emit(
                         DeclarationScoredEvent(
@@ -201,6 +258,7 @@ def drive_round(
 
             is_last = len(state.completed_tricks) == 8
             cards = tuple(tc.card for tc in last_trick)
+            leader_seat = last_trick[0].seat
             state = _emit(
                 TrickWonEvent(
                     winner=winner,
@@ -209,6 +267,7 @@ def drive_round(
                     is_last=is_last,
                     card_points=points,
                     trump=state.trump,
+                    leader_seat=leader_seat,
                 ),
                 state
             )
@@ -225,11 +284,13 @@ def drive_round(
                 trump=state.trump,
                 capot=is_capot(state) is not None,
                 hand_remainder=hand_remainder,
+                contract=state.contract or "normal",
+                coinche_level=coinche_level,
             ),
             state
         )
         ui_callbacks.on_round_end(breakdown)
-    
+
     return state
 
 
