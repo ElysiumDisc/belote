@@ -136,6 +136,13 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
         display(state, None)
         term_w, _ = get_term_size()
 
+        # L'Encyclopédie voucher: surface partner bidding tendency before each bid.
+        tendency = state._joker_state.get("partner_bid_tendency_text")
+        if isinstance(tendency, str) and tendency:
+            sys.stdout.write(
+                "\r\n" + ansi_center(f"{DIM}{tendency}{RESET}", term_w) + "\r\n"
+            )
+
         if state.bidding_round == 2:
             # Nice boxed UI for round 2
             inner_w = 40

@@ -541,8 +541,19 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     se_trump = state.boss_modifiers.seven_eight_trump
 
     res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value, se_trump)
+    res_cards = tuple(_ID_TO_CARD[i] for i in res_ids)
 
-    return tuple(_ID_TO_CARD[i] for i in res_ids)
+    # Le Républicain deck: 7s/8s are wild and always legal in addition to the
+    # normal options. Union (preserve order, don't double up).
+    if state._joker_state.get("republicain_wild") and state.current_trick:
+        existing = set(res_cards)
+        wild_extras = tuple(
+            c for c in hand if c.rank in (Rank.SEVEN, Rank.EIGHT) and c not in existing
+        )
+        if wild_extras:
+            res_cards = res_cards + wild_extras
+
+    return res_cards
 
 
 def _current_trick_winner(
@@ -674,7 +685,13 @@ def play_card(state: GameState, card: Card) -> GameState:
                         winner = best_other
 
         if winner is None:
-            winner = state.turn.prev_seat()
+            # Unreachable: trick has 4 cards and trump is set (PLAYING phase
+            # guarantees both). Surface this as a hard error instead of papering
+            # over what would be state corruption.
+            raise AssertionError(
+                "trick_winner_seat returned None for a complete 4-card trick — "
+                "GameState invariant violated."
+            )
 
         new_completed = state.completed_tricks + (new_trick,)
         tricks_count = len(new_completed)
@@ -813,14 +830,25 @@ _NORMAL_RANK_IDX: Final = {
 }
 
 
-def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
-    """Sort hand by suit and rank (trump first, then others, honors together)."""
+def _build_suit_idx(trump: Suit | None) -> dict[Suit, int]:
     suits_order = list(_SUITS_ORDER)
-    if trump:
+    if trump and trump in suits_order:
         suits_order.remove(trump)
         suits_order.insert(0, trump)
+    return {s: i for i, s in enumerate(suits_order)}
 
-    suit_idx = {s: i for i, s in enumerate(suits_order)}
+
+# Pre-compute suit→position maps for every possible trump value (None + the
+# four card suits). sort_hand is called frequently during rendering and this
+# keeps the hot path branch-free.
+_SUIT_IDX_CACHE: Final[dict[Suit | None, dict[Suit, int]]] = {
+    trump: _build_suit_idx(trump) for trump in (None, *_SUITS_ORDER)
+}
+
+
+def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
+    """Sort hand by suit and rank (trump first, then others, honors together)."""
+    suit_idx = _SUIT_IDX_CACHE.get(trump) or _build_suit_idx(trump)
 
     def sort_key(c: Card) -> tuple[int, int]:
         return (

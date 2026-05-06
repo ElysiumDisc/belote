@@ -120,7 +120,7 @@ RULES_CONTENT: dict[str, RulesPage] = {
                 "header": "Les Annonces",
                 "text": (
                     "Des points supplémentaires sont accordés pour des combinaisons:\n"
-                    "• Tierce: 20 pts | Cinquante (4 cartes): 50 pts | Cent (5 cartes): 100 pts\n"
+                    "• Tierce (3 cartes): 20 pts | Quarte (4 cartes): 50 pts | Quinte (5 cartes): 100 pts\n"
                     "• Carré (4 cartes pareilles): Valets=200 pts, Neufs=150 pts, As/R/D/10=100 pts.\n"
                     "• Belote et Rebelote: Le Roi et la Dame d'atout rapportent 20 pts."
                 ),

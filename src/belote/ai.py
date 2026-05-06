@@ -41,6 +41,9 @@ class AIPlayer:
         self.difficulty = difficulty
         self.memory = AIMemory()
         self._rng = random.Random()
+        # Set per decide_card() call from state.boss_modifiers.seven_eight_trump.
+        # All ranking helpers in this class read it via self._se.
+        self._se = False
 
     def update_memory(self, state: GameState) -> None:
         """Update memory with currently visible information."""
@@ -70,6 +73,7 @@ class AIPlayer:
 
     def decide_bid(self, state: GameState) -> Suit | None:
         """Decide whether to bid and which suit."""
+        self._se = state.boss_modifiers.seven_eight_trump
         # Boss: La Solitude (Partner forced pass)
         if state.boss_modifiers.partner_forced_pass and self.seat == partner(Seat.SOUTH):
             return None
@@ -102,6 +106,10 @@ class AIPlayer:
         """Decide which card to play."""
         hand = state.hand_of(self.seat)
         legal = legal_cards(state, self.seat)
+        # La Déluge boss promotes 7s/8s of trump above the Jack — every ranking
+        # / point read in this method must respect that flag or the AI will
+        # pick the wrong cards.
+        self._se = state.boss_modifiers.seven_eight_trump
 
         # Boss: L'Agent Double (Partner sabotages on 3 random tricks)
         if state.boss_modifiers.agent_double_active and self.seat == partner(Seat.SOUTH):
@@ -112,7 +120,7 @@ class AIPlayer:
             )
             trump = state.trump
             if current_trick in sabotage_tricks and trump is not None:
-                return min(legal, key=lambda c: trick_rank(c, trump))
+                return min(legal, key=lambda c: trick_rank(c, trump, self._se))
 
         if not hand:
             # Should never happen — game state is invalid if hand is empty mid-play.
@@ -202,13 +210,13 @@ class AIPlayer:
 
         # Check if partner is winning
         current_winner = _current_trick_winner(
-            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit
+            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se
         )
         partner_winning = current_winner is not None and current_winner == p
 
         if partner_winning and lead_suit != trump:
             # Partner winning, discard low
-            return min(legal, key=lambda c: trick_rank(c, trump))
+            return min(legal, key=lambda c: trick_rank(c, trump, self._se))
 
         if lead_suit == trump:
             # Trump led
@@ -216,19 +224,19 @@ class AIPlayer:
             if my_trumps:
                 if current_winner is not None and current_winner == p:
                     # Partner winning trump, play lowest trump
-                    return min(my_trumps, key=lambda c: trick_rank(c, trump))
+                    return min(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
                 # Try to win if we can afford it
-                return max(my_trumps, key=lambda c: trick_rank(c, trump))
+                return max(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
             # No trumps, discard low non-trump
-            return min(legal, key=lambda c: card_points_fn(c, trump))
+            return min(legal, key=lambda c: card_points_fn(c, trump, self._se))
 
         # Non-trump led
         my_suit = [c for c in legal if c.suit == lead_suit]
         if my_suit:
             # Must follow
             if current_winner is not None and current_winner == p:
-                return min(my_suit, key=lambda c: trick_rank(c, trump))
-            return max(my_suit, key=lambda c: trick_rank(c, trump))
+                return min(my_suit, key=lambda c: trick_rank(c, trump, self._se))
+            return max(my_suit, key=lambda c: trick_rank(c, trump, self._se))
 
         # Void - must trump or discard
         my_trumps = [c for c in legal if c.suit == trump]
@@ -236,14 +244,14 @@ class AIPlayer:
             # Optimized: pick the lowest trump that wins the trick
             # (or the lowest trump if we can't win)
             highest_in_trick = max(
-                (trick_rank(tc.card, trump) for tc in trick), default=-1
+                (trick_rank(tc.card, trump, self._se) for tc in trick), default=-1
             )
-            winners = [c for c in my_trumps if trick_rank(c, trump) > highest_in_trick]
+            winners = [c for c in my_trumps if trick_rank(c, trump, self._se) > highest_in_trick]
             if winners:
-                return min(winners, key=lambda c: trick_rank(c, trump))
-            return min(my_trumps, key=lambda c: trick_rank(c, trump))
+                return min(winners, key=lambda c: trick_rank(c, trump, self._se))
+            return min(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
 
-        return min(legal, key=lambda c: card_points_fn(c, trump))
+        return min(legal, key=lambda c: card_points_fn(c, trump, self._se))
 
     def _medium_lead(self, legal: tuple[Card, ...], trump: Suit | None, state: GameState) -> Card:
         """Lead strategy: void forcing, high non-trump A, longest suit, then trump pulls."""
@@ -275,19 +283,19 @@ class AIPlayer:
             if suit_counts[best_suit] > 1:
                 suit_cards = [c for c in non_trumps if c.suit == best_suit]
                 # Lead the highest card of that suit
-                return max(suit_cards, key=lambda c: trick_rank(c, trump))
+                return max(suit_cards, key=lambda c: trick_rank(c, trump, self._se))
 
         # 3. Lead lowest trump to pull if we have many
         trumps = [c for c in legal if c.suit == trump]
         if len(trumps) >= 3:
-            return min(trumps, key=lambda c: trick_rank(c, trump))
+            return min(trumps, key=lambda c: trick_rank(c, trump, self._se))
 
         # 4. Fallback: lead lowest non-trump
         if non_trumps:
-            return min(non_trumps, key=lambda c: trick_rank(c, trump))
+            return min(non_trumps, key=lambda c: trick_rank(c, trump, self._se))
 
         if trumps:
-            return min(trumps, key=lambda c: trick_rank(c, trump))
+            return min(trumps, key=lambda c: trick_rank(c, trump, self._se))
 
         return legal[0]
 
@@ -304,7 +312,7 @@ class AIPlayer:
         for suit in card_suits:
             trump_cards = [c for c in hand if c.suit == suit]
             honor_count = sum(1 for c in trump_cards if c.rank in (Rank.JACK, Rank.NINE, Rank.ACE))
-            point_total = sum(card_points_fn(c, suit) for c in trump_cards)
+            point_total = sum(card_points_fn(c, suit, self._se) for c in trump_cards)
 
             suit_scores[suit] = point_total * 0.5 + honor_count * 3
 
@@ -346,7 +354,7 @@ class AIPlayer:
         p = partner(self.seat)
 
         current_winner = _current_trick_winner(
-            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit
+            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se
         )
         partner_winning = current_winner is not None and current_winner == p
 
@@ -372,7 +380,7 @@ class AIPlayer:
     ) -> float:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
-        points = card_points_fn(card, trump)
+        points = card_points_fn(card, trump, self._se)
         # Base: card point value (prefer keeping high value cards if not winning)
         score += points * 0.1
 
@@ -397,7 +405,7 @@ class AIPlayer:
                 score += 1
         elif card.rank == Rank.ACE:
             score += 5
-        elif card_points_fn(card, trump) == 0:
+        elif card_points_fn(card, trump, self._se) == 0:
             # Leading waste card to probe
             score += 2
         return score
@@ -433,9 +441,9 @@ class AIPlayer:
     ) -> float:
         """Heuristics for trying to win the trick or ducking."""
         score = 0.0
-        rank = trick_rank(card, trump)
+        rank = trick_rank(card, trump, self._se)
         is_last_trick = len(state.completed_tricks) == 7
-        highest_rank = max((trick_rank(tc.card, trump) for tc in trick), default=-1)
+        highest_rank = max((trick_rank(tc.card, trump, self._se) for tc in trick), default=-1)
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
@@ -487,12 +495,12 @@ class AIPlayer:
         # Lead low trump for pulling
         trumps = [c for c in legal if c.suit == trump]
         if trumps:
-            return min(trumps, key=lambda c: trick_rank(c, trump))
+            return min(trumps, key=lambda c: trick_rank(c, trump, self._se))
 
         # Lead lowest non-trump
         non_trumps = [c for c in legal if c.suit != trump]
         if non_trumps:
-            return min(non_trumps, key=lambda c: trick_rank(c, trump))
+            return min(non_trumps, key=lambda c: trick_rank(c, trump, self._se))
 
         return legal[0]
 

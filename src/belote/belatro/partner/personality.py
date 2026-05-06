@@ -71,14 +71,39 @@ class LeFlambeur(PartnerPersonality):
     description = "Bids aggressively. Will randomly Coinche."
 
     def should_bid(self, state: GameState) -> bool:
+        from belote.deck import Rank
+
         hand = state.hand_of(Seat.NORTH)
-        return len(hand) > 0 and random.random() < 0.4
+        if not hand:
+            return False
+        # Aggressive but hand-aware: bid whenever the strongest suit has any
+        # honor (J/9/A) — that's roughly twice as often as Le Courageux's
+        # "2+ honors anywhere" and roughly half as often as the previous flat
+        # 40% coin-flip, so it lives up to "aggressive" without being random.
+        honors = {Rank.JACK, Rank.NINE, Rank.ACE}
+        per_suit_honors = Counter(
+            c.suit for c in hand if c.rank in honors and c.suit.is_card_suit
+        )
+        if not per_suit_honors:
+            return False
+        return per_suit_honors.most_common(1)[0][1] >= 1
 
     def bid_value(self, state: GameState) -> Suit | None:
         hand = state.hand_of(Seat.NORTH)
         if not hand:
             return None
-        return random.choice([s for s in Suit if s.is_card_suit])
+        # Pick the longest suit; tiebreak on most honors. Beats picking a
+        # random suit, which the audit flagged.
+        from belote.deck import Rank
+
+        honors = {Rank.JACK, Rank.NINE, Rank.ACE}
+        length = Counter(c.suit for c in hand if c.suit.is_card_suit)
+        if not length:
+            return None
+        honor_count = Counter(
+            c.suit for c in hand if c.rank in honors and c.suit.is_card_suit
+        )
+        return max(length, key=lambda s: (length[s], honor_count[s]))
 
     def should_coinche(self, state: GameState) -> bool:
         return random.random() < 0.2

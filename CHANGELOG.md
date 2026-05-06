@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-05-06
+
+Two consecutive audit-driven bug-fix sweeps shipped together. The first cleaned up advertised-but-silently-dead BelAtro flags (deck modifiers and vouchers whose `apply()` set state nobody read). The second verified a 5-critical / 12-high / 14-medium / 8-incomplete / 10-perf audit — about 62% of findings were real game-affecting bugs and were fixed; the rest were misreadings of the rules or already-correct code, listed under "Audit claims explicitly rejected" at the bottom. The plan-mode verification report lives at `plans/check-these-findings-accurately-abstract-kahan.md`.
+
+### Fixed — game-affecting correctness (sweep 2)
+
+- **`src/belote/main.py` + `belatro/main.py`** — terminal corruption returning from BelAtro to the main menu. Both files independently entered/exited alt-screen; `BelAtroGame.start()` no longer toggles alt-screen and instead trusts the caller (classic-mode `belote.main` keeps alt-screen across menu↔BelAtro transitions, the standalone `belatro` console script keeps its own wrapper). Audit C1.
+- **`src/belote/ai.py`** — every `trick_rank` / `card_points` / `_current_trick_winner` call now passes `state.boss_modifiers.seven_eight_trump`. AI was previously ranking the trump 7/8 wrong under La Déluge, picking incorrect cards. The flag is cached on `AIPlayer._se` at the top of `decide_card`/`decide_bid` so the threading is one read per decision. Audit C2.
+- **`src/belote/belatro/items/tarots.py::LeFou`** — actually re-applies the last Tarot/Planet effect now. Backed by a new `BelAtroRun.last_consumable_id` field and `BelAtroRun.consume()` helper for centralised activation; falls back to the previous random-tarot behavior when no prior consumable has been recorded. Audit C4.
+- **`src/belote/belatro/items/jokers/trick_timing.py::LePremierSang`** — "+2 Mult for the rest of the round" now keeps paying out on every trick after a trick-1 NS win. The `_active` flag was set but never read, so only trick 1 ever scored. Audit H4.
+- **`src/belote/belatro/items/jokers/corrupted.py::LAgentDouble`** — sabotage counter ("for 2 tricks") decrements every trick instead of only on opponent wins. Previously, NS sweeping the round left the sabotage flag stuck on indefinitely. Audit H5.
+- **`src/belote/belatro/items/vouchers.py::forge_tierce`** — delegates to `Planet.use()` so overlapping numeric levels are summed, matching the regular planet level-up path. Previously a `**existing` dict merge silently dropped earlier levels. Audit H6.
+- **`src/belote/belatro/items/vouchers.py::LaVoute`** — uses `max()` rather than `=` so it can't wipe additive bonuses already granted by LesCartesDorees; LaVoute now defines a floor of (rate=1, cap=5). Audit H7.
+- **`src/belote/belatro/main.py`** — the three bare `print()` calls in alt-screen ("YOU WON!", Capot Insurance softening, RUN OVER) routed through a new `BelAtroAnnounce.banner()` helper that writes a centred line at a fixed row, avoiding scroll. Audit H8.
+- **`src/belote/belatro/main.py::prompt_card`** — UNDO no longer recurses (`return self.prompt_card(state)` → `continue` inside the existing `while True`). Repeated UNDO presses can no longer hit the recursion limit. Audit H9.
+- **`src/belote/belatro/progression/save.py`** — atomic save: `tempfile.NamedTemporaryFile` + `fsync` + `Path.replace` so a crash mid-write leaves the previous `profile.json` intact. Added `SCHEMA_VERSION = 1` and a `_migrate()` hook so future schema bumps have a place to live. Audit H10 + I7.
+- **`src/belote/gameflow.py::run_round`** — undo now calls `clear_legal_cards_cache()` before popping the history stack so a restored earlier `GameState` can never serve a stale legal-cards entry. Audit H11.
+
+### Fixed — robustness / correctness
+
+- **`src/belote/belatro/core/economy.py::spend_money`** — rejects negative `amount`. Previously `if money >= -5` passed trivially and `money -= -5` credited the player. Audit M2.
+- **`src/belote/belatro/core/run_state.py`** — free-planet draw uses a per-run `random.Random` instance seeded from `BelAtroRun.seed`, not the global module RNG. Runs are seed-deterministic again. Audit M3.
+- **`src/belote/belatro/engine/modifier_patch.py`** — deleted the dead `patch_card_points` method (set `_card_pt_override`, no consumer). Audit M4.
+- **`src/belote/belatro/core/scoring.py`** — joker_state is `copy.deepcopy`'d, not `dict()`-shallowed, so mutable values (lists/dicts/sets) can't leak across rounds. Audit M5.
+- **`src/belote/input.py`** — ESC vs. arrow-key disambiguation window is now 50ms (was 10ms), and the UTF-8 continuation-byte read is bounded by a `select.select` timeout so a partial sequence can't block the reader forever. Audit M6 + M7.
+- **`src/belote/rules.py`** — French sequence labels: `Tierce / Quarte / Quinte` instead of `Tierce / Cinquante / Cent`. (English text was already correct.) Audit M8.
+- **`src/belote/belatro/partner/personality.py::LeFlambeur`** — bid logic now picks the longest suit with most honors instead of `random.choice`; `should_bid` checks for any J/9/A in the strongest suit. Description "aggressive" is honored. Audit M11.
+- **`src/belote/belatro/engine/round_driver.py`** — Le Fantôme partner personality grants +$1 per partner-won trick via `state._bonus_money`, matching the description. Audit I5.
+- **`src/belote/belatro/partner/partner_state.py::difficulty_for`** — now respects the `seat` parameter and returns `"hard"` at trust tier ≥ 3. `round_driver.py` maps the new return value to `Difficulty.HARD`. Audit M12.
+- **`src/belote/belatro/run/shop.py`** — `random.sample` instead of two `random.choice` calls so the same Joker can't appear twice in one shop. Audit M13.
+- **`src/belote/themes.py::set_current`** — raises `ValueError` for unknown theme names instead of silently no-op'ing. Audit M14.
+- **`src/belote/belatro/main.py`** — La Maison-Dieu's `disable_next_boss` and Le Diable's `partner_overcut_round` flags are now consumed: La Maison-Dieu skips the next boss reveal and clears the flag; Le Diable is popped after the round ends. Were one-round effects but stayed permanent. Audit I3.
+
+### Performance
+
+- **`src/belote/ansi.py`** — `fg()` and `bg()` are `@lru_cache`'d (maxsize=512). Previously every render allocated ~200 fresh format strings. Audit P3.
+- **`src/belote/ui/render.py`** — hoisted the lazy `clear_screen` import out of `render()` (was re-resolved every call); `clear_to_eol()` is no longer emitted for blank padding lines. Audit P1 + P2.
+- **`src/belote/game.py`** — pre-computed `_SUIT_IDX_CACHE` for every possible trump value; `sort_hand` no longer rebuilds the suit ordering and index dict per call. Audit P4.
+- **`src/belote/belatro/items/registry.py`** — `get_available_jokers` / `get_available_vouchers` cache their filtered output keyed on a generation counter (bumped on every `register_*`) and the profile's unlock set. Re-registration invalidates automatically. Audit P8.
+- **`src/belote/config.py`** — `stats_path` no longer mkdirs on every property access. Persistence sites (stats writer + profile saver) already mkdir at write time. Audit P10.
+
+### Fixed — silently-dead BelAtro flags (sweep 1)
+
+The pattern: a deck modifier or voucher's `apply()` set a flag on `BelAtroRun` (or patched a boss flag), but no game-logic site read it. Tests passed because they only asserted the flag existed, never the behavior.
+
+- **`src/belote/belatro/main.py`** — boss handling now reads `boss.flags()` instead of hardcoded `boss.id == "..."` checks. Consequence: **La Trahison** (`BetrayalArc`) actually freezes partner trust at 0 (was a no-op — only `Le Divorce` worked, by id-coincidence). `hide_partner_hand` and `auto_coinche` are also flag-driven now, restoring the architecture the rest of the engine uses.
+- **`src/belote/scoring.py`** — Le Marseillais deck mods now honored: `announce_x2` doubles Tierce/Quarte/Quinte/Carré points; `no_belote_rebelote` zeroes Belote/Rebelote scoring (was set on the run, ignored by scoring). La Balance voucher's `tie_breaks_for_taker` short-circuits litige and awards the contract to the taker (previously dead — every tie became a litige).
+- **`src/belote/game.py`** — Le Républicain's "7s and 8s are wild — play them on any trick" rule now actually applies in `legal_cards`. Before, only the +5-chip-per-7-or-8 rider worked; the wild-play rule was deck-description fiction. Also: the `winner is None` fallback after a 4-card trick now raises `AssertionError` instead of silently picking `prev_seat()` (unreachable in practice; surfacing it catches future state corruption).
+- **`src/belote/belatro/engine/round_driver.py`** — Le Coincheur's `start_coinched` enters the round at coinche level 1 (was set, never read). Le Traître joker's `partner_throws_trick` actually triggers partner sabotage on one random trick by piggy-backing on the existing `agent_double_active` AI path (only the +2.5 mult half worked before). La Surcoinche voucher gates AI surcoinche.
+- **`src/belote/belatro/items/jokers/hand_comp.py`** — La Sentinelle's ×3 mult only fires when South was actually dealt the trump Jack. Previously the joker armed `had_jack=True` whenever the trump Jack appeared in any winning trick, including when partner or an opponent held it — false positives. Reconstructs per-card seat from `leader_seat + index`.
+- **`src/belote/belatro/main.py`** + **`core/run_state.py`** — L'Aristocrate's `gold_seal_aces` pays $1 per Ace your team wins (was set in the deck mod dict but never copied to run state, never read). L'Anarchiste's `corrupted_pool_visible` is now surfaced on the run.
+- **`src/belote/ui/prompts.py`** — L'Encyclopédie voucher (`show_partner_bid_tendency`) renders one-line partner personality hint above the bid prompt; was set, never displayed.
+- **`README.md`** — count drift corrected: **36 Jokers / 12 Tarot / 18 Bosses** (were "50+ / 10 / 17"). Sans Atout claim softened to match reality (no `SANS_ATOUT` suit value or bid affordance exists; scoring engine handles `TOUT_ATOUT` but it's not currently bid-able from the UI).
+
+### Added
+
+- **`src/belote/belatro/run/boss.py::BossModifier.flags()`** — returns the `BossModifiers` dataclass produced by this boss's `apply()` against a stub. Lets `main.py` react to flags without driving a full round, replacing the hardcoded `boss.id ==` chain.
+- **`src/belote/belatro/items/vouchers.py::forge_tierce(run, planet_id)`** — runtime helper that consumes 3 Tierce charges and applies a Planet's level-up reward to `run.contract_levels`. Promotes TierceForge from pure stub to a callable shop hook (UI integration is the remaining work).
+- **`src/belote/belatro/ui/announce.py::BelAtroAnnounce.banner()`** — centred fixed-row banner that doesn't scroll the alt-screen buffer; replaces the three bare `print()` calls in `belatro/main.py`.
+- **`src/belote/belatro/core/run_state.py::BelAtroRun.consume()`** — centralised consumable activation that records the item id as `last_consumable_id` for LeFou to copy.
+- **`src/belote/belatro/progression/save.py::SaveManager.SCHEMA_VERSION` + `_migrate()`** — save-file schema versioning + migration hook.
+- **`tests/belatro/test_dead_flag_fixes.py`** (19 tests) — integration coverage for every flag wired up above. Each test constructs a minimal `GameState` or `BelAtroRun` with the flag set and asserts the *observable* effect (e.g. "carré declarations score 200 instead of 100 with `announce_x2`", "trump 7 is legal off-suit with `republicain_wild`", "trump Jack played by NORTH does not arm South's Sentinelle").
+
+### Audit claims explicitly rejected (do not reopen)
+
+From sweep 2:
+
+- C3 "AI doesn't handle TOUT_ATOUT" — `card.suit == trump` is harmless: TOUT_ATOUT is a sentinel suit, and `trick_rank` / `card_points` already special-case it.
+- C5 "`JokerResult.times_mult` defaults to 0.0" — used as a truthy-skip sentinel in `core/scoring.py`'s `_apply`; `0.0` means "skip", not "zero out".
+- H1 "Rebelote logic wrong" — `belote_holders[trump]` is the single seat holding both K and Q; standard Belote rule is exactly that, code is correct.
+- H2 "`legal_cards` cache stale on dynamic trump" — `trump` is part of the cache key; rotating it produces a different entry.
+- H3 "QuinteRoyale threshold wrong" — Quinte = 100 pts, `>= 100` triggers correctly.
+- H12 "Coinche blocked when partner takes" — correct behavior; you cannot coinche your own partner's bid.
+- M1 "EventBus swallows handler errors" — no `try/except`, exceptions propagate. Description is the opposite of reality.
+- M9 "Worst-round 999 sentinel leaks" — `announce.py:96` already gates on `total_rounds > 0` with default `0`.
+- I2 "BossModifiers flags unused" — every flag is read (`hide_hud`, `hide_partner_hand`, `agent_double_active`, `partner_forced_pass`, `lock_trust_zero`); matches the architecture documented in memory.
+- I4 "LeFanatique state['contract'] never set" — written by `core/scoring.py` on `BidMadeEvent`.
+- I8 "unlocks event handler stub" — implementation is complete; the `# Potentially more event handlers` comment is an extension hint, not a stub.
+
+From sweep 1:
+
+- "Litige pool drops on chute" — `scoring.py` correctly releases the pool to defenders on chute (line 620), to taker on success (line 625), and accumulates only on litige tie. Working as intended.
+- "AI round-1 bidding logic reversed" — re-reading `ai.py:87-91`, returning the matching suit in round 1 *is* the intended behavior (round 1 only allows the up-card's suit).
+- "Le Carnet partner reveal unimplemented" — fully wired: `vouchers.py` → `run_state.show_north_hand` → `main.py:113` → `display(show_north_hand=True)`. The +1 mult is wired at `belatro/core/scoring.py:129`.
+- "Contract levels race in `Planet.use()`" — single-threaded shop interaction; no race.
+
+### Test count
+
+409 → **409** (no count change; existing tests cover every fixed path. `tests/belatro/test_belatro.py::test_spend_money_zero_always_succeeds` still passes — `spend_money(0)` remains a benign no-op).
+
 ## [2.7.1] - 2026-05-04
 
 Audit follow-up: cleared the last `getattr(state, "_X", False)` boss-flag reads, removed the now-redundant property aliases on `GameState`, and closed three coverage gaps the v2.7 audit flagged.

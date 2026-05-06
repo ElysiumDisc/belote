@@ -23,8 +23,11 @@ class LaVoute(Voucher):
     description = "Earn $1 per $5 held at round end, max $5/round."
 
     def apply(self, run: BelAtroRun) -> None:
-        run.economy.interest_rate = 1
-        run.economy.max_interest = 5
+        # Use max() rather than `=` so LaVoute can't wipe additive bonuses
+        # already granted by LesCartesDorees (which is `+=` against the same
+        # fields). LaVoute defines a floor of (rate=1, cap=5).
+        run.economy.interest_rate = max(run.economy.interest_rate, 1)
+        run.economy.max_interest = max(run.economy.max_interest, 5)
 
 
 class LeGrimoire(Voucher):
@@ -85,11 +88,11 @@ class LaBalance(Voucher):
 class LaSurcoinche(Voucher):
     id = "la_surcoinche"
     name = "La Surcoinche"
-    description = "Unlocks the Surcoinche contract."
+    description = "Unlocks the Surcoinche contract (AI may surcoinche when you coinche)."
     is_unlockable = True
 
     def apply(self, run: BelAtroRun) -> None:
-        pass
+        run.surcoinche_unlocked = True
 
 
 class LeCarnet(Voucher):
@@ -118,6 +121,29 @@ class TierceForge(Voucher):
     cost = 6
 
     def apply(self, run: BelAtroRun) -> None:
-        # The activation logic lives in the shop UI; flag stays unused at apply time.
-        # Just having the voucher equipped enables the option in shop interactions.
+        # No-op at apply time. Owning the voucher enables `run.forge_tierce`
+        # which the shop UI calls when the player chooses to spend charges.
         pass
+
+
+def forge_tierce(run: BelAtroRun, planet_id: str) -> bool:
+    """Spend 3 Tierce charges to apply a Planet's level-up reward.
+
+    Returns True if the forge succeeded. Caller (shop UI) is responsible for
+    verifying the TierceForge voucher is actually owned before invoking.
+    """
+    from ..items.registry import registry
+
+    if run.tierce_charges < 3:
+        return False
+    planet_cls = registry.get_planet(planet_id)
+    if planet_cls is None:
+        return False
+    planet = planet_cls()
+    run.tierce_charges -= 3
+    # Delegate to Planet.use() so overlapping numeric levels are summed
+    # rather than overwritten — matches the regular planet level-up path
+    # (base.py: Planet.use). Previously this used dict ** merge which
+    # silently dropped earlier levels.
+    planet.use(run)
+    return True

@@ -71,8 +71,11 @@ class _UnixKeyReader:
 
         # Escape sequence
         if byte == 0x1B:
-            # Check if more data is available immediately (for sequences)
-            r, _, _ = select.select([sys.stdin], [], [], 0.01)
+            # 50ms is the conventional ESC vs. arrow-key disambiguation
+            # window. 10ms (the previous value) was tight enough that arrow
+            # keys over SSH or in slow terminals could be mis-classified as
+            # bare ESC presses.
+            r, _, _ = select.select([sys.stdin], [], [], 0.05)
             if not r:
                 return KeyEvent(Key.ESC)
 
@@ -118,6 +121,12 @@ class _UnixKeyReader:
             total_bytes = continuation_bytes + 1
             full_buf = bytes([byte])
             while len(full_buf) < total_bytes:
+                # Bound the wait for the rest of a multi-byte UTF-8 sequence:
+                # an unterminated leading byte (paste of garbage, killed
+                # remote, etc.) used to block the reader forever.
+                r, _, _ = select.select([sys.stdin], [], [], 0.05)
+                if not r:
+                    break
                 chunk = os.read(self._stdin_fd, total_bytes - len(full_buf))
                 if not chunk:
                     break

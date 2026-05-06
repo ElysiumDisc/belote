@@ -12,6 +12,8 @@ from ..ansi import (
     UNDERLINE,
     ansi_center,
     ansi_ljust,
+    banner_bg,
+    banner_fg,
     black_fg,
     card_back_bg,
     card_face_bg,
@@ -28,6 +30,9 @@ from ..ansi import (
     show_cursor,
     visible_len,
     white_fg,
+)
+from ..ansi import (
+    clear_screen as _clear_screen,
 )
 from ..context import TERMINAL
 from ..deck import Card, Rank
@@ -570,8 +575,6 @@ def render(state: GameState, selection: int | None = None, show_north_hand: bool
 
     # If the size or layout flavour changed since the last render, prefix a
     # full screen clear so we don't leak artifacts from the previous layout.
-    from ..ansi import clear_screen as _clear_screen
-
     key = (term_w, term_h, layout.name)
     prefix_clear = ""
     if _LAST_RENDER_KEY[0] is not None and _LAST_RENDER_KEY[0] != key:
@@ -628,12 +631,8 @@ def render(state: GameState, selection: int | None = None, show_north_hand: bool
         phase_info = f"{BOLD}{gold_fg()}Round complete!{RESET}"
 
     if state.belote_tracker[1]:
-        from ..ansi import banner_bg, banner_fg
-
         phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Rebelote! {RESET}"
     elif state.belote_tracker[0]:
-        from ..ansi import banner_bg, banner_fg
-
         phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Belote! {RESET}"
 
     lines.append(ansi_center(phase_info, term_w))
@@ -671,7 +670,12 @@ def render(state: GameState, selection: int | None = None, show_north_hand: bool
         bottom_pad = slack - top_pad
         lines = [""] * top_pad + lines + [""] * bottom_pad
 
-    rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
+    # Only emit clear_to_eol on lines that actually have content; pure-padding
+    # blank lines don't need it (we already cleared the screen on layout
+    # changes and the previous render's content area was clear-to-eol'd).
+    rendered_lines = [
+        line + clear_to_eol() if line else line for line in lines[:term_h]
+    ]
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
 
 

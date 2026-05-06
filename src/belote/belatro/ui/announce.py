@@ -53,6 +53,25 @@ class BelAtroAnnounce:
         interruptible_sleep(2.0, reader)
 
     @staticmethod
+    def banner(message: str, reader: KeyReader, *, color: str = "gold", hold: float = 1.5) -> None:
+        """Show a centered banner that doesn't scroll the alt-screen buffer."""
+        from belote.ui.render import get_term_size
+
+        term_w, term_h = get_term_size()
+        row = max(1, term_h // 2)
+        tint = gold_fg() if color != "red" else red_fg()
+        print(move(row, 1) + ansi_center(tint + BOLD + message + RESET, term_w), end="", flush=True)
+        end = time.time() + hold
+        remaining = end - time.time()
+        while remaining > 0:
+            event = reader.read_timeout(remaining)
+            if event is None:
+                break
+            if event.key in (Key.SPACE, Key.ESC, Key.ENTER):
+                break
+            remaining = end - time.time()
+
+    @staticmethod
     def score_popup(lines: list[str], reader: KeyReader) -> None:
         """Show a temporary score breakdown popup."""
         from belote.ui.render import get_term_size

@@ -272,6 +272,10 @@ def run_round(
         if res_bid is None:
             return None
         if res_bid == "UNDO":
+            # `legal_cards` memoizes on hand/trick tuple ids. After we restore
+            # an earlier GameState, those tuples may again be live — flush so
+            # we never serve a stale cached entry from before the undo.
+            clear_legal_cards_cache()
             if len(history_stack) > stack_base:
                 current = history_stack.pop()
                 continue
@@ -290,6 +294,7 @@ def run_round(
         if res_play is None:
             return None
         if res_play == "UNDO":
+            clear_legal_cards_cache()
             if len(history_stack) > stack_base:
                 current = history_stack.pop()
                 # If we undo into BIDDING, we continue the outer loop

@@ -19,8 +19,15 @@ class LePremierSang(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.trick_number == 1 and event.winner == Seat.SOUTH:
-            state[f"{self.id}_active"] = True
+        # Arm on a trick-1 NS win, then keep paying out +2 Mult on every
+        # subsequent NS-won trick for the rest of the round.
+        active = state.get(f"{self.id}_active", False)
+        if event.trick_number == 1:
+            if event.winner == Seat.SOUTH:
+                state[f"{self.id}_active"] = True
+                return JokerResult(add_mult=2.0)
+            return None
+        if active and event.winner == Seat.SOUTH:
             return JokerResult(add_mult=2.0)
         return None
 

@@ -69,6 +69,7 @@ def drive_round(
     boss: BossModifier | None = None,
     target_score: int = 0,
     seed: int | None = None,
+    card_enhancements: dict[str, object] | None = None,
 ) -> GameState:
     """
     Core engine loop for a single round in BelAtro.
@@ -78,6 +79,20 @@ def drive_round(
     # Initialize the base game state
     state = new_game(target=1000)  # Target doesn't matter for single round
     state = start_round(state, rng)
+
+    # Merge per-run deck/voucher flags so scoring/legal_cards can read them.
+    if card_enhancements:
+        new_jstate = {**state._joker_state, **card_enhancements}
+        state = replace(state, _joker_state=new_jstate)
+
+    # Le Traître joker (corrupted, partner_throws_trick): pick one random trick
+    # for partner sabotage and reuse the existing agent_double AI path. Skip if
+    # a boss already activates agent_double — its 3-trick set takes precedence.
+    if state._joker_state.get("traitre_active") and not state.boss_modifiers.agent_double_active:
+        sabotage = frozenset({rng.randint(1, 8)})
+        new_bm = replace(state.boss_modifiers, agent_double_active=True)
+        new_jstate2 = {**state._joker_state, "agent_double_tricks": sabotage}
+        state = replace(state, boss_modifiers=new_bm, _joker_state=new_jstate2)
 
     if acc is not None:
         state = acc.trigger_round_start(state)
@@ -102,7 +117,11 @@ def drive_round(
 
     # B4: Use partner trust-based difficulty for the North (partner) AI seat
     _north_diff_str = partner.difficulty_for(Seat.NORTH)
-    _north_diff = Difficulty.EASY if _north_diff_str == "easy" else Difficulty.MEDIUM
+    _north_diff = {
+        "easy": Difficulty.EASY,
+        "medium": Difficulty.MEDIUM,
+        "hard": Difficulty.HARD,
+    }.get(_north_diff_str, Difficulty.MEDIUM)
     ai_players = {
         Seat.EAST: AIPlayer(Seat.EAST, Difficulty.MEDIUM),
         Seat.NORTH: AIPlayer(Seat.NORTH, _north_diff),
@@ -165,7 +184,9 @@ def drive_round(
         if ui_callbacks.prompt_coinche(state, state.taker):
             coinche_level = 1
             # AI surcoinche: simple heuristic — 30% under the seeded RNG.
-            if rng.random() < 0.3:
+            # Surcoinche is gated by La Surcoinche voucher (when piped in).
+            surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
+            if surcoinche_unlocked and rng.random() < 0.3:
                 coinche_level = 2
             # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
         if state.boss_modifiers.auto_coinche:
@@ -184,6 +205,24 @@ def drive_round(
     elif state.boss_modifiers.auto_coinche and state.phase == Phase.PLAYING:
         # Boss forces coinche even if taker is on NS team.
         coinche_level = 1
+
+    # Le Coincheur deck: every round starts pre-coinched (deck mod plumbed via
+    # card_enhancements → state._joker_state).
+    if (
+        state.phase == Phase.PLAYING
+        and state._joker_state.get("start_coinched")
+        and coinche_level == 0
+    ):
+        coinche_level = 1
+        state = _emit(
+            BidMadeEvent(
+                seat=state.taker if state.taker is not None else Seat.SOUTH,
+                trump=state.trump,
+                contract=state.contract or "normal",
+                coinche_level=coinche_level,
+            ),
+            state,
+        )
 
     # If round ended early (everyone passed), emit RoundEndEvent
     if state.phase == Phase.DEAL and len(state.bids) == 0:
@@ -271,6 +310,15 @@ def drive_round(
                 ),
                 state
             )
+            # Le Fantôme partner personality: "Every trick they win gives you
+            # +$1." Personalities don't subscribe to the event bus the way
+            # jokers do, so payout is wired through state._bonus_money here.
+            if (
+                partner is not None
+                and getattr(partner.personality, "id", None) == "le_fantome"
+                and winner == Seat.NORTH
+            ):
+                state = replace(state, _bonus_money=state._bonus_money + 1)
             ui_callbacks.on_trick_end(state, winner, points)
 
     # Round End / Scoring

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from belote.deck import Rank, Suit
 from belote.game import GameState
 
 
@@ -39,10 +38,6 @@ class PatchedGameState:
             object.__getattribute__(self, "_patches")["boss_modifiers"] = new_bm
         else:
             object.__getattribute__(self, "_patches")[attr] = value
-
-    def patch_card_points(self, override: dict[tuple[Suit, Rank], int]) -> None:
-        """Override card point values (e.g. Kings → 0, 10s → 0)."""
-        object.__getattribute__(self, "_patches")["_card_pt_override"] = override
 
     # ── Transparent proxy ───────────────────────────────────────────────
 

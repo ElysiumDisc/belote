@@ -61,16 +61,32 @@ class SaveManager:
         if self._save_path.exists():
             self._save_path.unlink()
 
+    SCHEMA_VERSION: int = 1
+
     def save_profile(self, profile: Profile) -> None:
         import dataclasses
+        import tempfile
 
-        with self._save_path.open("w") as f:
-            json.dump(dataclasses.asdict(profile), f, indent=4)
+        payload = {"schema_version": self.SCHEMA_VERSION, **dataclasses.asdict(profile)}
+        # Atomic write: dump to a sibling tmp file, fsync, then os.replace
+        # which is atomic on POSIX/NTFS. A crash mid-write leaves the original
+        # profile.json intact instead of truncating it to invalid JSON.
+        directory = self._save_path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=str(directory), prefix=".profile-", suffix=".json.tmp", delete=False
+        ) as tf:
+            tmp_path = Path(tf.name)
+            json.dump(payload, tf, indent=4)
+            tf.flush()
+            os.fsync(tf.fileno())
+        tmp_path.replace(self._save_path)
 
     def load_profile(self) -> Profile:
         try:
             with self._save_path.open() as f:
                 data = json.load(f)
+            data = self._migrate(data)
             _default_stats = dict.fromkeys(
                 ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
             )
@@ -81,3 +97,16 @@ class SaveManager:
             )
         except (FileNotFoundError, json.JSONDecodeError):
             return Profile()
+
+    def _migrate(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Upgrade older save dicts to the current schema.
+
+        Profiles written before SCHEMA_VERSION existed have no `schema_version`
+        key but are otherwise structurally compatible. New keys with sensible
+        defaults can be added here as the schema evolves.
+        """
+        version = int(data.get("schema_version", 0))
+        # No structural migrations yet — just normalise the version field.
+        if version < self.SCHEMA_VERSION:
+            data["schema_version"] = self.SCHEMA_VERSION
+        return data

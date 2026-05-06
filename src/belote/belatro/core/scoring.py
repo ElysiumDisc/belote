@@ -73,9 +73,12 @@ class ScoreAccumulator:
         new_chips = state._chips
         new_mult = state._mult
         new_money = state._bonus_money
-        # Create a shallow copy of the joker state to allow mutation by jokers
-        # while keeping the original state immutable for the caller
-        joker_state = dict(state._joker_state)
+        # Deep-copy the joker state: a shallow dict() shares mutable values
+        # (lists/dicts/sets nested inside) across rounds, which has bitten us
+        # before with frozenset/list flags persisting after the round ended.
+        import copy
+
+        joker_state = copy.deepcopy(state._joker_state)
 
         def _apply(result: JokerResult, source: str) -> None:
             nonlocal new_chips, new_mult, new_money

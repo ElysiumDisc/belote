@@ -171,12 +171,15 @@ class ThemeManager:
         return THEMES.get(self._current_theme_name, THEMES["classic_green"])
 
     def set_current(self, name: str) -> None:
-        if name in THEMES:
-            self._current_theme_name = name
-            self.save_selection()
-            # Execute registered callbacks (e.g., to clear UI caches)
-            for callback in self._on_change_callbacks:
-                callback()
+        if name not in THEMES:
+            raise ValueError(
+                f"Unknown theme {name!r}. Available: {sorted(THEMES.keys())}"
+            )
+        self._current_theme_name = name
+        self.save_selection()
+        # Execute registered callbacks (e.g., to clear UI caches)
+        for callback in self._on_change_callbacks:
+            callback()
 
     def list_themes(self) -> list[str]:
         return list(THEMES.keys())

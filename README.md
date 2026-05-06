@@ -148,9 +148,9 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 ## Features
 
-- **BelAtro Roguelite Mode:** A massive expansion featuring 50+ Jokers, 10 Tarot cards, and permanent upgrades.
+- **BelAtro Roguelite Mode:** A massive expansion featuring 36 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
-- **Full Boss Blind Suite:** All 17 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
+- **Full Boss Blind Suite:** All 18 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
 - **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
 - **Rich Terminal UI:** Full-screen green felt table with detailed card graphics and "You" vs "Partner" terminology.
@@ -166,7 +166,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Sound Effects:** Enhanced auditory feedback for trick wins, Belote, and Capot, with a built-in mute toggle.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
-- **High Fidelity:** Full implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", "Capot" (252 pts), and "Litige" (tie-break). Full support for **Sans Atout** (No Trump) and **Tout Atout** (All Trump) contracts.
+- **High Fidelity:** Implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", "Capot" (252 pts), and "Litige" (tie-break). Scoring engine handles **Tout Atout** (All Trump) when in play; Sans Atout/Tout Atout bidding affordances are tracked as future work.
 - **Rules & History Viewer:** A scrollable, bilingual (English/French) in-game reference for the game's heritage and mechanics.
 
 ## AI
@@ -202,7 +202,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (390 tests)
+├── tests/             # Comprehensive test suite (409 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -218,14 +218,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **390 tests** passing with 100% coverage on core logic.
+Currently **409 tests** passing with 100% coverage on core logic.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 390/390 passed
+- **pytest**: 409/409 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

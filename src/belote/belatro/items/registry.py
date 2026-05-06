@@ -16,18 +16,36 @@ class ItemRegistry:
         self.planets: dict[str, type[Planet]] = {}
         self.tarots: dict[str, type[Tarot]] = {}
         self.vouchers: dict[str, type[Voucher]] = {}
+        # Bumped on every register_* call; the get_available_* caches key on
+        # this so a re-registration invalidates the cache automatically.
+        self._gen: int = 0
+        self._jokers_cache: dict[
+            tuple[int, frozenset[str] | None], dict[str, type[Joker]]
+        ] = {}
+        self._vouchers_cache: dict[
+            tuple[int, frozenset[str] | None], dict[str, type[Voucher]]
+        ] = {}
+
+    def _bump(self) -> None:
+        self._gen += 1
+        self._jokers_cache.clear()
+        self._vouchers_cache.clear()
 
     def register_joker(self, joker_cls: type[Joker]) -> None:
         self.jokers[joker_cls.id] = joker_cls
+        self._bump()
 
     def register_planet(self, planet_cls: type[Planet]) -> None:
         self.planets[planet_cls.id] = planet_cls
+        self._bump()
 
     def register_tarot(self, tarot_cls: type[Tarot]) -> None:
         self.tarots[tarot_cls.id] = tarot_cls
+        self._bump()
 
     def register_voucher(self, voucher_cls: type[Voucher]) -> None:
         self.vouchers[voucher_cls.id] = voucher_cls
+        self._bump()
 
     def get_joker(self, item_id: str) -> type[Joker] | None:
         return self.jokers.get(item_id)
@@ -41,21 +59,39 @@ class ItemRegistry:
     def get_voucher(self, item_id: str) -> type[Voucher] | None:
         return self.vouchers.get(item_id)
 
+    @staticmethod
+    def _profile_key(profile: Profile | None) -> frozenset[str] | None:
+        # Cache key includes the unlock set so different profiles get
+        # independent cached views without leaking across runs.
+        return frozenset(profile.unlocked_ids) if profile is not None else None
+
     def get_available_jokers(self, profile: Profile | None) -> dict[str, type[Joker]]:
-        return {
+        key = (self._gen, self._profile_key(profile))
+        cached = self._jokers_cache.get(key)
+        if cached is not None:
+            return cached
+        result = {
             k: v
             for k, v in self.jokers.items()
             if not getattr(v, "is_unlockable", False)
             or (profile is not None and profile.is_unlocked(k))
         }
+        self._jokers_cache[key] = result
+        return result
 
     def get_available_vouchers(self, profile: Profile | None) -> dict[str, type[Voucher]]:
-        return {
+        key = (self._gen, self._profile_key(profile))
+        cached = self._vouchers_cache.get(key)
+        if cached is not None:
+            return cached
+        result = {
             k: v
             for k, v in self.vouchers.items()
             if not getattr(v, "is_unlockable", False)
             or (profile is not None and profile.is_unlocked(k))
         }
+        self._vouchers_cache[key] = result
+        return result
 
 
 # Global registry instance

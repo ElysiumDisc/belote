@@ -31,11 +31,11 @@ class LaSentinelle(Joker):
     cost = 9
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        # Note: round_start event doesn't have the hand directly in the payload
-        # but the engine passes state. We'll check the player's hand.
-        # However, Joker.on_round_start usually only takes state dict.
-        # We'll rely on on_bid or first on_trick_won to detect it if needed,
-        # but let's assume we can store it.
+        # We can't see the dealt hand from on_round_start, but we can detect
+        # whether South was the player who held the trump Jack by inspecting
+        # the trick in which it was played (each player plays only their own
+        # cards, so the seat that played the Jack is the seat that was dealt
+        # it). See on_trick_won.
         state[f"{self.id}_had_jack"] = False
         state[f"{self.id}_won_with_jack"] = False
         return None
@@ -45,11 +45,16 @@ class LaSentinelle(Joker):
         if not trump:
             return None
 
+        # Reconstruct who played each card from leader_seat + card index.
+        # Seat order: SOUTH→EAST→NORTH→WEST→SOUTH.
+        seat = event.leader_seat
         for card in event.cards:
-            if card.suit == trump and card.rank == Rank.JACK:
+            if card.suit == trump and card.rank == Rank.JACK and seat == Seat.SOUTH:
+                # Only South being dealt the Jack matters for this joker.
                 state[f"{self.id}_had_jack"] = True
                 if event.winner == Seat.SOUTH:
                     state[f"{self.id}_won_with_jack"] = True
+            seat = seat.next_seat()
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:

@@ -34,10 +34,12 @@ def ansi_ljust(s: str, width: int) -> str:
     return s + " " * pad
 
 
+@lru_cache(maxsize=512)
 def fg(r: int, g: int, b: int) -> str:
     return f"\x1b[38;2;{r};{g};{b}m"
 
 
+@lru_cache(maxsize=512)
 def bg(r: int, g: int, b: int) -> str:
     return f"\x1b[48;2;{r};{g};{b}m"
 

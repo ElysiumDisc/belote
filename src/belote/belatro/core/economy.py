@@ -16,6 +16,11 @@ class Economy:
         self.money += amount
 
     def spend_money(self, amount: int) -> bool:
+        # Reject negative amounts: a negative `amount` would otherwise pass
+        # `money >= amount` trivially and credit the player via the
+        # `money -= amount` line. Zero is a benign no-op spend.
+        if amount < 0:
+            return False
         if self.money >= amount:
             self.money -= amount
             return True

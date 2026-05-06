@@ -25,12 +25,14 @@ class Shop:
         prof = self.profile or Profile()
         self.inventory = []
 
-        # 2 Jokers (filtered by unlock)
+        # 2 distinct Jokers (filtered by unlock). random.sample so the same
+        # joker can't show up twice in one shop. If the unlocked pool is
+        # smaller than 2, take whatever's available without padding.
         available_jokers = registry.get_available_jokers(prof)
         joker_ids = list(available_jokers.keys())
         if joker_ids:
-            for _ in range(2):
-                j_id = random.choice(joker_ids)
+            picks = random.sample(joker_ids, k=min(2, len(joker_ids)))
+            for j_id in picks:
                 j_item: Any = available_jokers[j_id]()
                 self.inventory.append(j_item)
                 if self.profile:

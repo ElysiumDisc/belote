@@ -63,6 +63,43 @@ class BelAtroRun:
     card_enhancements: dict[str, Any] = field(default_factory=dict)  # card_id → Enhancement
     show_north_hand: bool = False  # set True by LeCarnet voucher
     contract_levels: dict[str, Any] = field(default_factory=dict)  # contract_id → planet reward dict
+    gold_seal_aces: bool = False  # L'Aristocrate: Aces won → +$1 each
+    corrupted_pool_visible: bool = False  # L'Anarchiste: corrupted shop pool revealed
+    surcoinche_unlocked: bool = False  # La Surcoinche voucher: enables AI surcoinche
+
+    # ── Last consumable used (read by LeFou tarot) ─────────
+    last_consumable_id: str | None = None
+
+    # ── Determinism ────────────────────────────────────────
+    seed: int | None = None
+    _rng: Any = None
+
+    def consume(self, item: Any, context: object = None) -> None:
+        """Centralised consumable activation.
+
+        Records the item id as the most recent consumable (so LeFou can copy
+        it) and removes it from `consumables` if present, then dispatches to
+        the right hook based on item type (Tarot vs Planet).
+        """
+        import contextlib
+
+        from ..items.base import Planet, Tarot
+
+        with contextlib.suppress(ValueError):
+            self.consumables.remove(item)
+        self.last_consumable_id = getattr(item, "id", None)
+        if isinstance(item, Tarot):
+            item.use(self, context)
+        elif isinstance(item, Planet):
+            item.use(self)
+
+    def _get_rng(self) -> Any:
+        """Per-run random.Random instance, seeded from `seed` when given."""
+        if self._rng is None:
+            import random as _random
+
+            self._rng = _random.Random(self.seed) if self.seed is not None else _random.Random()
+        return self._rng
 
     def __post_init__(self) -> None:
         from ..items.registry import register_all_items, registry
@@ -82,11 +119,9 @@ class BelAtroRun:
                         self.profile.discover(joker_id)
 
             if deck.deck_modifications.get("free_planet"):
-                import random
-
                 planet_ids = list(registry.planets.keys())
                 if planet_ids:
-                    p_id = random.choice(planet_ids)
+                    p_id = self._get_rng().choice(planet_ids)
                     planet_cls = registry.get_planet(p_id)
                     if planet_cls:
                         if self.profile:
@@ -103,6 +138,13 @@ class BelAtroRun:
                 self.card_enhancements["announce_x2"] = True
             if deck.deck_modifications.get("no_belote_rebelote"):
                 self.card_enhancements["no_belote_rebelote"] = True
+            if deck.deck_modifications.get("gold_seal_aces"):
+                self.gold_seal_aces = True
+            if deck.deck_modifications.get("corrupted_pool_visible"):
+                self.corrupted_pool_visible = True
+            if self.deck_id == "republicain":
+                # 7s/8s are wild; legal_cards reads this flag from _joker_state.
+                self.card_enhancements["republicain_wild"] = True
 
     # ── Current blind target ───────────────────────────────
     @property

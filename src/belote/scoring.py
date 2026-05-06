@@ -514,7 +514,10 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_rebelote = False
     defender_rebelote = False
 
-    if belote_holder is not None and not state.boss_modifiers.no_belote:
+    no_belote = state.boss_modifiers.no_belote or bool(
+        state._joker_state.get("no_belote_rebelote")
+    )
+    if belote_holder is not None and not no_belote:
         holder_team = team_of(belote_holder)
         points = 0
         is_rebelote = state.belote_tracker[1]
@@ -546,6 +549,11 @@ def score_round(state: GameState) -> ScoringBreakdown:
                 defender_declarations += _sequence_points(seq)
             for carre in resolved.ns_carres if defender_team == 0 else resolved.ew_carres:
                 defender_declarations += _carre_points(carre)
+
+    # Le Marseillais deck: annonces (Tierce/Quarte/Quinte/Carré) score x2.
+    if state._joker_state.get("announce_x2"):
+        taker_declarations *= 2
+        defender_declarations *= 2
 
     # Check capot
     capot_winner_team = is_capot(state)
@@ -603,11 +611,19 @@ def score_round(state: GameState) -> ScoringBreakdown:
         )
 
     if comp_taker == comp_defender:
-        is_litige = True
-        messages.append("Litige! (tie)")
-        defender_total = defender_card_pts + defender_declarations + defender_belote
-        taker_total = taker_belote
-        litige_points_awarded = taker_card_pts + taker_declarations
+        # La Balance voucher: taker wins automatically on a card-point tie.
+        if state._joker_state.get("tie_breaks_for_taker"):
+            messages.append("La Balance: tie awarded to taker.")
+            taker_total = (
+                taker_card_pts + taker_declarations + taker_belote + state.litige_points
+            )
+            defender_total = defender_card_pts + defender_declarations + defender_belote
+        else:
+            is_litige = True
+            messages.append("Litige! (tie)")
+            defender_total = defender_card_pts + defender_declarations + defender_belote
+            taker_total = taker_belote
+            litige_points_awarded = taker_card_pts + taker_declarations
     elif comp_taker < comp_defender:
         is_failed = True
         messages.append("Chute! (bid failed)")

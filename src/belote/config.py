@@ -46,18 +46,15 @@ class Config:
             base = Path(xdg_data) / "belote"
         else:
             base = Path.home() / ".local" / "share" / "belote"
-
-        # Create stats directory if it doesn't exist (avoiding recursive call)
-        import contextlib
-        with contextlib.suppress(OSError):
-            base.mkdir(parents=True, exist_ok=True)
-
+        # Don't mkdir here — every reader/writer that actually persists
+        # (stats.save_stats, save.SaveManager.save_profile) ensures the
+        # directory exists at write time. Side-effecting on every property
+        # access used to syscall on every render path.
         return base / "stats.json"
 
     def ensure_stats_dir(self) -> None:
         """Create stats directory if it doesn't exist."""
-        # Already handled in stats_path getter, but keeping for compatibility
-        pass
+        self.stats_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 GLOBAL_CONFIG = Config()

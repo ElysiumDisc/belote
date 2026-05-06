@@ -31,19 +31,16 @@ class BelAtroGame:
         self.reader: KeyReader | None = None
 
     def start(self, reader: KeyReader) -> None:
+        # Caller owns the alt-screen / cursor state. We just clear and run.
+        # The classic-Belote entry point (belote.main) keeps the alt-screen
+        # active across menu↔BelAtro transitions; the standalone `belatro`
+        # console script wraps this in main() below.
         self.reader = reader
         import sys
 
-        from ..ansi import (
-            RESET,
-            alt_screen_off,
-            alt_screen_on,
-            clear_screen,
-            hide_cursor,
-            show_cursor,
-        )
+        from ..ansi import clear_screen, hide_cursor
 
-        sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
+        sys.stdout.write(clear_screen() + hide_cursor())
         sys.stdout.flush()
         try:
             menu = BelAtroMainMenu(self.reader, self.profile)
@@ -55,14 +52,12 @@ class BelAtroGame:
         except KeyboardInterrupt:
             # Catch exit signals to return to the Belote main menu
             return
-        finally:
-            sys.stdout.write(alt_screen_off() + show_cursor() + RESET)
-            sys.stdout.flush()
 
     def _run_loop(self) -> None:
         """Main game loop: Blind -> Shop -> Next."""
         if self.run is None:
             return
+        from .ui.announce import BelAtroAnnounce
         try:
             while not self.run.run_over:
                 # 1. Round (Blind)
@@ -82,7 +77,8 @@ class BelAtroGame:
                 self.unlock_tracker.check_ante_unlocks(self.run.ante_number)
                 if self.run.run_won:
                     self.unlock_tracker.notify_run_won()
-                    print("YOU WON!")
+                    if self.reader is not None:
+                        BelAtroAnnounce.banner("YOU WON!", self.reader, hold=2.5)
                     break
         except KeyboardInterrupt:
             self.run.run_over = True
@@ -157,7 +153,7 @@ class BelAtroGame:
                     if card is None:
                         raise KeyboardInterrupt
                     if card == "UNDO":
-                        return self.prompt_card(state)
+                        continue
                     if isinstance(card, str):
                         continue
                     return card, new_state
@@ -185,30 +181,57 @@ class BelAtroGame:
         # Check if boss
         boss = None
         if self.run.blind_index == 2:
-            import random
+            # La Maison-Dieu tarot, when used during the previous shop, sets
+            # `disable_next_boss` so the upcoming boss blind is replaced by a
+            # plain blind. Consume the flag (one-shot effect).
+            if self.run.card_enhancements.pop("disable_next_boss", False):
+                pass  # boss stays None; deliberately skip the reveal animation
+            else:
+                import random
 
-            from .run.boss import ALL_BOSS_MODIFIERS
+                from .run.boss import ALL_BOSS_MODIFIERS
 
-            boss_cls = random.choice(ALL_BOSS_MODIFIERS)
-            boss = boss_cls()
-            BelAtroAnnounce.boss_reveal(boss, self.reader)
+                boss_cls = random.choice(ALL_BOSS_MODIFIERS)
+                boss = boss_cls()
+                BelAtroAnnounce.boss_reveal(boss, self.reader)
 
-        # Boss-specific pre-round setup
-        auto_coinche_active = boss is not None and boss.id == "l_avocat"
-        divorce_active = boss is not None and boss.id == "le_divorce"
+        # Boss-specific pre-round setup, driven by boss_modifiers flags rather
+        # than hardcoded boss.id checks (preserves the architecture that the
+        # rest of the engine uses and that tests/belatro/test_phase0_coverage.py
+        # pins down).
+        boss_flags = boss.flags() if boss is not None else None
+        auto_coinche_active = boss_flags is not None and boss_flags.auto_coinche
+        lock_trust = boss_flags is not None and boss_flags.lock_trust_zero
 
-        if boss is not None and boss.id == "le_fantome_partenaire":
+        if boss_flags is not None and boss_flags.hide_partner_hand:
             show_north = False  # partner hand hidden for this round
 
         if auto_coinche_active:
             acc.target_score *= 2  # L'Avocat: target doubles
 
-        if divorce_active:
+        if lock_trust:
             _saved_trust = self.run.partner.trust.value
-            self.run.partner.trust.value = 0  # Le Divorce: freeze trust at 0
+            self.run.partner.trust.value = 0  # Le Divorce / La Trahison: freeze trust at 0
 
         # B4: Reset round-specific trust flags
         self.run.partner.trust.auto_capot_used = False
+
+        # Surface dead voucher flags + deck mods into the round so scoring/legal_cards
+        # can honor them. Empty dict if nothing relevant — round_driver no-ops.
+        round_flags: dict[str, object] = dict(self.run.card_enhancements)
+        if self.run.tie_breaks_for_taker:
+            round_flags["tie_breaks_for_taker"] = True
+        if self.run.show_partner_bid_tendency:
+            personality = self.run.partner.personality
+            round_flags["partner_bid_tendency_text"] = (
+                f"Partner ({personality.name}): {personality.description}"
+            )
+        if self.run.partner_throws_trick:
+            # Le Traître joker: partner sabotages one random trick per round.
+            # round_driver picks the trick + reuses the agent_double AI path.
+            round_flags["traitre_active"] = True
+        if self.run.surcoinche_unlocked:
+            round_flags["surcoinche_unlocked"] = True
 
         final_state = drive_round(
             bus=bus,
@@ -217,10 +240,15 @@ class BelAtroGame:
             target_score=self.run.target_score,
             ui_callbacks=UICallbacks(self.reader),
             acc=acc,
+            card_enhancements=round_flags,
         )
 
-        if divorce_active:
+        if lock_trust:
             self.run.partner.trust.value = _saved_trust  # restore after round
+
+        # Le Diable tarot is one-round only — consume after the round so the
+        # partner doesn't permanently over-cut for the rest of the run.
+        self.run.card_enhancements.pop("partner_overcut_round", None)
 
         # Check win/loss and update trust
         total = acc.get_total(final_state)
@@ -245,11 +273,20 @@ class BelAtroGame:
                 failure_softened = True
                 # Defer run-over by one blind: the player paid for a safety net.
                 # We treat the round as a survived chute (no run-over flag).
-                print("[Assurance Capot] Chute pénalité divisée par deux — round survived.")
+                BelAtroAnnounce.banner(
+                    "[Assurance Capot] Chute pénalité divisée par deux — round survived.",
+                    self.reader,
+                    hold=2.0,
+                )
             if not failure_softened:
                 self.run.run_over = True
-                print(f"RUN OVER - Failed to meet target {effective_target} (scored {total}).")
-            if not divorce_active:
+                BelAtroAnnounce.banner(
+                    f"RUN OVER — Failed to meet target {effective_target} (scored {total}).",
+                    self.reader,
+                    color="red",
+                    hold=2.5,
+                )
+            if not lock_trust:
                 trust.blind_failed()
         else:
             payout = self.run.economy.process_round_end(total - self.run.target_score)
@@ -261,14 +298,28 @@ class BelAtroGame:
                 extra = max(0, (total - self.run.target_score) // 10)
                 self.run.economy.add_money(extra)  # Le Puriste: double base payout
 
-            if not divorce_active:
+            # L'Aristocrate deck: +$1 per Ace captured by NS team this round.
+            if self.run.gold_seal_aces:
+                from belote.deck import Rank
+                from belote.game import team_of, trick_winner_seat
+                aces_won = 0
+                trump = final_state.trump
+                se_trump = final_state.boss_modifiers.seven_eight_trump
+                for trick in final_state.completed_tricks:
+                    w = trick_winner_seat(trick, trump, se_trump)
+                    if w is not None and team_of(w) == 0:
+                        aces_won += sum(1 for tc in trick if tc.card.rank == Rank.ACE)
+                if aces_won > 0:
+                    self.run.economy.add_money(aces_won)
+
+            if not lock_trust:
                 if total >= self.run.target_score * 1.5:
                     trust.big_margin_win()
                 else:
                     trust.blind_beaten()
 
         # Partner-specific trust events (skipped under Le Divorce)
-        if not divorce_active:
+        if not lock_trust:
             if bd.taker_team == 0 and bd.is_failed:
                 trust.chute()
             elif bd.is_capot and bd.taker_team == 0:
@@ -278,7 +329,7 @@ class BelAtroGame:
 def main() -> None:
     import sys
 
-    from ..ansi import alt_screen_off, alt_screen_on, clear_screen, hide_cursor, show_cursor
+    from ..ansi import RESET, alt_screen_off, alt_screen_on, clear_screen, hide_cursor, show_cursor
     from ..input import KeyReader
 
     with KeyReader() as reader:
@@ -288,7 +339,7 @@ def main() -> None:
             game = BelAtroGame()
             game.start(reader)
         finally:
-            sys.stdout.write(alt_screen_off() + show_cursor())
+            sys.stdout.write(alt_screen_off() + show_cursor() + RESET)
             sys.stdout.flush()
 
 

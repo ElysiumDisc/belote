@@ -87,10 +87,26 @@ class LaTemperance(Tarot):
 class LeFou(Tarot):
     id = "le_fou"
     name = "Le Fou"
-    description = "Create a copy of the last Tarot or Planet card used."
+    description = "Re-applies the effect of the last Tarot or Planet card used."
 
     def use(self, run: BelAtroRun, context: object) -> None:
         from .registry import registry
+
+        last_id = run.last_consumable_id
+        # Re-apply the most recently used consumable. We deliberately leave
+        # `last_consumable_id` pointing at that item so a second LeFou keeps
+        # copying the same source rather than copying itself.
+        if last_id and last_id != self.id:
+            tarot_cls = registry.tarots.get(last_id)
+            planet_cls = registry.planets.get(last_id)
+            if tarot_cls is not None:
+                tarot_cls().use(run, context)
+                return
+            if planet_cls is not None:
+                planet_cls().use(run)
+                return
+        # Fallback if we have no record of a prior consumable (run just
+        # started): grant a random tarot to the consumables tray.
         tarots = [t for t in registry.tarots.values() if t is not type(self)]
         if tarots and len(run.consumables) < run.consumable_slots:
             run.consumables.append(random.choice(tarots)())

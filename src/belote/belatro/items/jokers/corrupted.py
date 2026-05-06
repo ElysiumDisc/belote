@@ -74,9 +74,12 @@ class LAgentDouble(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        # Count down the sabotage window; no score penalty here since it's a behavioral effect
+        # Count down the sabotage window once per trick regardless of who won —
+        # otherwise NS sweeping the round leaves the sabotage flag stuck on for
+        # the whole game. The "for 2 tricks" wording in the description is
+        # absolute, not "until the opponents have won 2".
         remaining = state.get(f"{self.id}_sabotage_remaining", 0)
-        if remaining > 0 and event.winner in (Seat.EAST, Seat.WEST):
+        if remaining > 0:
             state[f"{self.id}_sabotage_remaining"] = remaining - 1
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=4.0)
