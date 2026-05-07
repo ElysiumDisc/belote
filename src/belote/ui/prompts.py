@@ -118,17 +118,29 @@ def prompt_card(
 
 
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
-    """Interactive bid selection. Returns 'QUIT' if QUIT is pressed."""
+    """Interactive bid selection. Returns 'QUIT' if QUIT is pressed.
+
+    Round 2 offers Tout Atout (TA) and Sans Atout (SA) in addition to the
+    three remaining card suits. Per FFBelote rules, round 1 is "take the
+    up-card suit at the standard contract" only — TA/SA aren't offered there.
+    """
+    from ..game import SANS_ATOUT_BID
+
     if state.bidding_round == 1:
         # Round 1: Take (up_card suit) or Pass
-        options = [state.up_card.suit, None]  # type: ignore[union-attr]
+        options: list[Suit | str | None] = [state.up_card.suit, None]  # type: ignore[union-attr]
         labels = [f"Take {state.up_card.suit.symbol}", "Pass"]  # type: ignore[union-attr]
     else:
-        # Round 2: Any suit except up_card suit, or Pass
+        # Round 2: Any classic suit except up_card's, plus Tout Atout (every
+        # suit acts as trump) and Sans Atout (no trump). All round-2 specials
+        # gate to round 2 in `place_bid` — calling them in round 1 raises.
         all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
         other_suits = [s for s in all_suits if s != state.up_card.suit]  # type: ignore[union-attr]
-        options = other_suits + [None]
-        labels = [s.symbol for s in other_suits] + ["Pass"]
+        options = [*other_suits, Suit.TOUT_ATOUT, SANS_ATOUT_BID, None]
+        labels = (
+            [s.symbol for s in other_suits]
+            + ["TA", "SA", "Pass"]
+        )
 
     sel = 0
 
@@ -144,8 +156,9 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
             )
 
         if state.bidding_round == 2:
-            # Nice boxed UI for round 2
-            inner_w = 40
+            # Nice boxed UI for round 2. Widened to fit 7 options (♠/♥/♦/♣
+            # minus up-card suit + TA + SA + Pass) on one row.
+            inner_w = 60
             box_lines = [
                 f"┌{'─' * inner_w}┐",
                 f"│{f'ROUND {state.bidding_round} BID'.center(inner_w)}│",
@@ -220,6 +233,13 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                         return "UNDO"
                     if char == "p":
                         return None
+                    # Round-2-only quick keys for the new contracts. `a` = All
+                    # trump (Tout Atout), `s` = Sans Atout. Silently ignored in
+                    # round 1 since those contracts aren't legal there.
+                    if char == "a" and Suit.TOUT_ATOUT in options:
+                        return Suit.TOUT_ATOUT
+                    if char == "s" and SANS_ATOUT_BID in options:
+                        return SANS_ATOUT_BID
                     try:
                         idx = int(char) - 1
                         if 0 <= idx < len(options):

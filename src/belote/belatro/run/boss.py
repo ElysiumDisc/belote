@@ -227,7 +227,10 @@ class BetrayalArc(BossModifier):
     def apply(self, state: PatchedGameState) -> PatchedGameState:
         state.patch("_lock_trust_zero", True)
         # Re-use the existing agent_double_active flag to drive sabotage in ai.py.
+        # `late_only` makes round_driver populate sabotage_tricks as 4..8 instead
+        # of a random 3-trick set — matches the description "from trick 4 onward".
         state.patch("_agent_double_active", True)
+        state.patch("_agent_double_late_only", True)
         return state
 
 

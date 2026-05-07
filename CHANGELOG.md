@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] - 2026-05-06
+
+Audit-driven sweep on top of 2.8.0: four engine bugs fixed and the long-deferred Tout Atout / Sans Atout bidding affordance shipped end-to-end. The README's "future work" line for those contracts is gone — both contracts are now bidable in classic Belote and BelAtro, and the two jokers / two unlock counters that had been waiting on the affordance now fire in real play. Plan: `plans/bug-hunt-code-performance-elegant-starlight.md`.
+
+### Fixed — confirmed bugs
+
+- **`src/belote/belatro/engine/round_driver.py`** — replaced the lingering `boss.id == "l_agent_double_boss"` string-branch with a flag-based dispatch keyed on `state.boss_modifiers.agent_double_active`. Previously, BetrayalArc and the Le Traître joker both set the active flag but only L'Agent Double populated `agent_double_tricks` — so partner sabotage silently never fired for the other two paths. New `BossModifiers.agent_double_late_only` flag lets BetrayalArc express its "from trick 4 onward" pattern without re-introducing string-branching. Regression tests pinned in `tests/belatro/test_round_driver.py`. Plan B1.
+- **`src/belote/belatro/run/decks.py` + `core/run_state.py` + `belatro/main.py`** — Le Joueur's advertised "Boss Blind every 2 antes" was unimplemented (zero `boss_every_2` matches in the codebase). Now: deck modification → `card_enhancements["boss_every_2"]` → `main.py` rolls an extra boss on the Big Blind of even-numbered antes, doubling Le Joueur's boss-encounter count and matching the deck's high-variance theme. Plan B2.
+- **`src/belote/game.py`** — removed the dead `bid_suits` field on `GameState`. It was initialized and reset to `()` but never written, never read for gameplay. AI bidding correctly uses `state.up_card.suit` for round-1/2 forcing/forbidding. Plan B3.
+- **`src/belote/game.py::_calculate_legal_cards_impl`** — Tout Atout legal_cards branch added. Pre-fix the code dropped into the "non-trump led" branch under TA because `lead_suit != Suit.TOUT_ATOUT`, producing wrong legal moves whenever a TA round actually played. Now: must follow lead suit, must rise within suit if possible, free discard if void. Bug was unreachable until B-feature shipped, but is now exercised by the new bidding affordance. Plan B4.
+
+### Added — Tout Atout / Sans Atout contracts
+
+The full bidding affordance for both special contracts, end to end across classic Belote and BelAtro:
+
+- **`src/belote/game.py`** — `BidValue = Suit | Literal["sans_atout"] | None` and `SANS_ATOUT_BID` sentinel. `place_bid` accepts the new bid value and rejects TA/SA in round 1 with `IllegalMoveError`. Post-bid mapping: TA → `trump=Suit.TOUT_ATOUT, contract="tout_atout"`; SA → `trump=None, contract="sans_atout"`; normal → `trump=<suit>, contract="normal"`. Belote pre-calc skipped for both special contracts (no unique K+Q-of-trump exists). New `is_sans_atout` flag threaded through `_calculate_legal_cards_impl`, `_card_beats`, `_current_trick_winner`, `trick_winner_seat`. Dynamic-trump boss suppressed under SA.
+- **`src/belote/scoring.py`** — `score_round` gates on `state.contract` instead of `state.trump` so SA rounds (trump=None) score correctly. Chute formula uses `TOTAL_POINTS_TOUT_ATOUT=248` (TA) / `TOTAL_POINTS_SANS_ATOUT=120` (SA) from `config.py`. `_detect_all_declarations` skips belote detection under TA/SA. `card_points(c, None)` already produces the SA non-trump scale, so inner arithmetic is unchanged. Capot stays 252 for both contracts.
+- **`src/belote/ai.py`** — three-tier TA/SA bid heuristics. Easy: spread-Jacks → TA, flat-Aces → SA. Medium: weighted scoring with personality jitter. Hard: card_points-based with Jack-bonus / long-suit-penalty. Round 1 still rejects TA/SA — the affordance is round-2-only per FFBelote rules.
+- **`src/belote/ui/prompts.py`** — round-2 bid box widened to 60 cols and offers `[♠ ♥ ♦ ♣ TA SA Pass]` minus the up-card suit. New keyboard shortcuts `a` (Tout Atout) and `s` (Sans Atout) alongside the existing digit-select.
+- **`src/belote/gameflow.py::_bid_label`** — helper produces "Tout Atout" / "Sans Atout" / suit symbol / "Pass" for the AI bid announcement line. Pre-fix `bid.symbol` would crash on the SA string sentinel.
+- **`src/belote/belatro/engine/round_driver.py`** — partner's TA/SA bid is now gated on `partner.trust.duo_contracts_available`. Below the threshold, the bid falls back to "pass" rather than to a normal-suit bid, respecting the personality's choice to "go big or go home." This is the missing reader of the unread `duo_contracts_available` flag at `partner/trust.py:49`.
+- **`src/belote/belatro/partner/personality.py`** — `LeCourageux` opts into TA on Jack-heavy hands; `LeStratege` opts into SA on flat Ace/10-heavy hands. Both gate on round 2 and on the trust flag.
+
+These changes unblock two BelAtro jokers that were previously dead code:
+
+- **`Le Fanatique`** — now reachable via `tout_atout_wins` unlock counter; ×1.5 mult past the 4th NS-won trick of a TA round actually fires.
+- **`L'Idéologue`** — reachable via `sans_atout_wins`; +18 chips per Jack in SOUTH-won SA tricks actually fires.
+
+End-to-end integration tests in `tests/belatro/test_contract_unlocks.py` pin both unlock counters incrementing on real round-end events.
+
+### Audit findings reviewed and dismissed
+
+Three claims from the audit pipeline turned out to be misreadings of correct code; documented here so future audits don't re-flag them:
+
+- "AI Round 1 bidding logic is inverted" — the variable is named `forbidden` but per the comment it's the up-card suit, which is the **only** allowed bid in Round 1 per FFBelote. Code is correct.
+- "Partner-overtrump exception missing on trump leads" — intentional and pinned by `tests/test_belote.py:313` ("Trump lead: partner-winning exception does NOT apply"). Per FFBelote rules.
+- "Le Marseillais `announce_x2` / `no_belote_rebelote` flags never read" — both ARE read at `scoring.py:518` and `:554`, with dedicated tests in `tests/belatro/test_dead_flag_fixes.py`.
+
+### Performance
+
+Audit confirmed AI 0.032ms / render 0.233ms / scoring 0.197ms — well under the advertised targets. No perf changes needed.
+
 ## [2.8.0] - 2026-05-06
 
 Two consecutive audit-driven bug-fix sweeps shipped together. The first cleaned up advertised-but-silently-dead BelAtro flags (deck modifiers and vouchers whose `apply()` set state nobody read). The second verified a 5-critical / 12-high / 14-medium / 8-incomplete / 10-perf audit — about 62% of findings were real game-affecting bugs and were fixed; the rest were misreadings of the rules or already-correct code, listed under "Audit claims explicitly rejected" at the bottom. The plan-mode verification report lives at `plans/check-these-findings-accurately-abstract-kahan.md`.

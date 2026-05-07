@@ -71,3 +71,80 @@ def test_ai_hard_void_inference() -> None:
     )
     player._update_voids(state)
     assert Suit.SPADES in player.memory.known_voids[Seat.WEST]
+
+
+# ── F5: AI bidding for Tout Atout / Sans Atout ─────────────────────────────
+
+
+def _bid_state(hand, bidder_index=0, up_card=None, bidding_round=2):
+    hands = [(), (), (), ()]
+    hands[Seat.EAST.value] = hand
+    return GameState(
+        hands=tuple(hands),
+        up_card=up_card,
+        bidding_round=bidding_round,
+        bidder_index=bidder_index,
+        dealer=Seat.SOUTH,
+    )
+
+
+def test_ai_round1_never_bids_tout_atout() -> None:
+    """Round 1 must reject TA/SA — they're round-2-only contracts."""
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    # Strong TA-shaped hand: lots of Jacks
+    hand = (
+        Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK),
+        Card(Suit.HEARTS, Rank.NINE), Card(Suit.SPADES, Rank.NINE),
+        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.CLUBS, Rank.ACE),
+    )
+    state = _bid_state(hand, up_card=Card(Suit.HEARTS, Rank.TEN), bidding_round=1)
+    # Round 1: even if AI loves TA, the up-card is HEARTS, so it can only take HEARTS.
+    bid = player.decide_bid(state)
+    assert bid in (Suit.HEARTS, None), f"unexpected round-1 bid: {bid}"
+
+
+def test_ai_hard_bids_tout_atout_on_jack_heavy_hand() -> None:
+    """All four Jacks plus Aces should trigger Tout Atout in round 2."""
+    from belote.game import SANS_ATOUT_BID  # noqa: F401 (used elsewhere)
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    hand = (
+        Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK),
+        Card(Suit.HEARTS, Rank.NINE), Card(Suit.SPADES, Rank.NINE),
+        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.CLUBS, Rank.ACE),
+    )
+    state = _bid_state(hand, bidder_index=3)  # last to bid → aggression bonus
+    bid = player.decide_bid(state)
+    assert bid == Suit.TOUT_ATOUT
+
+
+def test_ai_easy_bids_sans_atout_on_flat_ace_hand() -> None:
+    """Three Aces across three suits with no long suit → Sans Atout."""
+    from belote.game import SANS_ATOUT_BID
+    player = AIPlayer(Seat.EAST, Difficulty.EASY)
+    hand = (
+        Card(Suit.HEARTS, Rank.ACE), Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.SPADES, Rank.ACE), Card(Suit.SPADES, Rank.EIGHT),
+        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.DIAMONDS, Rank.NINE),
+        Card(Suit.CLUBS, Rank.SEVEN), Card(Suit.CLUBS, Rank.EIGHT),
+    )
+    state = _bid_state(hand)
+    bid = player.decide_bid(state)
+    assert bid == SANS_ATOUT_BID
+
+
+def test_ai_pass_on_weak_hand() -> None:
+    """A weak hand should not bid TA, SA, or any suit."""
+    player = AIPlayer(Seat.EAST, Difficulty.MEDIUM)
+    hand = (
+        Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.HEARTS, Rank.EIGHT),
+        Card(Suit.SPADES, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT),
+        Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.DIAMONDS, Rank.EIGHT),
+        Card(Suit.CLUBS, Rank.SEVEN), Card(Suit.CLUBS, Rank.EIGHT),
+    )
+    state = _bid_state(hand)
+    # Force personality jitter to its extreme negative so the test isn't flaky.
+    with unittest.mock.patch.object(player._rng, "uniform", return_value=-0.5):
+        bid = player.decide_bid(state)
+    assert bid is None

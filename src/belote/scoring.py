@@ -222,7 +222,7 @@ def _sequence_points(seq: Sequence) -> int:
 
 def resolve_declarations(
     decls_per_seat: dict[Seat, SeatDeclarations],
-    trump: Suit,
+    trump: Suit | None,
 ) -> ResolvedDeclarations:
     """Resolve declarations per §3.7."""
     ns_seqs: list[Sequence] = []
@@ -316,13 +316,14 @@ def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None
         return None
 
     se_trump = state.boss_modifiers.seven_eight_trump
-    first_winner = trick_winner_seat(all_tricks[0], state.trump, se_trump)
+    is_sa = state.contract == "sans_atout"
+    first_winner = trick_winner_seat(all_tricks[0], state.trump, se_trump, is_sa)
     if first_winner is None:
         return None
     winning_team = team_of(first_winner)
 
     for trick in all_tricks[1:]:
-        winner = trick_winner_seat(trick, state.trump, se_trump)
+        winner = trick_winner_seat(trick, state.trump, se_trump, is_sa)
         if winner is None or team_of(winner) != winning_team:
             return None
     return winning_team
@@ -334,9 +335,17 @@ class SeatDeclarations(TypedDict):
     belote: bool
 
 
-def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDeclarations]:
-    """Internal helper to find all potential declarations in all hands."""
+def _detect_all_declarations(
+    state: GameState, trump: Suit | None
+) -> dict[Seat, SeatDeclarations]:
+    """Internal helper to find all potential declarations in all hands.
+
+    Sequences and carrés exist under every contract (Sans Atout included), so
+    `trump=None` is acceptable here. Belote is disabled under Sans Atout and
+    Tout Atout (no unique K+Q-of-trump) — `detect_belote` is skipped.
+    """
     decls_per_seat: dict[Seat, SeatDeclarations] = {}
+    no_belote_contract = trump is None or trump == Suit.TOUT_ATOUT
     for seat in Seat:
         # Default empty decls
         decls_per_seat[seat] = {
@@ -354,7 +363,7 @@ def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDe
 
         seqs = detect_sequences(hand)
         carres = detect_carres(hand)
-        has_belote = detect_belote(hand, trump)
+        has_belote = False if no_belote_contract else detect_belote(hand, trump)  # type: ignore[arg-type]
         decls_per_seat[seat] = {
             "sequences": seqs,
             "carres": carres,
@@ -363,27 +372,34 @@ def _detect_all_declarations(state: GameState, trump: Suit) -> dict[Seat, SeatDe
     return decls_per_seat
 
 
-def _calculate_base_points(state: GameState, trump: Suit) -> tuple[int, int]:
-    """Calculate raw card points per team, considering boss modifiers."""
+def _calculate_base_points(state: GameState, trump: Suit | None) -> tuple[int, int]:
+    """Calculate raw card points per team, considering boss modifiers.
+
+    `trump=None` is the Sans Atout case. `card_points(c, None)` already returns
+    the SA non-trump scale, so the inner arithmetic is unchanged.
+    """
     taker_team = team_of(state.taker) if state.taker is not None else 0
     taker_pts = 0
     defender_pts = 0
+    is_sa = state.contract == "sans_atout"
 
     kings_zero = state.boss_modifiers.kings_zero
     tens_zero = state.boss_modifiers.tens_zero
     ban_clubs = state.boss_modifiers.ban_clubs
 
-    def get_points(card: Card, t: Suit) -> int:
+    def get_points(card: Card, t: Suit | None) -> int:
         if kings_zero and card.rank == Rank.KING:
             return 0
         if tens_zero and card.rank == Rank.TEN:
             return 0
         if ban_clubs and card.suit == Suit.CLUBS:
             return 0
-        return card_points_fn(card, t)
+        return card_points_fn(card, t)  # type: ignore[arg-type]
 
     for trick in state.completed_tricks:
-        winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
+        winner = trick_winner_seat(
+            trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+        )
         if winner is None:
             continue
 
@@ -406,26 +422,30 @@ def _apply_scoring_modifiers(
     """Apply complex boss scoring modifiers (Compétition, Reine Noire)."""
     messages: list[str] = []
     trump = state.trump
+    is_sa = state.contract == "sans_atout"
     taker_team = team_of(state.taker) if state.taker is not None else 0
 
-    # Boss: La Competition (Separate scoring)
-    if state.boss_modifiers.separate_scoring and trump is not None:
+    # Boss: La Competition (Separate scoring) — applies under any active
+    # contract, including Sans Atout (trump=None).
+    if state.boss_modifiers.separate_scoring and state.contract is not None:
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
         kings_zero = state.boss_modifiers.kings_zero
         tens_zero = state.boss_modifiers.tens_zero
         ban_clubs = state.boss_modifiers.ban_clubs
 
-        def get_p(card: Card, t: Suit) -> int:
+        def get_p(card: Card, t: Suit | None) -> int:
             if kings_zero and card.rank == Rank.KING:
                 return 0
             if tens_zero and card.rank == Rank.TEN:
                 return 0
             if ban_clubs and card.suit == Suit.CLUBS:
                 return 0
-            return card_points_fn(card, t)
+            return card_points_fn(card, t)  # type: ignore[arg-type]
 
         for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
+            winner = trick_winner_seat(
+                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+            )
             if winner is None:
                 continue
             tp = 0 if (ban_clubs and trick[0].card.suit == Suit.CLUBS) else sum(get_p(tc.card, trump) for tc in trick)
@@ -447,7 +467,9 @@ def _apply_scoring_modifiers(
     if state.boss_modifiers.queen_spades_penalty:
         qs = Card(Suit.SPADES, Rank.QUEEN)
         for trick in state.completed_tricks:
-            winner = trick_winner_seat(trick, trump, state.boss_modifiers.seven_eight_trump)
+            winner = trick_winner_seat(
+                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+            )
             if winner is not None and any(tc.card == qs for tc in trick):
                 if team_of(winner) == taker_team:
                     taker_pts -= 25
@@ -460,7 +482,12 @@ def _apply_scoring_modifiers(
 
 def score_round(state: GameState) -> ScoringBreakdown:
     """Score the completed round per official rules."""
-    if state.trump is None or state.taker is None:
+    # An active contract has either a trump suit set or contract=="sans_atout"
+    # (the only legal case where trump is None mid-game). Pre-existing tests
+    # build states with `trump=Suit.X` and `contract=None` — those still score
+    # via the trump check.
+    contract_active = state.trump is not None or state.contract == "sans_atout"
+    if not contract_active or state.taker is None:
         return ScoringBreakdown(
             taker_team=team_of(Seat.SOUTH),
             table_taker_pts=0,
@@ -507,8 +534,10 @@ def score_round(state: GameState) -> ScoringBreakdown:
     decls_per_seat = _detect_all_declarations(state, trump)
     resolved = resolve_declarations(decls_per_seat, trump)
 
-    # 5. Compute belote points
-    belote_holder = state.belote_holders.get(trump)
+    # 5. Compute belote points. Belote is disabled under Sans Atout / Tout
+    # Atout (no unique K+Q-of-trump) — `belote_holders` is empty post-bid in
+    # those contracts, so this path naturally collapses.
+    belote_holder = state.belote_holders.get(trump) if trump is not None else None
     taker_belote = 0
     defender_belote = 0
     taker_rebelote = False
@@ -627,8 +656,16 @@ def score_round(state: GameState) -> ScoringBreakdown:
     elif comp_taker < comp_defender:
         is_failed = True
         messages.append("Chute! (bid failed)")
+        # Contract-aware total for the chute formula. SA/TA score over a
+        # different deck total — the defender pockets the full hand.
+        if state.contract == "sans_atout":
+            chute_total = GLOBAL_CONFIG.TOTAL_POINTS_SANS_ATOUT
+        elif state.contract == "tout_atout":
+            chute_total = GLOBAL_CONFIG.TOTAL_POINTS_TOUT_ATOUT
+        else:
+            chute_total = GLOBAL_CONFIG.TOTAL_POINTS
         defender_total = (
-            GLOBAL_CONFIG.TOTAL_POINTS
+            chute_total
             + GLOBAL_CONFIG.LAST_TRICK_BONUS
             + defender_declarations
             + taker_declarations
@@ -645,8 +682,9 @@ def score_round(state: GameState) -> ScoringBreakdown:
     if state.boss_modifiers.invert_scoring:
         t_tricks = 0
         se_trump = state.boss_modifiers.seven_eight_trump
+        is_sa_local = state.contract == "sans_atout"
         for trick in state.completed_tricks:
-            w = trick_winner_seat(trick, trump, se_trump)
+            w = trick_winner_seat(trick, trump, se_trump, is_sa_local)
             if w is not None and team_of(w) == taker_team:
                 t_tricks += 1
 
@@ -757,8 +795,14 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
 
 
 def get_declarations(state: GameState) -> tuple[Declaration, ...]:
-    """Pre-calculate all declarations from initial hands."""
-    if state.trump is None:
+    """Pre-calculate all declarations from initial hands.
+
+    Sequences and carrés exist under every contract (Sans Atout included).
+    Returns empty when the contract isn't established (no trump set and
+    contract field unset) — pre-existing call sites that only set `trump`
+    keep working.
+    """
+    if state.trump is None and state.contract != "sans_atout":
         return ()
 
     decls_per_seat = _detect_all_declarations(state, state.trump)

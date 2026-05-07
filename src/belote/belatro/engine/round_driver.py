@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from belote.ai import AIPlayer, Difficulty
 from belote.deck import Card, Suit
 from belote.game import (
+    SANS_ATOUT_BID,
+    BidValue,
     GameState,
     Phase,
     Seat,
@@ -109,11 +111,19 @@ def drive_round(
         # Ensure boss modifiers don't use stale cached logic/values
         clear_legal_cards_cache()
 
-        # L'Agent Double: pick 3 random tricks where sabotage is active
-        if boss.id == "l_agent_double_boss":
+    # Populate sabotage_tricks for any path that flagged agent_double_active.
+    # Sources: L'Agent Double boss (3 random tricks), BetrayalArc (tricks 4-8 via
+    # agent_double_late_only flag), traitre joker (already populated above).
+    # Reading the flag — not boss.id — keeps this site reusable.
+    if state.boss_modifiers.agent_double_active and not state._joker_state.get(
+        "agent_double_tricks"
+    ):
+        if state.boss_modifiers.agent_double_late_only:
+            sabotage_tricks = frozenset(range(4, 9))
+        else:
             sabotage_tricks = frozenset(rng.sample(range(1, 9), 3))
-            new_jstate = {**state._joker_state, "agent_double_tricks": sabotage_tricks}
-            state = replace(state, _joker_state=new_jstate)
+        new_jstate = {**state._joker_state, "agent_double_tricks": sabotage_tricks}
+        state = replace(state, _joker_state=new_jstate)
 
     # B4: Use partner trust-based difficulty for the North (partner) AI seat
     _north_diff_str = partner.difficulty_for(Seat.NORTH)
@@ -140,7 +150,7 @@ def drive_round(
     # Phase: BIDDING
     while state.phase == Phase.BIDDING:
         bidder = state.turn
-        bid: Suit | None = None
+        bid: BidValue = None
 
         if bidder == Seat.SOUTH:
             bid = ui_callbacks.prompt_bid(state)
@@ -154,19 +164,32 @@ def drive_round(
                 bid = None
             elif partner.personality.should_bid(state):
                 p_bid = partner.personality.bid_value(state)
-                # Ensure the bid is legal for the current round
+                # Trust-gate Tout Atout / Sans Atout: partner only bids these
+                # special contracts once the trust track unlocks them. Below
+                # the threshold, fall through to "pass" rather than bid a
+                # normal suit — the personality already chose to go big.
+                is_special = p_bid == Suit.TOUT_ATOUT or p_bid == SANS_ATOUT_BID
+                if is_special and not partner.trust.duo_contracts_available:
+                    p_bid = None
+                # Ensure the bid is legal for the current round (round 1 = up
+                # card suit only). TA/SA are also rejected in round 1 by
+                # place_bid, but we filter early to keep the bid legal here.
                 forbidden = state.up_card.suit if state.up_card else None
-                if p_bid != forbidden:
+                if p_bid != forbidden and not (
+                    is_special and state.bidding_round == 1
+                ):
                     bid = p_bid
         else:
             # Standard AI for EAST/WEST
             bid = ai_players[bidder].decide_bid(state)
 
         state = process_bid(state, bid)
+        # `bid` was a BidValue; the BidMadeEvent's `trump` field is the actual
+        # trump suit (Suit | None) from state, which place_bid set correctly.
         state = _emit(
             BidMadeEvent(
                 seat=bidder,
-                trump=bid,
+                trump=state.trump,
                 contract=state.contract or "normal",
             ),
             state
@@ -275,7 +298,10 @@ def drive_round(
             last_trick = state.completed_tricks[-1]
 
             winner = trick_winner_seat(
-                last_trick, state.trump, state.boss_modifiers.seven_eight_trump
+                last_trick,
+                state.trump,
+                state.boss_modifiers.seven_eight_trump,
+                state.contract == "sans_atout",
             )
             # Use state diff to get points; perfectly handles all boss-aware points and Dix de Der
             points = sum(state.current_round_points) - old_pts_total

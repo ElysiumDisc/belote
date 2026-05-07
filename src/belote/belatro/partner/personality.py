@@ -4,7 +4,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import Counter
 
-from belote.game import GameState, Seat, Suit
+from belote.game import SANS_ATOUT_BID, BidValue, GameState, Seat, Suit
 
 
 class PartnerPersonality(ABC):
@@ -18,8 +18,13 @@ class PartnerPersonality(ABC):
         ...
 
     @abstractmethod
-    def bid_value(self, state: GameState) -> Suit | None:
-        """Return the suit the partner bids when they do open."""
+    def bid_value(self, state: GameState) -> BidValue:
+        """Return the contract the partner bids: a Suit, `Suit.TOUT_ATOUT`,
+        the `SANS_ATOUT_BID` sentinel, or None.
+
+        The round driver gates TA/SA returns on `partner.trust.duo_contracts_available`
+        — personalities can return them freely; trust enforces availability.
+        """
         ...
 
     def should_coinche(self, state: GameState) -> bool:
@@ -39,8 +44,20 @@ class LeCourageux(PartnerPersonality):
         honors = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.KING, Rank.JACK))
         return honors >= 2
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
+        from belote.deck import Rank
+
         hand = state.hand_of(Seat.NORTH)
+        # Round-2-only: prefer Tout Atout when the hand is Jack-heavy across
+        # multiple suits (every suit acts as trump under TA, so distributed
+        # Jacks are the strongest TA signal). Trust gating happens in
+        # round_driver — we just propose; engine accepts or rejects.
+        if state.bidding_round == 2:
+            jack_suits = {c.suit for c in hand if c.rank == Rank.JACK and c.suit.is_card_suit}
+            jack_count = sum(1 for c in hand if c.rank == Rank.JACK)
+            if jack_count >= 3 and len(jack_suits) >= 3:
+                return Suit.TOUT_ATOUT
+
         c = Counter(card.suit for card in hand)
         suits = sorted(c, key=lambda s: c[s], reverse=True)
         return suits[0] if suits else None
@@ -60,7 +77,7 @@ class LEconome(PartnerPersonality):
             return False
         return any(c.suit == up.suit and c.rank == Rank.JACK for c in hand)
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
         up = state.up_card
         return up.suit if up else None
 
@@ -88,7 +105,7 @@ class LeFlambeur(PartnerPersonality):
             return False
         return per_suit_honors.most_common(1)[0][1] >= 1
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
         hand = state.hand_of(Seat.NORTH)
         if not hand:
             return None
@@ -117,7 +134,7 @@ class LeSacrifie(PartnerPersonality):
     def should_bid(self, state: GameState) -> bool:
         return False
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
         return None
 
 
@@ -129,7 +146,7 @@ class LeFantome(PartnerPersonality):
     def should_bid(self, state: GameState) -> bool:
         return False
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
         return None
 
 
@@ -145,8 +162,18 @@ class LeStratege(PartnerPersonality):
         high_value = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.JACK, Rank.NINE))
         return high_value >= 3
 
-    def bid_value(self, state: GameState) -> Suit | None:
+    def bid_value(self, state: GameState) -> BidValue:
+        from belote.deck import Rank
+
         hand = state.hand_of(Seat.NORTH)
+        # Round-2-only: prefer Sans Atout on a flat Ace/10-heavy hand. Under SA
+        # the Ace is master in every suit and long suits are a liability.
+        if state.bidding_round == 2:
+            ace_ten = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.TEN))
+            lengths = Counter(c.suit for c in hand if c.suit.is_card_suit)
+            if ace_ten >= 3 and (max(lengths.values(), default=0) <= 3):
+                return SANS_ATOUT_BID
+
         c = Counter(card.suit for card in hand)
         suits = sorted(c, key=lambda s: c[s], reverse=True)
         return suits[0] if suits else None

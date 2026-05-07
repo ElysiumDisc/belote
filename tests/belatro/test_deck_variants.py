@@ -65,6 +65,22 @@ class TestDeckVariants:
         run = BelAtroRun(deck_id="joueur")
         assert run.economy.money == 14
 
+    def test_joueur_deck_boss_every_2_flag_set(self) -> None:
+        """Le Joueur starts with the boss_every_2 enhancement so even-ante Big
+        Blinds also roll a boss in main.py."""
+        run = BelAtroRun(deck_id="joueur")
+        assert run.card_enhancements.get("boss_every_2") is True
+
+    def test_other_decks_do_not_set_boss_every_2(self) -> None:
+        """Sanity: only Le Joueur has boss_every_2 — guards against accidental
+        regressions if the dispatcher in run_state.py changes shape."""
+        for deck_id in ("classique", "republicain", "aristocrate", "ermite", "veteran",
+                        "flambeur", "anarchiste", "marseille", "coinche"):
+            run = BelAtroRun(deck_id=deck_id)
+            assert not run.card_enhancements.get("boss_every_2"), (
+                f"unexpected boss_every_2 on {deck_id}"
+            )
+
     def test_ermite_deck_initial_joker(self) -> None:
         """Verify L'Ermite starts with La Sentinelle."""
         run = BelAtroRun(deck_id="ermite")

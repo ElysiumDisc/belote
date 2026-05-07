@@ -62,6 +62,7 @@ STARTING_DECKS: list[StartingDeck] = [
         name="Le Joueur",
         description="Start with $10 extra cash. Boss Blind every 2 rounds.",
         initial_money=14,
+        deck_modifications={"boss_every_2": True},
         ascii_art=(
             "   $   $   $   $   $    ",
             "  ┌──────────────────┐  ",

@@ -141,3 +141,87 @@ def test_boss_modifier_patch_persistence():
     patches = dict(object.__getattribute__(proxy, "_patches"))
     assert "boss_modifiers" in patches
     assert patches["boss_modifiers"].invert_scoring is True
+
+
+# ── B1 regression: sabotage_tricks populated for any agent_double_active source ──
+
+
+class _AbortAfterCaptureError(Exception):
+    """Sentinel: raised inside prompt_bid to short-circuit drive_round once the
+    pre-bidding setup state has been captured."""
+
+
+class _CaptureBidUI(MockUICallbacks):
+    """UI that captures the state passed into prompt_bid (post-boss-apply,
+    post-sabotage-trick setup) and aborts the round so we don't have to mock
+    a full PLAYING phase to assert on setup. Captures from prompt_card too in
+    case SOUTH isn't the first bidder and the partner personality bids first."""
+
+    def __init__(self) -> None:
+        self.captured: GameState | None = None
+
+    def _capture_and_abort(self, state: GameState) -> None:
+        if self.captured is None:
+            self.captured = state
+        raise _AbortAfterCaptureError
+
+    def prompt_bid(self, state: GameState):  # type: ignore[no-untyped-def]
+        self._capture_and_abort(state)
+
+    def prompt_card(self, state: GameState):  # type: ignore[no-untyped-def]
+        self._capture_and_abort(state)
+
+
+def _capture_post_setup_state(boss=None, card_enhancements=None) -> GameState:  # type: ignore[no-untyped-def]
+    import contextlib
+
+    bus = EventBus()
+    partner = PartnerState()
+    ui = _CaptureBidUI()
+    with contextlib.suppress(_AbortAfterCaptureError):
+        drive_round(
+            bus=bus,
+            partner=partner,
+            boss=boss,
+            ui_callbacks=ui,
+            seed=7,
+            card_enhancements=card_enhancements,
+        )
+    assert ui.captured is not None
+    return ui.captured
+
+
+def test_agent_double_boss_populates_sabotage_tricks() -> None:
+    """L'Agent Double boss → 3 random sabotage tricks set in _joker_state."""
+    from belote.belatro.run.boss import LAgentDoubleBoss
+
+    state = _capture_post_setup_state(boss=LAgentDoubleBoss())
+    tricks = state._joker_state.get("agent_double_tricks")
+    assert isinstance(tricks, frozenset)
+    assert len(tricks) == 3
+    assert all(1 <= t <= 8 for t in tricks)
+
+
+def test_betrayal_arc_populates_late_sabotage_tricks() -> None:
+    """BetrayalArc → sabotage_tricks == {4..8} ('partner sabotages from trick 4 onward').
+
+    Pre-fix this was the bug: BetrayalArc set agent_double_active=True but the
+    round_driver only populated sabotage_tricks when boss.id matched l_agent_double_boss,
+    so partner never actually sabotaged.
+    """
+    from belote.belatro.run.boss import BetrayalArc
+
+    state = _capture_post_setup_state(boss=BetrayalArc())
+    assert state.boss_modifiers.agent_double_active is True
+    assert state.boss_modifiers.agent_double_late_only is True
+    assert state._joker_state.get("agent_double_tricks") == frozenset(range(4, 9))
+
+
+def test_traitre_joker_sabotage_preserved_when_no_boss() -> None:
+    """Le Traître joker (card_enhancement) sets a single sabotage trick that the
+    flag-based dispatch must not clobber."""
+    state = _capture_post_setup_state(card_enhancements={"traitre_active": True})
+    assert state.boss_modifiers.agent_double_active is True
+    tricks = state._joker_state.get("agent_double_tricks")
+    assert isinstance(tricks, frozenset)
+    assert len(tricks) == 1  # traitre's "single random trick" pattern

@@ -180,7 +180,14 @@ class BelAtroGame:
 
         # Check if boss
         boss = None
-        if self.run.blind_index == 2:
+        # Le Joueur deck (`boss_every_2`) adds an extra boss blind on the Big
+        # Blind of even-numbered antes — see decks.py.
+        is_boss_blind = self.run.blind_index == 2 or (
+            bool(self.run.card_enhancements.get("boss_every_2"))
+            and self.run.blind_index == 1
+            and self.run.ante_number % 2 == 0
+        )
+        if is_boss_blind:
             # La Maison-Dieu tarot, when used during the previous shop, sets
             # `disable_next_boss` so the upcoming boss blind is replaced by a
             # plain blind. Consume the flag (one-shot effect).
@@ -305,8 +312,9 @@ class BelAtroGame:
                 aces_won = 0
                 trump = final_state.trump
                 se_trump = final_state.boss_modifiers.seven_eight_trump
+                is_sa = final_state.contract == "sans_atout"
                 for trick in final_state.completed_tricks:
-                    w = trick_winner_seat(trick, trump, se_trump)
+                    w = trick_winner_seat(trick, trump, se_trump, is_sa)
                     if w is not None and team_of(w) == 0:
                         aces_won += sum(1 for tc in trick if tc.card.rank == Rank.ACE)
                 if aces_won > 0:

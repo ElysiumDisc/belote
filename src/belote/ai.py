@@ -6,6 +6,8 @@ from enum import Enum
 from .deck import Card, Rank, Suit, trick_rank
 from .deck import card_points as card_points_fn
 from .game import (
+    SANS_ATOUT_BID,
+    BidValue,
     GameState,
     Phase,
     Seat,
@@ -71,8 +73,13 @@ class AIPlayer:
             for card in state.hand_of(p):
                 self.memory.partner_hand.add(card)
 
-    def decide_bid(self, state: GameState) -> Suit | None:
-        """Decide whether to bid and which suit."""
+    def decide_bid(self, state: GameState) -> BidValue:
+        """Decide whether to bid and which contract.
+
+        Returns a normal Suit, `Suit.TOUT_ATOUT`, the `SANS_ATOUT_BID` string,
+        or None (pass). TA and SA are only considered in round 2; round 1 is
+        "take the up-card suit at the standard contract" only.
+        """
         self._se = state.boss_modifiers.seven_eight_trump
         # Boss: La Solitude (Partner forced pass)
         if state.boss_modifiers.partner_forced_pass and self.seat == partner(Seat.SOUTH):
@@ -81,26 +88,135 @@ class AIPlayer:
         hand = state.hand_of(self.seat)
         forbidden = state.up_card.suit if state.up_card else None
 
-        if self.difficulty == Difficulty.EASY:
-            bid = self._easy_bid(hand)
-        elif self.difficulty == Difficulty.MEDIUM:
-            bid = self._medium_bid(hand, state)
-        else:
-            bid = self._hard_bid(hand, state)
-
         if state.bidding_round == 1:
-            # Round 1: only take the up-card's suit
-            if forbidden and bid == forbidden:
-                return bid
+            # Round 1: classic-suit bids only, and only the up-card's suit. Get
+            # the heuristic's preferred suit; accept iff it matches the up-card.
+            suit_bid = self._suit_bid(hand, state)
+            if forbidden and suit_bid == forbidden:
+                return suit_bid
             return None
-        # Round 2: pick any suit except the forbidden one; try second-best if needed
-        if forbidden and bid == forbidden:
-            if self.difficulty == Difficulty.EASY:
-                return self._easy_bid(hand, exclude=forbidden)
-            if self.difficulty == Difficulty.MEDIUM:
-                return self._medium_bid(hand, state, exclude=forbidden)
-            return self._hard_bid(hand, state, exclude=forbidden)
-        return bid
+
+        # Round 2: any suit except the up-card's, plus TA and SA.
+        special = self._special_bid(hand, state)
+        if special is not None:
+            return special
+        return self._suit_bid(hand, state, exclude=forbidden)
+
+    def _suit_bid(
+        self, hand: tuple[Card, ...], state: GameState, exclude: Suit | None = None
+    ) -> Suit | None:
+        """Dispatch to the per-difficulty suit-only heuristic."""
+        if self.difficulty == Difficulty.EASY:
+            return self._easy_bid(hand, exclude=exclude)
+        if self.difficulty == Difficulty.MEDIUM:
+            return self._medium_bid(hand, state, exclude=exclude)
+        return self._hard_bid(hand, state, exclude=exclude)
+
+    def _special_bid(self, hand: tuple[Card, ...], state: GameState) -> BidValue:
+        """Round-2 evaluation of Tout Atout vs Sans Atout. Returns one of those
+        if the heuristic favors them strongly; None otherwise (so the caller
+        falls back to the suit-only path).
+
+        Heuristics (per-tier thresholds chosen to be conservative — these
+        contracts aren't picked unless the hand really fits):
+        - Easy: spread-honor TA / flat-Aces SA, simple counting.
+        - Medium: weighted sum + personality jitter.
+        - Hard: card-points-based + Jack/Ace bonuses.
+        """
+        if self.difficulty == Difficulty.EASY:
+            return self._easy_special(hand)
+        if self.difficulty == Difficulty.MEDIUM:
+            return self._medium_special(hand, state)
+        return self._hard_special(hand, state)
+
+    @staticmethod
+    def _suit_lengths(hand: tuple[Card, ...]) -> dict[Suit, int]:
+        lengths: dict[Suit, int] = dict.fromkeys(
+            (s for s in Suit if s.is_card_suit), 0
+        )
+        for c in hand:
+            if c.suit in lengths:
+                lengths[c.suit] += 1
+        return lengths
+
+    def _easy_special(self, hand: tuple[Card, ...]) -> BidValue:
+        """Pick the contract that best fits the hand shape:
+        - Tout Atout if Jack-heavy (≥3 Jacks/9s across ≥3 suits) — Jacks are
+          the dominant card under TA in every suit.
+        - Sans Atout if Ace-heavy (≥3 Aces+10s) with a flat distribution.
+        Aces alone don't trigger TA — under TA the Jack reigns, not the Ace.
+        """
+        ta_strong = {Rank.JACK, Rank.NINE}
+        ta_strong_suits = {c.suit for c in hand if c.rank in ta_strong}
+        ta_count = sum(1 for c in hand if c.rank in ta_strong)
+        if ta_count >= 3 and len(ta_strong_suits) >= 3:
+            return Suit.TOUT_ATOUT
+
+        ace_ten_count = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.TEN))
+        lengths = self._suit_lengths(hand)
+        if ace_ten_count >= 3 and max(lengths.values(), default=0) <= 3:
+            return SANS_ATOUT_BID
+        return None
+
+    def _medium_special(self, hand: tuple[Card, ...], state: GameState) -> BidValue:
+        """Weighted score: TA leans on Jacks (each acts like a trump master in
+        its own suit), SA leans on Aces and 10s with a flat-distribution bonus."""
+        personality = self._rng.uniform(-0.5, 0.5)
+
+        # TA score: every honor counts because every suit is trump.
+        ta_weights = {Rank.JACK: 4.0, Rank.NINE: 3.0, Rank.ACE: 2.0, Rank.KING: 1.0}
+        ta_score = sum(ta_weights.get(c.rank, 0.0) for c in hand)
+        # Spread bonus: more suits with honors → TA stronger.
+        suits_with_honors = len({c.suit for c in hand if c.rank in ta_weights})
+        ta_score += 0.5 * suits_with_honors
+
+        # SA score: Aces and 10s win lead-suit tricks; flat distribution helps.
+        sa_weights = {Rank.ACE: 3.0, Rank.TEN: 2.0, Rank.KING: 1.0}
+        sa_score = sum(sa_weights.get(c.rank, 0.0) for c in hand)
+        lengths = self._suit_lengths(hand)
+        if max(lengths.values(), default=0) <= 3 and min(lengths.values(), default=8) >= 1:
+            sa_score += 1.5  # flat-distribution bonus
+
+        # Thresholds: TA needs ~12 weighted points (Jack+Ace+9 in two suits etc.)
+        # SA needs ~9 (three Aces). Scaled to be slightly under classic-suit
+        # threshold so TA/SA show up in distinct hands.
+        ta_pick = ta_score + personality >= 11.0
+        sa_pick = sa_score + personality >= 9.0
+        if ta_pick and (not sa_pick or ta_score >= sa_score):
+            return Suit.TOUT_ATOUT
+        if sa_pick:
+            return SANS_ATOUT_BID
+        return None
+
+    def _hard_special(self, hand: tuple[Card, ...], state: GameState) -> BidValue:
+        """Use actual card_points scales as the heuristic.
+
+        TA: every card scores on the trump scale; threshold against the average
+            taker total (~62 raw). Plus a Jack-count bonus.
+        SA: every card scores on the non-trump scale; flat-Aces hand favored.
+        """
+        ta_pts = sum(card_points_fn(c, Suit.TOUT_ATOUT) for c in hand)
+        jack_bonus = sum(1 for c in hand if c.rank == Rank.JACK) * 6  # Jacks dominate TA
+        ta_score = ta_pts + jack_bonus
+
+        sa_pts = sum(
+            card_points_fn(c, None) for c in hand  # type: ignore[arg-type, misc]
+        )
+        # Long suits are bad under SA — opponents won't follow your suit.
+        lengths = self._suit_lengths(hand)
+        long_suit_penalty = sum(max(0, n - 3) ** 2 for n in lengths.values()) * 4
+        sa_score = sa_pts - long_suit_penalty
+
+        # Aggression bonus when last to bid in round 2 (won't get another shot).
+        aggression = 6 if state.bidder_index == 3 else 0
+
+        # Calibrated thresholds: average 8-card hand has ~31 points raw on each
+        # scale. We want TA/SA to fire on noticeably stronger-than-average hands.
+        if ta_score + aggression >= 50:
+            return Suit.TOUT_ATOUT
+        if sa_score + aggression >= 38:
+            return SANS_ATOUT_BID
+        return None
 
     def decide_card(self, state: GameState) -> Card:
         """Decide which card to play."""
@@ -209,8 +325,9 @@ class AIPlayer:
         p = partner(self.seat)
 
         # Check if partner is winning
+        is_sa = state.contract == "sans_atout"
         current_winner = _current_trick_winner(
-            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se
+            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se, is_sa
         )
         partner_winning = current_winner is not None and current_winner == p
 
@@ -353,8 +470,9 @@ class AIPlayer:
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
+        is_sa = state.contract == "sans_atout"
         current_winner = _current_trick_winner(
-            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se
+            [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se, is_sa
         )
         partner_winning = current_winner is not None and current_winner == p
 

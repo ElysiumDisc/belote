@@ -12,6 +12,8 @@ from .ansi import (
 )
 from .deck import Card, Suit
 from .game import (
+    SANS_ATOUT_BID,
+    BidValue,
     Carre,
     GameState,
     Phase,
@@ -54,6 +56,20 @@ def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
 
 
+def _bid_label(bid: BidValue) -> str:
+    """Human-readable label for an AI bid. `BidValue` is `Suit | str | None`;
+    this handles each shape so the AI announcement line doesn't crash when the
+    bid is the Sans Atout sentinel string."""
+    if bid is None:
+        return "Pass"
+    if bid == SANS_ATOUT_BID:
+        return "Sans Atout"
+    if bid == Suit.TOUT_ATOUT:
+        return "Tout Atout"
+    assert isinstance(bid, Suit)
+    return bid.symbol
+
+
 def run_bidding(
     state: GameState,
     reader: KeyReader,
@@ -78,15 +94,18 @@ def run_bidding(
             if res == "OVERLAY":
                 # Classic mode has no separate score overlay; re-prompt for a real bid.
                 continue
-            if isinstance(res, str):
+            if isinstance(res, str) and res != SANS_ATOUT_BID:
+                # Sentinels like "QUIT"/"UNDO"/"OVERLAY" are not real bids.
                 return None
-            bid: Suit | None = res
+            bid: BidValue = res
         else:
             ai = ai_players[bidder]
             bid = ai.decide_bid(current)
             display(current, None)
-            if bid:
-                sys.stdout.write(f"\r\n  {bidder.name} takes it as {bid.symbol}!\r\n")
+            if bid is not None:
+                sys.stdout.write(
+                    f"\r\n  {bidder.name} takes it as {_bid_label(bid)}!\r\n"
+                )
             else:
                 sys.stdout.write(f"\r\n  {bidder.name} passes\r\n")
             sys.stdout.flush()
@@ -160,7 +179,10 @@ def run_play(
             play_sound("trick")
             if len(current.completed_tricks) == 7:  # This was the 8th trick
                 se_trump = current.boss_modifiers.seven_eight_trump
-                winner = trick_winner_seat(display_state.current_trick, current.trump, se_trump)
+                is_sa = current.contract == "sans_atout"
+                winner = trick_winner_seat(
+                    display_state.current_trick, current.trump, se_trump, is_sa
+                )
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"
                     announce(

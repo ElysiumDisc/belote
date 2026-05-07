@@ -1,8 +1,24 @@
 from __future__ import annotations
 
 import dataclasses
+import random
 
-from belote.game import Card, GameState, Phase, Rank, Seat, Suit, TrickCard
+import pytest
+
+from belote.game import (
+    SANS_ATOUT_BID,
+    Card,
+    GameState,
+    IllegalMoveError,
+    Phase,
+    Rank,
+    Seat,
+    Suit,
+    TrickCard,
+    new_game,
+    place_bid,
+    start_round,
+)
 from belote.scoring import score_round
 
 
@@ -279,3 +295,252 @@ def test_sequence_trump_bonus() -> None:
     decls = _detect_all_declarations(state, Suit.DIAMONDS)
     resolved = resolve_declarations(decls, Suit.DIAMONDS)
     assert resolved.scoring_team is None  # cancel
+
+
+# ── B4 regression: Tout Atout legal_cards ──────────────────────────────────
+
+
+def _ta_state(south_hand, current_trick, leader=Seat.NORTH):
+    """Build a minimal PLAYING-phase TA state with South to play."""
+    hands = [(), (), (), ()]
+    hands[Seat.SOUTH.value] = south_hand
+    return GameState(
+        hands=tuple(hands),
+        trump=Suit.TOUT_ATOUT,
+        contract="tout_atout",
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        leader=leader,
+        turn=Seat.SOUTH,
+        current_trick=current_trick,
+    )
+
+
+def test_tout_atout_must_overtake_within_lead_suit() -> None:
+    """Under Tout Atout, holding ♥7 and ♥J after partner leads ♥7: must rise
+    with the Jack (the only riser within ♥) — pre-fix this fell into the
+    non-trump-led branch and allowed the 7 too."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.HEARTS, Rank.JACK),
+        Card(Suit.SPADES, Rank.ACE),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _ta_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert legal == (Card(Suit.HEARTS, Rank.JACK),)
+
+
+def test_tout_atout_must_follow_suit() -> None:
+    """Under Tout Atout, holding hearts and spades when hearts is led: must
+    follow hearts only — off-suit play is illegal."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.HEARTS, Rank.QUEEN),
+        Card(Suit.HEARTS, Rank.NINE),
+        Card(Suit.SPADES, Rank.ACE),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _ta_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert set(legal) == {Card(Suit.HEARTS, Rank.QUEEN), Card(Suit.HEARTS, Rank.NINE)}
+
+
+def test_tout_atout_void_can_discard_anything() -> None:
+    """Under Tout Atout, void in lead suit → free discard. No 'must trump'
+    rule because off-suit cards never beat the lead suit."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.DIAMONDS, Rank.SEVEN),
+        Card(Suit.CLUBS, Rank.JACK),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _ta_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert set(legal) == set(south_hand)
+
+
+# ── F3/F4 regression: Sans Atout engine + scoring ─────────────────────────
+
+
+def _sa_state(south_hand, current_trick, leader=Seat.NORTH):
+    """Build a minimal PLAYING-phase Sans Atout state with South to play."""
+    hands = [(), (), (), ()]
+    hands[Seat.SOUTH.value] = south_hand
+    return GameState(
+        hands=tuple(hands),
+        trump=None,
+        contract="sans_atout",
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        leader=leader,
+        turn=Seat.SOUTH,
+        current_trick=current_trick,
+    )
+
+
+def test_sans_atout_must_follow_lead_suit() -> None:
+    """Under Sans Atout (trump=None, contract='sans_atout') with hearts and
+    spades in hand: must follow hearts only when hearts is led."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.HEARTS, Rank.QUEEN),
+        Card(Suit.HEARTS, Rank.NINE),
+        Card(Suit.SPADES, Rank.ACE),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _sa_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert set(legal) == {Card(Suit.HEARTS, Rank.QUEEN), Card(Suit.HEARTS, Rank.NINE)}
+
+
+def test_sans_atout_void_can_discard_anything() -> None:
+    """Under Sans Atout, void in lead suit → free discard. No 'must trump'
+    rule; off-suit cards never beat the lead-suit hand anyway."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.DIAMONDS, Rank.SEVEN),
+        Card(Suit.CLUBS, Rank.JACK),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _sa_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert set(legal) == set(south_hand)
+
+
+def test_sans_atout_no_overtake_required() -> None:
+    """Under Sans Atout, when you can follow suit, you can play any of your
+    lead-suit cards — no must-rise rule like under Tout Atout."""
+    from belote.game import legal_cards
+
+    south_hand = (
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.HEARTS, Rank.JACK),
+    )
+    trick = (TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),)
+    state = _sa_state(south_hand, trick)
+    legal = legal_cards(state, Seat.SOUTH)
+    assert set(legal) == set(south_hand)  # both legal — no rise rule
+
+
+def test_sans_atout_trick_winner_lead_suit_only() -> None:
+    """Off-suit cards never win under SA; among lead-suit cards, highest
+    non-trump rank wins (Ace highest, 7 lowest)."""
+    from belote.game import trick_winner_seat
+
+    trick = (
+        TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.JACK)),  # not lead-suit master under SA
+        TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.ACE)),  # off-suit, can't win
+        TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.ACE)),  # SA Ace = highest
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.SEVEN)),  # SA lead suit, low
+    )
+    # Lead is SOUTH's HEARTS.JACK
+    winner = trick_winner_seat(trick, None, False, is_sans_atout=True)
+    assert winner == Seat.NORTH  # ♥A beats ♥J under non-trump scale
+
+
+def test_sans_atout_score_round_baseline() -> None:
+    """SA round, 8 tricks all to NS, no declarations, no belote → NS scores
+    TOTAL_POINTS_SANS_ATOUT (120) + LAST_TRICK_BONUS (10) = 130."""
+    # Build: every trick is taken by SOUTH with the lead-suit Ace
+    tricks = []
+    for suit in (Suit.HEARTS, Suit.SPADES, Suit.DIAMONDS, Suit.CLUBS):
+        # Two tricks per suit: A+10+K+Q = 28, then J+9+8+7 = 2
+        tricks.append((
+            TrickCard(Seat.SOUTH, Card(suit, Rank.ACE)),
+            TrickCard(Seat.WEST, Card(suit, Rank.TEN)),
+            TrickCard(Seat.NORTH, Card(suit, Rank.KING)),
+            TrickCard(Seat.EAST, Card(suit, Rank.QUEEN)),
+        ))
+        tricks.append((
+            TrickCard(Seat.SOUTH, Card(suit, Rank.JACK)),
+            TrickCard(Seat.WEST, Card(suit, Rank.NINE)),
+            TrickCard(Seat.NORTH, Card(suit, Rank.EIGHT)),
+            TrickCard(Seat.EAST, Card(suit, Rank.SEVEN)),
+        ))
+    state = GameState(
+        hands=((), (), (), ()),
+        trump=None,
+        contract="sans_atout",
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        completed_tricks=tuple(tricks),
+        last_trick_winner=Seat.SOUTH,
+    )
+    breakdown = score_round(state)
+    # NS won every trick. Total non-trump points = 120 + 10 dix de der = 130.
+    # Note: 8 tricks × all-NS-take-it-all = capot (252).
+    assert breakdown.is_capot is True
+    assert breakdown.taker_total == 252
+
+
+def test_sans_atout_no_belote_ever() -> None:
+    """Even when NS holds K+Q hearts under SA, no belote awarded — there's
+    no trump suit, so K+Q is not 'of trump' for any suit."""
+    # Single trick state, give NS hearts K+Q in initial_hands but no belote
+    initial_hands = (
+        (Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.QUEEN)),
+        (), (), (),
+    )
+    state = GameState(
+        hands=((), (), (), ()),
+        initial_hands=initial_hands,
+        trump=None,
+        contract="sans_atout",
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        completed_tricks=(),
+        belote_holders={},  # post-bid: empty for SA
+    )
+    breakdown = score_round(state)
+    assert breakdown.taker_belote == 0
+    assert breakdown.defender_belote == 0
+
+
+def test_tout_atout_no_belote_ever() -> None:
+    """Belote is also disabled under Tout Atout (no unique K+Q-of-trump)."""
+    initial_hands = (
+        (Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.QUEEN)),
+        (), (), (),
+    )
+    state = GameState(
+        hands=((), (), (), ()),
+        initial_hands=initial_hands,
+        trump=Suit.TOUT_ATOUT,
+        contract="tout_atout",
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        completed_tricks=(),
+        belote_holders={},
+    )
+    breakdown = score_round(state)
+    assert breakdown.taker_belote == 0
+    assert breakdown.defender_belote == 0
+
+
+def _start_round_state() -> GameState:
+    return start_round(new_game(target=1000), random.Random(7))
+
+
+def test_place_bid_sans_atout_round1_rejected() -> None:
+    """SA can't be bid in round 1 (round 1 is 'take the up-card suit only')."""
+    state = _start_round_state()
+    assert state.bidding_round == 1
+    with pytest.raises(IllegalMoveError):
+        place_bid(state, SANS_ATOUT_BID)
+
+
+def test_place_bid_tout_atout_round1_rejected() -> None:
+    """TA can't be bid in round 1."""
+    state = _start_round_state()
+    assert state.bidding_round == 1
+    with pytest.raises(IllegalMoveError):
+        place_bid(state, Suit.TOUT_ATOUT)

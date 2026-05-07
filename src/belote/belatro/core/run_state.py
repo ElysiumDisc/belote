@@ -138,6 +138,10 @@ class BelAtroRun:
                 self.card_enhancements["announce_x2"] = True
             if deck.deck_modifications.get("no_belote_rebelote"):
                 self.card_enhancements["no_belote_rebelote"] = True
+            if deck.deck_modifications.get("boss_every_2"):
+                # Le Joueur: also rolls a boss on the Big Blind of even-numbered
+                # antes (2, 4, 6, 8). Read by main.py when picking the round's boss.
+                self.card_enhancements["boss_every_2"] = True
             if deck.deck_modifications.get("gold_seal_aces"):
                 self.gold_seal_aces = True
             if deck.deck_modifications.get("corrupted_pool_visible"):

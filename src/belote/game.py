@@ -10,6 +10,15 @@ from .deck import Card, Rank, Suit, card_points, make_deck, trick_rank
 from .deck import deal as deal_cards_
 from .deck import shuffle as shuffle_deck_
 
+# Sentinel for the Sans Atout contract at the bidding API boundary.
+# `Suit.TOUT_ATOUT` already exists for Tout Atout. Sans Atout has no card-suit
+# equivalent (no card has this "suit"), so the bid value is the string literal
+# `"sans_atout"`. Post-bid this is encoded as `state.trump=None` plus
+# `state.contract="sans_atout"` — `state.contract` is the authoritative carrier
+# of contract identity from PLAYING onward.
+SANS_ATOUT_BID: Literal["sans_atout"] = "sans_atout"
+BidValue = Suit | Literal["sans_atout"] | None
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -159,6 +168,7 @@ class BossModifiers:
     tens_zero: bool = False
     hide_partner_hand: bool = False
     agent_double_active: bool = False
+    agent_double_late_only: bool = False
     partner_forced_pass: bool = False
     lock_trust_zero: bool = False
     separate_scoring: bool = False
@@ -174,7 +184,7 @@ class GameState:
     leader: Seat = Seat.SOUTH
     turn: Seat = Seat.SOUTH
     phase: Phase = Phase.DEAL
-    bids: tuple[Suit | None, ...] = field(default_factory=tuple)
+    bids: tuple[BidValue, ...] = field(default_factory=tuple)
     taker: Seat | None = None
     current_trick: tuple[TrickCard, ...] = field(default_factory=tuple)
     completed_tricks: tuple[tuple[TrickCard, ...], ...] = field(default_factory=tuple)
@@ -188,7 +198,6 @@ class GameState:
     remaining_cards: tuple[Card, ...] = field(default_factory=tuple)
     bidder_index: int = 0
     bidding_round: int = 1
-    bid_suits: tuple[Suit, ...] = field(default_factory=tuple)
     announced: str | None = None
     belote_holders: dict[Suit, Seat] = field(default_factory=dict)
     belote_tracker: tuple[bool, bool] = (False, False)
@@ -226,7 +235,6 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "last_trick_winner": None,
         "bids": (),
         "bidder_index": 0,
-        "bid_suits": (),
         "current_round_points": (0, 0),
         "declarations": (),
         "announced": None,
@@ -288,7 +296,7 @@ def bidding_turn(state: GameState) -> Seat:
     return get_bidder(state.dealer, state.bidder_index)
 
 
-def process_bid(state: GameState, bid: Suit | None) -> GameState:
+def process_bid(state: GameState, bid: BidValue) -> GameState:
     """Process a bid and return the new state."""
     return place_bid(state, bid)
 
@@ -322,8 +330,24 @@ def _distribute_remaining_cards(state: GameState, taker: Seat) -> list[list[Card
     return new_hands
 
 
-def place_bid(state: GameState, bid: Suit | None) -> GameState:
-    """Process a bid from the current bidder."""
+def place_bid(state: GameState, bid: BidValue) -> GameState:
+    """Process a bid from the current bidder.
+
+    `bid` is one of:
+    - `None` → pass
+    - `Suit.SPADES`/`HEARTS`/`DIAMONDS`/`CLUBS` → normal contract
+    - `Suit.TOUT_ATOUT` → Tout Atout (round 2 only)
+    - `"sans_atout"` → Sans Atout (round 2 only)
+
+    TA and SA in round 1 raise `IllegalMoveError` — round 1 is "take the
+    up-card suit at the standard contract" only.
+    """
+    is_special = bid == Suit.TOUT_ATOUT or bid == SANS_ATOUT_BID
+    if is_special and state.bidding_round == 1:
+        raise IllegalMoveError(
+            "Tout Atout / Sans Atout can only be bid in round 2"
+        )
+
     new_bids = state.bids + (bid,)
 
     if bid is not None:
@@ -336,17 +360,34 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
         if not all(len(h) == 8 for h in new_hands):
             raise ValueError(f"Deal corruption: Hands lengths {[len(h) for h in new_hands]}")
 
-        # Pre-calculate belote holders
-        belote_holders = {}
-        for s_idx in range(4):
-            seat = Seat(s_idx)
-            hand = new_hands[s_idx]
-            hand_set = {(c.rank, c.suit) for c in hand}
-            for suit in Suit:
-                if not suit.is_card_suit:
-                    continue
-                if (Rank.KING, suit) in hand_set and (Rank.QUEEN, suit) in hand_set:
-                    belote_holders[suit] = seat
+        # Map bid → (trump, contract). State.contract is the authoritative
+        # contract identity; state.trump is the trump *suit* (None for SA, the
+        # special TOUT_ATOUT marker for TA, a normal suit otherwise).
+        if bid == SANS_ATOUT_BID:
+            new_trump: Suit | None = None
+            new_contract = "sans_atout"
+        elif bid == Suit.TOUT_ATOUT:
+            new_trump = Suit.TOUT_ATOUT
+            new_contract = "tout_atout"
+        else:
+            assert isinstance(bid, Suit)
+            new_trump = bid
+            new_contract = "normal"
+
+        # Pre-calculate belote holders. Belote = K+Q of trump. There is no
+        # unique K+Q-of-trump under TA (every suit acts as trump) or SA (no
+        # trump at all), so belote is disabled for both contracts.
+        belote_holders: dict[Suit, Seat] = {}
+        if new_contract == "normal":
+            for s_idx in range(4):
+                seat = Seat(s_idx)
+                hand = new_hands[s_idx]
+                hand_set = {(c.rank, c.suit) for c in hand}
+                for suit in Suit:
+                    if not suit.is_card_suit:
+                        continue
+                    if (Rank.KING, suit) in hand_set and (Rank.QUEEN, suit) in hand_set:
+                        belote_holders[suit] = seat
 
         # Pre-calculate declarations
         from .scoring import get_declarations
@@ -358,7 +399,8 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
             hands=tuple(tuple(h) for h in new_hands),
             initial_hands=tuple(tuple(h) for h in new_hands),
             bids=new_bids,
-            trump=bid,
+            trump=new_trump,
+            contract=new_contract,
             taker=taker,
             phase=Phase.PLAYING,
         )
@@ -393,7 +435,6 @@ def place_bid(state: GameState, bid: Suit | None) -> GameState:
             phase=Phase.DEAL,
             bidder_index=0,
             bidding_round=1,
-            bid_suits=(),
         )
     next_bidder = get_bidder(state.dealer, next_index)
     return replace(
@@ -425,16 +466,28 @@ def _calculate_legal_cards_impl(
     current_trick_ids: tuple[tuple[int, int], ...],
     seat_val: int,
     seven_eight_trump: bool = False,
+    is_sans_atout: bool = False,
 ) -> tuple[int, ...]:
-    """Calculate legal cards using card IDs (memoized)."""
+    """Calculate legal cards using card IDs (memoized).
+
+    `is_sans_atout` discriminates the Sans Atout contract from "no trump set
+    yet" (both have trump=None). Under SA, the player must follow the lead
+    suit if able; if void, free discard (no trumping concept).
+    """
     # Map IDs back to Cards for logic
     hand = tuple(_ID_TO_CARD[i] for i in hand_ids)
     seat = Seat(seat_val)
 
-    if trump is None:
+    if not current_trick_ids:
         return hand_ids
 
-    if not current_trick_ids:
+    if is_sans_atout:
+        lead_suit = _ID_TO_CARD[current_trick_ids[0][1]].suit
+        my_suit = tuple(c for c in hand if c.suit == lead_suit)
+        res = my_suit if my_suit else hand
+        return tuple(_CARD_TO_ID[c] for c in res)
+
+    if trump is None:
         return hand_ids
 
     # Reconstruct TrickCard-like objects for the internal logic if needed,
@@ -448,12 +501,41 @@ def _calculate_legal_cards_impl(
         TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in current_trick_ids if s != seat_val
     ]
 
-    current_winner = _current_trick_winner(played_cards, trump, lead_suit, seven_eight_trump)
+    current_winner = _current_trick_winner(
+        played_cards, trump, lead_suit, seven_eight_trump, is_sans_atout
+    )
     partner_winning = current_winner is not None and partner(seat) == current_winner
 
     my_suit_cards = [c for c in hand if c.suit == lead_suit]
 
     res_cards: tuple[Card, ...] = ()
+
+    # Tout Atout: every suit acts as trump within its own led-suit group. Must
+    # follow the lead suit if able and must rise within it; if void, discard
+    # freely (off-suit cards never beat the lead suit, so there's no "trump
+    # over" to force). Partner-winning gives no extra flexibility — the rise
+    # rule applies regardless of who's winning, since rising is the only way
+    # to beat opponents within the lead suit.
+    if trump == Suit.TOUT_ATOUT:
+        if my_suit_cards:
+            highest_in_trick = max(
+                (
+                    trick_rank(tc.card, trump, seven_eight_trump)
+                    for tc in played_cards
+                    if tc.card.suit == lead_suit
+                ),
+                default=-1,
+            )
+            risers = tuple(
+                c
+                for c in my_suit_cards
+                if trick_rank(c, trump, seven_eight_trump) > highest_in_trick
+            )
+            res_cards = risers or tuple(my_suit_cards)
+        else:
+            res_cards = hand
+        return tuple(_CARD_TO_ID[c] for c in res_cards)
+
     is_trump_lead = (lead_suit == trump) or (
         seven_eight_trump and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
     )
@@ -539,8 +621,11 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
     se_trump = state.boss_modifiers.seven_eight_trump
+    is_sa = state.contract == "sans_atout"
 
-    res_ids = _calculate_legal_cards_impl(hand_ids, state.trump, trick_ids, seat.value, se_trump)
+    res_ids = _calculate_legal_cards_impl(
+        hand_ids, state.trump, trick_ids, seat.value, se_trump, is_sa
+    )
     res_cards = tuple(_ID_TO_CARD[i] for i in res_ids)
 
     # Le Républicain deck: 7s/8s are wild and always legal in addition to the
@@ -557,23 +642,46 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
 
 
 def _current_trick_winner(
-    played: list[TrickCard], trump: Suit, lead_suit: Suit, seven_eight_trump: bool = False
+    played: list[TrickCard],
+    trump: Suit | None,
+    lead_suit: Suit,
+    seven_eight_trump: bool = False,
+    is_sans_atout: bool = False,
 ) -> Seat | None:
     """Determine who is currently winning the trick based on cards played so far."""
     if not played:
         return None
     best = played[0]
     for tc in played[1:]:
-        if _card_beats(tc.card, best.card, trump, lead_suit, seven_eight_trump):
+        if _card_beats(tc.card, best.card, trump, lead_suit, seven_eight_trump, is_sans_atout):
             best = tc
     return best.seat
 
 
 def _card_beats(
-    card: Card, current_best: Card, trump: Suit, lead_suit: Suit, seven_eight_trump: bool = False
+    card: Card,
+    current_best: Card,
+    trump: Suit | None,
+    lead_suit: Suit,
+    seven_eight_trump: bool = False,
+    is_sans_atout: bool = False,
 ) -> bool:
-    """Does card beat current_best?"""
+    """Does card beat current_best?
+
+    Sans Atout: only lead-suit cards can win; among lead-suit cards, the
+    higher non-trump rank wins. Off-suit cards never beat the lead-suit hand.
+    """
+    if is_sans_atout:
+        if card.suit == current_best.suit:
+            # Both same suit. Use SANS_ATOUT_TRUMP placeholder is wrong; we want
+            # the non-trump scale. Pass an unrelated suit so trick_rank treats
+            # both as non-trump.
+            return _NONTRUMP_RANK[card.rank] > _NONTRUMP_RANK[current_best.rank]
+        # Different suits under SA: only the lead-suit card can win.
+        return card.suit == lead_suit and current_best.suit != lead_suit
+
     if card.suit == current_best.suit:
+        assert trump is not None  # legal_cards guarantees this for non-SA
         return trick_rank(card, trump, seven_eight_trump) > trick_rank(
             current_best, trump, seven_eight_trump
         )
@@ -594,6 +702,7 @@ def _card_beats(
 
     # Neither are trump (or both are trump but different suits - only possible with 7/8 deluge)
     if is_trump_card and is_best_trump:
+        assert trump is not None
         # Both act as trumps, compare their trick_ranks
         return trick_rank(card, trump, seven_eight_trump) > trick_rank(
             current_best, trump, seven_eight_trump
@@ -602,31 +711,53 @@ def _card_beats(
     return card.suit == lead_suit
 
 
+# Inline copy of deck._NONTRUMP_ORDER so _card_beats can rank lead-suit cards
+# under Sans Atout without importing private symbols. Match deck.py:111-121.
+_NONTRUMP_RANK: dict[Rank, int] = {
+    Rank.SEVEN: 0,
+    Rank.EIGHT: 1,
+    Rank.NINE: 2,
+    Rank.JACK: 3,
+    Rank.QUEEN: 4,
+    Rank.KING: 5,
+    Rank.TEN: 6,
+    Rank.ACE: 7,
+}
+
+
 def trick_winner_seat(
-    trick: tuple[TrickCard, ...], trump: Suit | None, seven_eight_trump: bool = False
+    trick: tuple[TrickCard, ...],
+    trump: Suit | None,
+    seven_eight_trump: bool = False,
+    is_sans_atout: bool = False,
 ) -> Seat | None:
-    """Determine the winner of a completed trick."""
-    if not trick or trump is None:
+    """Determine the winner of a completed trick.
+
+    Returns None when the contract isn't established (e.g., during DEAL/BIDDING).
+    Sans Atout has trump=None but produces a real winner when is_sans_atout=True.
+    """
+    if not trick:
+        return None
+    if trump is None and not is_sans_atout:
         return None
 
     # Use a primitive-only key for memoization
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in trick)
-    return _trick_winner_seat_impl(trick_ids, trump, seven_eight_trump)
+    return _trick_winner_seat_impl(trick_ids, trump, seven_eight_trump, is_sans_atout)
 
 
 @lru_cache(maxsize=1024)
 def _trick_winner_seat_impl(
-    trick_ids: tuple[tuple[int, int], ...], trump: Suit, seven_eight_trump: bool = False
+    trick_ids: tuple[tuple[int, int], ...],
+    trump: Suit | None,
+    seven_eight_trump: bool = False,
+    is_sans_atout: bool = False,
 ) -> Seat:
     """Internal memoized winner detection using primitives."""
-    # Convert back to TrickCard for existing logic or just use IDs
-    # Existing logic uses _current_trick_winner which uses _card_beats
     played = [TrickCard(Seat(s), _ID_TO_CARD[c]) for s, c in trick_ids]
     lead_suit = played[0].card.suit
 
-    # We can optimize this further by avoiding reconstruction if we rewrite _current_trick_winner
-    # but for now this fixes the cache effectiveness while keeping logic central.
-    res = _current_trick_winner(played, trump, lead_suit, seven_eight_trump)
+    res = _current_trick_winner(played, trump, lead_suit, seven_eight_trump, is_sans_atout)
     assert res is not None  # Should not be None if trick_ids is not empty
     return res
 
@@ -663,11 +794,12 @@ def play_card(state: GameState, card: Card) -> GameState:
     # Check if trick is complete (4 cards)
     if len(new_trick) == 4:
         se_trump = state.boss_modifiers.seven_eight_trump
-        winner = trick_winner_seat(new_trick, trump, se_trump)
+        is_sa = state.contract == "sans_atout"
+        winner = trick_winner_seat(new_trick, trump, se_trump, is_sa)
 
         # Boss: La Rupture (No consecutive team wins)
         if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
-            last_winner = trick_winner_seat(state.completed_tricks[-1], trump, se_trump)
+            last_winner = trick_winner_seat(state.completed_tricks[-1], trump, se_trump, is_sa)
             if last_winner and winner and team_of(winner) == team_of(last_winner):
                 # Force the other team to win if they had any card in the trick
                 # or just pick the highest card of the other team.
@@ -676,10 +808,10 @@ def play_card(state: GameState, card: Card) -> GameState:
                 other_team_cards = [
                     tc for tc in new_trick if team_of(tc.seat) != team_of(last_winner)
                 ]
-                if other_team_cards and trump:
+                if other_team_cards and (trump or is_sa):
                     # Find best card among other team
                     best_other = _current_trick_winner(
-                        other_team_cards, trump, new_trick[0].card.suit, se_trump
+                        other_team_cards, trump, new_trick[0].card.suit, se_trump, is_sa
                     )
                     if best_other:
                         winner = best_other
@@ -696,10 +828,17 @@ def play_card(state: GameState, card: Card) -> GameState:
         new_completed = state.completed_tricks + (new_trick,)
         tricks_count = len(new_completed)
 
-        # Update current round points
-        trick_pts = (
-            sum(card_points(tc.card, trump, se_trump) for tc in new_trick)
-            if trump is not None
+        # Update current round points. `card_points(card, None)` already
+        # produces the Sans Atout non-trump scale, so the only non-trump-set
+        # case is "contract not established" (DEAL/BIDDING) which can't reach
+        # this branch — but keep the guard for defensiveness.
+        contract_active = state.contract is not None
+        trick_pts: int = (
+            sum(
+                card_points(tc.card, trump, se_trump)  # type: ignore[arg-type, misc]
+                for tc in new_trick
+            )
+            if contract_active
             else 0
         )
         # Boss: Les Clubs Bannis – club-led tricks score 0
@@ -711,9 +850,9 @@ def play_card(state: GameState, card: Card) -> GameState:
                 0
                 if (state.boss_modifiers.kings_zero and tc.card.rank == Rank.KING)
                 or (state.boss_modifiers.tens_zero and tc.card.rank == Rank.TEN)
-                else card_points(tc.card, trump, se_trump)
+                else card_points(tc.card, trump, se_trump)  # type: ignore[arg-type, misc]
                 for tc in new_trick
-            ) if trump is not None else 0
+            ) if contract_active else 0
         ns_pts, ew_pts = state.current_round_points
         if team_of(winner) == 0:
             ns_pts += trick_pts
@@ -729,13 +868,19 @@ def play_card(state: GameState, card: Card) -> GameState:
 
         new_round_points = (ns_pts, ew_pts)
 
-        # Boss: L'Anarchie (Trump changes every 2 tricks)
+        # Boss: L'Anarchie (Trump changes every 2 tricks). Suppressed under
+        # Sans Atout — there's no trump to rotate, and silently flipping
+        # `state.trump` from None to a real suit would break the SA contract
+        # mid-round.
         current_trump = trump
-        if state.boss_modifiers.dynamic_trump and tricks_count % 2 == 0 and tricks_count < 8:
+        if (
+            state.boss_modifiers.dynamic_trump
+            and state.contract != "sans_atout"
+            and tricks_count % 2 == 0
+            and tricks_count < 8
+        ):
             possible = [s for s in Suit if s != trump and s.is_card_suit]
             current_trump = state._rng.choice(possible)
-            # Use set_announced to notify user?
-            # For now we'll just update it quietly, maybe add a message.
 
         # Check if round is complete (8 tricks)
         if tricks_count >= 8:

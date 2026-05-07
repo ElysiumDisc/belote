@@ -14,6 +14,12 @@ class Config:
     REBELOTE_POINTS: int = 40
     CAPOT_BASE: int = 252
     TOTAL_POINTS: int = 152
+    # Sum over the 32-card deck under each contract. TA scores every card on
+    # the trump scale (J=20, 9=14, A=11, 10=10, K=4, Q=3, 7/8=0 → 62/suit ×4).
+    # SA scores every card on the non-trump scale (A=11, 10=10, K=4, Q=3, J=2,
+    # 9/8/7=0 → 30/suit ×4).
+    TOTAL_POINTS_TOUT_ATOUT: int = 248
+    TOTAL_POINTS_SANS_ATOUT: int = 120
 
     # Timing (ai_move_delay, trick_result_pause, round_result_pause)
     _SPEED_TIMINGS: tuple[tuple[str, tuple[float, float, float]], ...] = (
