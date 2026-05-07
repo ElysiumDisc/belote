@@ -139,10 +139,10 @@ def test_hud_compact_omits_help_hints_and_theme() -> None:
     bar_compact = _build_hud(state, term_w=80, layout=COMPACT)
     bar_spacious = _build_hud(state, term_w=140, layout=SPACIOUS)
     # Compact bar shouldn't carry the help-hint substring or the "Theme: " label.
-    assert "[T]History" not in bar_compact
+    assert "[H]Hist" not in bar_compact
     assert "Theme:" not in bar_compact
     # Spacious does carry both — there's room.
-    assert "[T]History" in bar_spacious
+    assert "[H]Hist" in bar_spacious
     assert "Theme:" in bar_spacious
 
 

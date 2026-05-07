@@ -5,6 +5,81 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.5] - 2026-05-07
+
+In-game keyboard shortcuts cleaned up, the trick mat now anchors every played card inside a visible per-seat slot, the round history overlay carries the full per-round picture, and the cards have been redrawn in a GRIMAUD-1898 style with both-corner indices and patterned pip layouts.
+
+### Fixed
+
+- **`src/belote/input.py`** — `Key.THEME` was defined but never mapped to a keystroke; the help text falsely advertised `Shift+T` (which terminals can't generally distinguish in raw mode). Theme cycling during gameplay was unreachable. New mapping: `t/T → Key.THEME`, `h/H → Key.HIST`, `?` → `Key.HELP`, `o/O → Key.SORT`. Both the Unix and Windows readers updated.
+- **`src/belote/input.py`** — `s` was previously stolen by `Key.SORT`, so pressing `S` in round-2 bidding triggered a sort instead of the **Sans Atout** quick-bid the help text promised. Sort now lives on `O` (matching what the help screen always claimed) and `s` falls through to `Key.CHAR` so SA bidding works.
+- **`src/belote/gameflow.py::run_play`** — when the user had already pressed any key earlier in the round (which sets `skip_anims`), the post-trick pause was skipped entirely and the 4th card vanished before it could be read. New `MIN_TRICK_DWELL = 0.5s` non-skippable hold runs after every completed trick (even on the `instant` speed preset) so the player always sees all four cards before the mat clears.
+
+### Added
+
+- **`src/belote/ui/render.py`** — visible **slot frames** drawn around each compass position on the trick mat. Implemented via three new helpers (`_slot_anchors`, `_slot_frame_row`, `_felt_pad_ns`, `_we_row`) that paint thin `─`/`│` borders on the felt cells immediately surrounding each card slot, in the felt-placeholder dim colour. Total mat dimensions (`6 + 3*card_h`) are unchanged, so `_calculate_base_row` and `patch_trick_card` continue to work without any coordinate adjustments — patched cards land exactly inside the existing frame.
+- **`src/belote/game.py::RoundScore`** — eight new optional fields (`contract`, `trump`, `taker_seat`, `tricks_ns`, `tricks_ew`, `last_trick_winner`, `decl_summary_ns`, `decl_summary_ew`) populated from `state` and `state.completed_tricks` at scoring time. All fields default so existing test fixtures and any historical `RoundScore` constructions remain valid.
+- **`src/belote/scoring.py::apply_round_score`** — now computes per-team trick counts via `trick_winner_seat`/`team_of`, builds short declaration labels (`"100♥"`, `"Belote"`, `"Carré-J"`, …) gated on the team's `*_decl_pts > 0` so only the *scored* declarations appear, and threads everything into `RoundScore`. New helper `_decl_short_label` covers belote/rebelote/sequence/carre.
+- **`src/belote/ui/prompts.py::show_history`** — rewritten as an 8-column table (`RD | TAKER | CONTRACT | TRICKS | DECLARATIONS | NS | EW | STATUS`) for terminals ≥78 cols, with a 2-line-per-round fallback for narrower terminals. Status colouring: gold `CAPOT`, red `CHUTE`, dim `LITIGE`. Existing scrolling, view-height clamp, and exit-on-any-key behaviour preserved.
+- **`src/belote/ui/render.py::_card_face_internal`** — full GRIMAUD-1898-inspired redraw:
+  - Both corners now carry a 3-cell `rank+suit` index (`A♠` top-left, `♠A` bottom-right). The index padding scales with `inner_w`.
+  - Pip cards (7-10) at `card_h ≥ 7` get a recognisable pip arrangement instead of a single centred suit symbol.
+  - Court cards J/Q/K each get a distinct multi-row motif (sword, jewelled headdress, crown).
+  - Aces get a decorative `╭─◆─╮` / `╰─◆─╯` wreath around the central suit.
+  - Compact 6×5 layout keeps the single inner row but still benefits from both-corner indices.
+  - All variants honour the active theme (`face_card_bg`, `card_face_bg`, `highlight_bg`, `red_fg`/`black_fg`) and the `DIM` prefix for illegal cards. ASCII fallback paths preserved.
+- **`tests/test_extended.py::test_round_score_history_extra_fields`** — pins the new `RoundScore` fields end-to-end through `apply_round_score`.
+
+### Changed
+
+- **`src/belote/ui/menu.py`** — main-menu loop now handles `Key.THEME` (cycles forward through `THEMES`), so the new in-game `T` shortcut works at the menu too.
+- **`src/belote/main.py`**, **`src/belote/ui/render.py`** — game-over hint and HUD compact hint updated to advertise the new `[H] History` / `[T] Theme` shortcuts.
+- **`src/belote/ui/prompts.py::show_help`** — help-screen text rewritten to match the new bindings.
+- **`README.md`** — Controls section rewritten; theme section now lists all six themes by name.
+- **`tests/test_layout.py::test_hud_compact_omits_help_hints_and_theme`** — assertion updated for the new compact-HUD hint substring.
+
+### Notes
+
+436/436 tests pass. No gameplay, scoring, or AI-decision changes — all updates are UX (keys, slot framing, dwell, history depth, card glyphs).
+
+## [2.9.2] - 2026-05-07
+
+Render-pipeline fix for Konsole (KDE/Kubuntu) and other strict ANSI terminals where UI elements visibly stacked on top of each other — the top HUD repeating ~6 times, "Theme: Sepia Vintage" duplicating in the right column, "Partner" doubling, the bid prompt repainting below itself, and bid history accumulating between frames. The bug existed in the code on every terminal but VTE-based emulators (LXTerminal, GNOME Terminal, xterm) auto-blanked the leaking cells, masking it. Konsole's Vt102Emulation does not, so the leakage was visible.
+
+### Fixed
+
+- **`src/belote/ui/render.py::render`** — the bidding selector (Round 1 inline highlighted Take/Pass; Round 2 boxed grid; optional `partner_bid_tendency_text` line) is now painted inside the main render frame via the new `bid_selection: int | None` parameter on `render()` and `display()`. Previously `prompt_bid` paid display() and then wrote 8+ extra `\r\n` lines, which scrolled the alt-screen on the bottom row and left stale rows that the next frame's blank padding never repainted.
+- **`src/belote/ui/render.py::render`** — every line in the rendered frame now ends with `clear_to_eol()` (`\x1b[K`), including blank vertical-centering padding rows. The previous `line + clear_to_eol() if line else line` branch skipped the escape on padding rows, betting the previous frame's content area had already cleared them — but that bet broke whenever an external write (announcement, prompt artifact) deposited debris on a padding row. Cost is one 3-byte escape per row; benefit is correct rendering on any ANSI-compliant terminal regardless of strictness.
+- **`src/belote/ui/prompts.py::prompt_bid`** — gutted of all post-`display()` `sys.stdout.write` calls. Each loop iteration is now a single `display(state, None, bid_selection=sel)` + `reader.read()`. Removed unused `REVERSE` and `black_fg` imports (the box-rendering code that consumed them moved to `render.py::_build_bid_prompt_lines`).
+- **`src/belote/ui/announce.py::announce`** — replaced the `\r\n`-bracketed banner with absolute cursor positioning (`move(term_h - 1, 1) + clear_line()`) so the banner can never trigger a scroll, even when the cursor is parked on the bottom row of the alt-screen.
+
+### Added
+
+- **`src/belote/ui/render.py::_build_bid_prompt_lines`** — pure helper that returns the in-frame bidding selector lines. Encapsulates the Round 1 inline form, the Round 2 60-column boxed form, and the optional partner-tendency line so the main render loop reads as one coherent paint.
+
+### Notes
+
+No gameplay, scoring, or AI changes. 435/435 tests pass. The fix is observable when running under Konsole — start a Belote round, force a Round 2 bid (pass on the up-card), and arrow-navigate the selector: previously the box stacked between iterations; now it repaints in place.
+
+## [2.9.1] - 2026-05-06
+
+UI polish patch on top of 2.9.0. Two pieces of menu art had drifted; this release fixes both and tightens the menu plumbing so the cup walls hold for every label combination.
+
+### Fixed
+
+- **`src/belote/ui/menu.py::get_cards_art`** — the croissant Braille had a corrupted line 8 (`⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀`, 21 cells) that broke the right curl, and was missing the 13th-line `⠉⠉⠉` crumb under the tip entirely. Restored to the canonical 13-line, 25-cell-wide reference. Each line now uses U+2800 Braille blanks for its leading indent (uniform 25-cell width) rather than mixed ASCII spaces, so callers don't have to re-pad.
+- **`src/belote/ui/menu.py::CUP_TEMPLATE`** — body inner width was 47 chars (29-char opt + 16 trailing dead space + 2 gutter), much wider than the 23-char lid and saucer. Now 29 chars flush so menu options sit between the cup walls with no padding. Steam line 2 now correctly shows the two-puff frame (`)     (`) — previously the template's leading-indent disagreement with `STEAMS[..][1]` pushed the second puff out of view.
+- **`src/belote/ui/menu.py::_render_main_menu_art`** — selected-row markers tightened from ` > {label} < ` (6-char overhead) to `> {label} <` (4-char overhead) so the selected row uses the same width budget as unselected (`  {label}  `, also 4-char overhead). Without this, a selected `Theme: < Sepia Vintage >` would bust the right cup wall.
+- **`src/belote/ui/menu.py::show_main_menu`** — settings labels shortened to fit the new 25-char usable label width: `AI Config:` → `AI:`, `Target Score:` → `Target:`. `Speed:` and `Theme:` keep their names with tightened spacing. All four `<` markers still column-align.
+
+### Changed
+
+- **`src/belote/ui/menu.py::_render_main_menu_art`** — opt-slot loop and assertion bound dropped from 12 → 9 to match the new template. The error message ("add opt slots to CUP_TEMPLATE") still points at the right fix if the menu ever grows past 9 entries.
+
+### Notes
+
+No gameplay or scoring changes; classic and BelAtro behavior is bit-for-bit identical. 435/435 tests pass; ruff and mypy clean on `src/`. Pre-existing lint/type debt in `tests/` and `scripts/benchmark.py` (18 ruff, 69 mypy strict-mode annotations) is untouched and tracked separately.
+
 ## [2.9.0] - 2026-05-06
 
 Audit-driven sweep on top of 2.8.0: four engine bugs fixed and the long-deferred Tout Atout / Sans Atout bidding affordance shipped end-to-end. The README's "future work" line for those contracts is gone — both contracts are now bidable in classic Belote and BelAtro, and the two jokers / two unlock counters that had been waiting on the affordance now fire in real play. Plan: `plans/bug-hunt-code-performance-elegant-starlight.md`.

@@ -149,6 +149,14 @@ class RoundScore:
     is_capot: bool
     is_litige: bool = False
     litige_points: int = 0
+    contract: str | None = None
+    trump: Suit | None = None
+    taker_seat: Seat | None = None
+    tricks_ns: int = 0
+    tricks_ew: int = 0
+    last_trick_winner: Seat | None = None
+    decl_summary_ns: tuple[str, ...] = ()
+    decl_summary_ew: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

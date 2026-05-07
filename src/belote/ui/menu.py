@@ -25,43 +25,48 @@ from .render import get_term_size
 
 
 def get_cards_art() -> list[str]:
-    """Return the cards logo art with current theme colors."""
+    """Return the croissant art with current theme colors.
+
+    Each line is 25 Braille cells wide (including U+2800 blanks for indent),
+    so callers can rely on uniform width without ASCII padding.
+    """
     c = menu_art_fg()
     return [
-        f"      {c}⢠⣴⣶⣶⣶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"      {c}⣿⣿⣿⣿⣿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"     {c}⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"     {c}⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀{RESET}",
-        f"      {c}⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀{RESET}",
-        f"    {c}⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀⠀⠀⠀⠀⠀{RESET}",
-        f"    {c}⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆⠀⠀⠀⠀{RESET}",
-        f"    {c}⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀⠀⠀⠀{RESET}",
-        f"      {c}⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀{RESET}",
-        f"      {c}⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿{RESET}",
-        f"       {c}⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟{RESET}",
-        f"         {c}⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁⠀{RESET}",
+        f"{c}⠀⠀⢠⣴⣶⣶⣶⣄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⠀⠀⣿⣿⣿⣿⣿⣿⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⠀⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⠀⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀⠀⠀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⠀⠀⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆⠀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀⠀⠀⠀⠀⠀{RESET}",
+        f"{c}⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆⠀⠀⠀⠀{RESET}",
+        f"{c}⠘⢿⡿⠋⣠⣾⣿⣿⣿⣿⣿⣿⣿⡿⠋⢀⣾⣿⣿⠟⢁⣀⠀⠀⠀{RESET}",
+        f"{c}⠀⠀⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀{RESET}",
+        f"{c}⠀⠀⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿{RESET}",
+        f"{c}⠀⠀⠀⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟{RESET}",
+        f"{c}⠀⠀⠀⠀⠀⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁⠀{RESET}",
+        f"{c}⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀{RESET}",
     ]
 
 
 CUP_TEMPLATE = [
-    "                       {steam0}",
-    "                        {steam1}",
+    "                 {steam0}",
+    "                 {steam1}",
     "                 {gold}___...(-------)-....___{reset}",
     "             {gold}.-''       )    (          ''-.{reset}",
     "       {gold}.-'``'|-._             )         _.-|{reset}",
     "      {gold}/  .--.|   `''---...........---''`   |{reset}",
-    "     {gold}/  /    |  {opt0}                |{reset}",
-    "     {gold}|  |    |  {opt1}                |{reset}",
-    "     {gold}|  |    |  {opt2}                |{reset}",
-    "     {gold}|  |    |  {opt3}                |{reset}",
-    "     {gold}|  |    |  {opt4}                |{reset}",
-    "     {gold}|  |    |  {opt5}                |{reset}",
-    "     {gold}|  |    |  {opt6}                |{reset}",
-    "      {gold}\\  \\   |  {opt7}                |{reset}",
-    "       {gold}`\\ `\\ |  {opt8}                |{reset}",
-    "         {gold}`\\ `|  {opt9}                |{reset}",
-    "         {gold}_/ /\\  {opt10}               /{reset}",
-    "        {gold}(__/  \\ {opt11}               /{reset}",
+    "     {gold}/  /    |{opt0}|{reset}",
+    "     {gold}|  |    |{opt1}|{reset}",
+    "     {gold}|  |    |{opt2}|{reset}",
+    "     {gold}|  |    |{opt3}|{reset}",
+    "     {gold}|  |    |{opt4}|{reset}",
+    "     {gold}|  |    |{opt5}|{reset}",
+    "     {gold}|  |    |{opt6}|{reset}",
+    "      {gold}\\  \\   |{opt7}|{reset}",
+    "       {gold}`\\ `\\ |{opt8}|{reset}",
+    "         {gold}`\\ `|                             |{reset}",
+    "         {gold}_/ /\\                             /{reset}",
+    "        {gold}(__/  \\                           /{reset}",
     "     {gold}_..---''` \\                         /`''---.._{reset}",
     "  {gold}.-'           \\                       /          '-.{reset}",
     " {gold}:               `-.__             __.-'              :{reset}",
@@ -88,12 +93,12 @@ def _render_main_menu_art(sel: int, options: list[str], frame: int, term_h: int)
 
     # Process placeholders
     opts = {}
-    assert len(options) <= 12, (
+    assert len(options) <= 9, (
         f"Too many menu options ({len(options)}); add opt slots to CUP_TEMPLATE"
     )
-    for i in range(12):
+    for i in range(9):
         label = options[i] if i < len(options) else ""
-        text = f"{REVERSE} > {label} < {RESET}" if i == sel else f"  {label}  "
+        text = f"{REVERSE}> {label} <{RESET}" if i == sel else f"  {label}  "
         opts[f"opt{i}"] = ansi_center(text, 29)
 
     final_cup = []
@@ -231,10 +236,10 @@ def show_main_menu(
         options_labels = [
             "BelAtro",
             "Start Game",
-            f"AI Config:     < {diff_display} >",
-            f"Target Score: < {curr_target} >",
-            f"Speed:        < {curr_speed.capitalize()} >",
-            f"Theme:        < {theme_manager.get_current().name} >",
+            f"AI:     < {diff_display} >",
+            f"Target: < {curr_target} >",
+            f"Speed:  < {curr_speed.capitalize()} >",
+            f"Theme:  < {theme_manager.get_current().name} >",
             "Rules & History",
             "Statistics",
             "Quit",
@@ -276,6 +281,11 @@ def show_main_menu(
                 show_help(reader)
             case Key.MUTE:
                 toggle_mute()
+            case Key.THEME:
+                themes_list = list(THEMES.keys())
+                curr_theme = theme_manager._current_theme_name
+                new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
+                theme_manager.set_current(themes_list[new_idx])
             case Key.UP:
                 sel = (sel - 1) % len(options_labels)
             case Key.DOWN:

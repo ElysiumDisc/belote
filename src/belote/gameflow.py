@@ -50,6 +50,12 @@ from .ui import (
 )
 
 
+# Minimum time the four cards stay on the mat before a trick clears. This
+# applies even when the user has skipped earlier animations (so a fast-paced
+# session still lets the player read every completed trick).
+MIN_TRICK_DWELL: float = 0.5
+
+
 def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     """Create AI players for seats not occupied by humans."""
     ai_seats = {Seat.EAST, Seat.NORTH, Seat.WEST}
@@ -177,6 +183,10 @@ def run_play(
         # 3. If this completes a trick, pause longer and show announcements
         if len(display_state.current_trick) == 4:
             play_sound("trick")
+            # Non-skippable minimum dwell so all four cards are always visible
+            # before the trick clears, even when the user has skipped earlier
+            # animations or is on the "instant" speed preset.
+            interruptible_sleep(MIN_TRICK_DWELL, None)
             if len(current.completed_tricks) == 7:  # This was the 8th trick
                 se_trump = current.boss_modifiers.seven_eight_trump
                 is_sa = current.contract == "sans_atout"

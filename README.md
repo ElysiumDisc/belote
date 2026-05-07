@@ -45,18 +45,19 @@ belatro
 
 ### Main Menu
 ```text
-      ⢠⣴⣶⣶⣶⣄
-      ⣿⣿⣿⣿⣿⣿⣦
-     ⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄
-     ⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀
-      ⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆
-    ⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀
-    ⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆
-    ⠘⢿⡿⠋⣠⣾⣿⣿⣿⠟⠁⣿⣿⣿⣿⣿⠟⢁⣀
-      ⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀
-      ⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿
-       ⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟
-         ⠉⠉⠉⠀⢾⣿⣿⣿⣿⠋⠀⠚⠛⠛⠛⠛⠛⠛⠁
+  ⢠⣴⣶⣶⣶⣄
+  ⣿⣿⣿⣿⣿⣿⣦
+ ⢰⣿⣿⣿⣿⡿⠟⠁⣠⣴⣶⣦⠄
+ ⢸⣿⣿⠟⠉⣠⣴⣿⣿⣿⠟⠁⣠⣾⣿⣦⡀
+  ⠉⣀⣴⣾⣿⣿⣿⠟⢁⣤⣾⣿⣿⣿⣿⣿⡆
+⢀⣤⣾⣿⣿⣿⡿⠛⢁⣴⣿⣿⣿⣿⣿⣿⣿⠟⠁⡀
+⢼⣿⣿⣿⡿⠋⣀⣴⣿⣿⣿⣿⣿⣿⣿⡿⠉⣠⣾⣿⡆
+⠘⢿⡿⠋⣠⣾⣿⣿⣿⣿⣿⣿⣿⡿⠋⢀⣾⣿⣿⠟⢁⣀
+  ⣠⣾⣿⣿⣿⣿⣿⣿⣿⣿⠏⢀⣴⣿⣿⣿⠋⢠⣾⣿⣷⣦⡀
+  ⢻⣿⣿⣿⣿⣿⣿⣿⠟⢁⣴⣿⣿⣿⡿⠁⣰⣿⣿⣿⣿⣿⣿
+   ⠹⢿⣿⣿⣿⡿⠋⣠⣾⣿⣿⣿⠟⢀⣼⣿⣿⣿⣿⣿⣿⡟
+     ⠉⠉⠉ ⢾⣿⣿⣿⣿⠋ ⠚⠛⠛⠛⠛⠛⠛⠁
+          ⠉⠉⠉
 
                        (
                         )     (
@@ -64,12 +65,17 @@ belatro
              .-''       )    (          ''-.
        .-'``'|-._             )         _.-|
       /  .--.|   `''---...........---''`   |
-     /  /    |       > Start Game <        |
-     |  |    |     Difficulty: Medium      |
-      \  \   |    Target Score: 1000       |
-       `\ `\ |       Speed: Normal         |
-         `\ `|      Rules & History        |
-         _/ /\           Quit              /
+     /  /    |           BelAtro           |
+     |  |    |       > Start Game <        |
+     |  |    |      AI:     < Hard >       |
+     |  |    |      Target: < 1000 >       |
+     |  |    |     Speed:  < Normal >      |
+     |  |    |  Theme:  < Classic Green >  |
+     |  |    |       Rules & History       |
+      \  \   |         Statistics          |
+       `\ `\ |            Quit             |
+         `\ `|                             |
+         _/ /\                             /
         (__/  \                           /
      _..---''` \                         /`''---.._
   .-'           \                       /          '-.
@@ -121,12 +127,12 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 ## Controls
 
 **General:**
-- `?` or `H`: Show keyboard shortcut help
+- `?`: Show keyboard shortcut help
 - `M`: Toggle sound effects on/off
-- `I`: Toggle BelAtro score overlay (per-trick breakdown popup)
+- `I` or `V`: Toggle BelAtro score overlay (per-trick breakdown popup)
 - `Q`: Quit to main menu or exit
-- `t`: View Game History (Round-by-round)
-- `T`: Switch UI Theme
+- `H`: View Game History (round-by-round, with contract / taker / tricks / declarations)
+- `T`: Cycle UI Theme
 
 **Classic Belote:**
 - `↑` `↓`: Navigate options
@@ -134,7 +140,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `Enter`: Select option / Enter submenu
 
 **BelAtro (Roguelite):**
-- `S`: View current Run State and Jokers
 - `1`-`5`: Inspect specific Jokers in the Shop
 - `U`: Use a consumable (Tarot/Planet) during gameplay
 
@@ -145,6 +150,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `O`: Sort hand by suit and rank
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
+- During bidding round 2: `P` = Pass, `A` = Tout Atout, `S` = Sans Atout
 
 ## Features
 
@@ -155,7 +161,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
 - **Rich Terminal UI:** Full-screen green felt table with detailed card graphics and "You" vs "Partner" terminology.
 - **Enhanced Hard AI**: Advanced void inference and 2-ply lookahead for critical tricks (Dix de Der).
-- **Customizable Themes:** Switch between different color palettes (e.g., Classic Green, Dark Blue, Royal Purple) using the `T` key during gameplay.
+- **Customizable Themes:** Switch between six color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast) using the `T` key during gameplay.
 - **Incremental Rendering:** High-performance cursor-based updates for zero-flicker gameplay even at high speeds.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
 - **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
@@ -246,3 +252,5 @@ This will wipe all global statistics and reset your discovered item Almanac in B
 ## Terminal Hygiene
 
 Signal handlers (SIGINT, SIGTERM) and atexit hooks ensure the terminal is always restored — cursor visible, colors reset, alt-screen off — even after Ctrl+C or crashes.
+
+Every rendered row ends with `\x1b[K` (clear-to-end-of-line) and every interactive prompt (bid selector, card selector, full-screen overlays) repaints in a single in-frame pass — no `\r\n`-bracketed writes outside the render. This keeps the game free of stale-cell artifacts on strict ANSI emulators like Konsole (KDE), in addition to the more lenient VTE-based terminals (GNOME Terminal, LXTerminal, xterm).

@@ -12,9 +12,11 @@ from ..ansi import (
     ansi_center,
     banner_bg,
     banner_fg,
+    clear_line,
     clear_screen,
     gold_fg,
     hide_cursor,
+    move,
     white_fg,
 )
 from ..context import AUDIO
@@ -33,8 +35,19 @@ def toggle_mute() -> bool:
 
 
 def announce(message: str, duration: float = 2.0, reader: KeyReader | None = None) -> None:
-    """Display a transient announcement banner."""
-    sys.stdout.write(f"\r\n{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}\r\n")
+    """Display a transient announcement banner.
+
+    Painted with absolute cursor positioning + clear_line so it never triggers
+    a scroll, even when the cursor is parked on the bottom row of the alt
+    screen. Writing \\r\\n at the bottom row scrolls the alt-screen on Konsole
+    and other strict emulators, which leaks the previous frame onto rows the
+    next render's blank padding doesn't repaint.
+    """
+    term_w, term_h = get_term_size()
+    banner = ansi_center(
+        f"{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}", term_w
+    )
+    sys.stdout.write(move(max(1, term_h - 1), 1) + clear_line() + banner)
     sys.stdout.flush()
     if reader and duration > 0:
         interruptible_sleep(duration, reader)

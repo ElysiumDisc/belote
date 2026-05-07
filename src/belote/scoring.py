@@ -719,6 +719,20 @@ def score_round(state: GameState) -> ScoringBreakdown:
     )
 
 
+def _decl_short_label(d: Declaration) -> str:
+    if d.kind == "belote":
+        return "Belote"
+    if d.kind == "rebelote":
+        return "Rebelote"
+    if d.kind == "carre" and isinstance(d.detail, Carre):
+        rank = _VALUE_TO_RANK.get(d.detail.rank)
+        return f"Carré-{rank.value}" if rank else "Carré"
+    if d.kind == "sequence" and isinstance(d.detail, Sequence):
+        pts = _SEQUENCE_POINTS.get(d.detail.length, 0)
+        return f"{pts}{d.detail.suit.symbol}"
+    return d.kind
+
+
 def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameState:
     """Apply round scoring result to team scores and advance state."""
     ns, ew = state.team_scores
@@ -730,6 +744,46 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         ns += breakdown.defender_total
 
     new_scores = (ns, ew)
+
+    # Trick counts per team across the played round.
+    se_trump = state.boss_modifiers.seven_eight_trump
+    is_sa = state.contract == "sans_atout"
+    tricks_ns = 0
+    tricks_ew = 0
+    for trick in state.completed_tricks:
+        winner = trick_winner_seat(trick, state.trump, se_trump, is_sa)
+        if winner is None:
+            continue
+        if team_of(winner) == 0:
+            tricks_ns += 1
+        else:
+            tricks_ew += 1
+
+    # Declaration summaries — only show the team(s) that actually scored decls,
+    # which matches Belote's "best team takes all decls" rule.
+    ns_decl_total = breakdown.taker_declarations if breakdown.taker_team == 0 else breakdown.defender_declarations
+    ew_decl_total = breakdown.defender_declarations if breakdown.taker_team == 0 else breakdown.taker_declarations
+    ns_decls = tuple(
+        _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 0
+    ) if ns_decl_total > 0 else ()
+    ew_decls = tuple(
+        _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 1
+    ) if ew_decl_total > 0 else ()
+
+    common_kwargs = dict(
+        is_failed=breakdown.is_failed,
+        is_capot=breakdown.is_capot,
+        is_litige=breakdown.is_litige,
+        litige_points=breakdown.litige_points_awarded,
+        contract=state.contract,
+        trump=state.trump,
+        taker_seat=state.taker,
+        tricks_ns=tricks_ns,
+        tricks_ew=tricks_ew,
+        last_trick_winner=state.last_trick_winner,
+        decl_summary_ns=ns_decls,
+        decl_summary_ew=ew_decls,
+    )
 
     # Create RoundScore for history
     if breakdown.taker_team == 0:
@@ -745,10 +799,7 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_rebelote=breakdown.defender_rebelote,
             ns_total=breakdown.taker_total,
             ew_total=breakdown.defender_total,
-            is_failed=breakdown.is_failed,
-            is_capot=breakdown.is_capot,
-            is_litige=breakdown.is_litige,
-            litige_points=breakdown.litige_points_awarded,
+            **common_kwargs,
         )
     else:
         round_score = RoundScore(
@@ -763,10 +814,7 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_rebelote=breakdown.taker_rebelote,
             ns_total=breakdown.defender_total,
             ew_total=breakdown.taker_total,
-            is_failed=breakdown.is_failed,
-            is_capot=breakdown.is_capot,
-            is_litige=breakdown.is_litige,
-            litige_points=breakdown.litige_points_awarded,
+            **common_kwargs,
         )
 
     new_history = state.score_history + (round_score,)

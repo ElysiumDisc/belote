@@ -9,6 +9,7 @@ from ..ansi import (
     BOLD,
     DIM,
     RESET,
+    REVERSE,
     UNDERLINE,
     ansi_center,
     ansi_ljust,
@@ -35,8 +36,9 @@ from ..ansi import (
     clear_screen as _clear_screen,
 )
 from ..context import TERMINAL
-from ..deck import Card, Rank
+from ..deck import Card, Rank, Suit
 from ..game import (
+    SANS_ATOUT_BID,
     GameState,
     Phase,
     Seat,
@@ -127,11 +129,6 @@ def _card_face_internal(
     rank_str = card.rank.value
     suit_sym = card.suit.symbol if has_utf8 else card.suit.name[0]
 
-    # Top-left and bottom-right rank displays (always 2 visible cells, padded to
-    # match "10" — the longest rank string).
-    tl_rank = rank_str.ljust(2)
-    br_rank = rank_str.rjust(2)
-
     is_face = card.rank in (Rank.JACK, Rank.QUEEN, Rank.KING)
 
     color = red_fg() if card.suit.is_red else black_fg()
@@ -146,6 +143,19 @@ def _card_face_internal(
     prefix = "" if legal else DIM
     inner_w = card_w - 2
 
+    # Both corners carry rank+suit (GRIMAUD-style index):
+    #   top-left: "A♠" / "10♥" — 3 visible cells
+    #   bottom-right mirror.
+    if inner_w >= 3:
+        tl_index = f"{rank_str.ljust(2)}{suit_sym}"
+        br_index = f"{suit_sym}{rank_str.rjust(2)}"
+        index_w = 3
+    else:
+        # Defensive fallback for impossibly-narrow layouts.
+        tl_index = rank_str.ljust(2)
+        br_index = rank_str.rjust(2)
+        index_w = 2
+
     # Ornate border characters
     b_tl, b_tr, b_bl, b_br, b_h, b_v = (
         ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
@@ -157,44 +167,81 @@ def _card_face_internal(
     top_border = f"{prefix}{bg_code}{color}{b_tl}{b_h * inner_w}{b_tr}{RESET}"
     bottom_border = f"{prefix}{bg_code}{color}{b_bl}{b_h * inner_w}{b_br}{RESET}"
 
-    # Standard / spacious: room for 3-row centre art between the rank corners.
-    # Compact (card_h <= 5): just rank corners and a single suit row.
+    # Standard / spacious: room for 3-row centre art between the index corners.
+    # Compact (card_h <= 5): just index corners and a single suit row.
     if card_h >= 7:
         art_top = " " * inner_w
         art_mid = " " * inner_w
         art_bot = " " * inner_w
 
         if card.rank == Rank.JACK:
-            art_top = ("  ▄▆▄  " if has_utf8 else "  ***  ").center(inner_w)
-            art_mid = f"  {suit_sym}V{suit_sym}  ".center(inner_w)
-            art_bot = ("  ▀▆▀  " if has_utf8 else "  ***  ").center(inner_w)
+            # Knave with sword.
+            art_top = ("╭━┳━╮" if has_utf8 else " ***  ").center(inner_w)
+            art_mid = f"{suit_sym}J{suit_sym}".center(inner_w)
+            art_bot = ("╰─┃─╯" if has_utf8 else " -|-  ").center(inner_w)
         elif card.rank == Rank.QUEEN:
-            art_top = ("  ╭▼╮  " if has_utf8 else "  ( )  ").center(inner_w)
-            art_mid = f"  {suit_sym}Q{suit_sym}  ".center(inner_w)
-            art_bot = ("  ╰─╯  " if has_utf8 else "  ---  ").center(inner_w)
+            # Queen with jewelled headdress.
+            art_top = ("╭◊─◊╮" if has_utf8 else " (-)  ").center(inner_w)
+            art_mid = f"{suit_sym}Q{suit_sym}".center(inner_w)
+            art_bot = ("╰─♥─╯" if has_utf8 else " -v-  ").center(inner_w)
         elif card.rank == Rank.KING:
-            art_top = ("  ╔█╗  " if has_utf8 else "  [#]  ").center(inner_w)
-            art_mid = f"  {suit_sym}K{suit_sym}  ".center(inner_w)
-            art_bot = ("  ╚═╝  " if has_utf8 else "  [=]  ").center(inner_w)
+            # King with crown.
+            art_top = ("╭┻━┻╮" if has_utf8 else " /=\\  ").center(inner_w)
+            art_mid = f"{suit_sym}K{suit_sym}".center(inner_w)
+            art_bot = ("╰─┴─╯" if has_utf8 else " ---  ").center(inner_w)
         elif card.rank == Rank.ACE:
-            art_top = ("   ▲   " if has_utf8 else "   ^   ").center(inner_w)
-            art_mid = f"  {suit_sym}A{suit_sym}  ".center(inner_w)
-            art_bot = ("   ▼   " if has_utf8 else "   v   ").center(inner_w)
+            # Ace: decorative wreath around the suit.
+            art_top = ("╭─◆─╮" if has_utf8 else "*-+-*").center(inner_w)
+            art_mid = f" {suit_sym}A{suit_sym} ".center(inner_w)
+            art_bot = ("╰─◆─╯" if has_utf8 else "*-+-*").center(inner_w)
         else:
-            art_mid = f"   {suit_sym}   ".center(inner_w)
+            # Pip cards (7-10): arrange suit pips in a recognisable pattern.
+            pip = suit_sym if has_utf8 else card.suit.name[0]
+            if card.rank == Rank.SEVEN:
+                top_raw, mid_raw, bot_raw = (
+                    f"{pip}   {pip}",
+                    f"  {pip}  ",
+                    f"{pip}   {pip}",
+                )
+            elif card.rank == Rank.EIGHT:
+                top_raw, mid_raw, bot_raw = (
+                    f"{pip}   {pip}",
+                    f"{pip}   {pip}",
+                    f"{pip}   {pip}",
+                )
+            elif card.rank == Rank.NINE:
+                top_raw, mid_raw, bot_raw = (
+                    f"{pip} {pip} {pip}",
+                    f"{pip}   {pip}",
+                    f"{pip} {pip} {pip}",
+                )
+            elif card.rank == Rank.TEN:
+                top_raw, mid_raw, bot_raw = (
+                    f"{pip} {pip} {pip}",
+                    f"{pip} {pip} {pip}",
+                    f"{pip}   {pip}",
+                )
+            else:
+                top_raw = ""
+                mid_raw = pip
+                bot_raw = ""
+            art_top = top_raw.center(inner_w)
+            art_mid = mid_raw.center(inner_w)
+            art_bot = bot_raw.center(inner_w)
 
         # Truncate art rows to inner_w (handles card_w slightly different from 9).
         art_top = art_top[:inner_w].ljust(inner_w)
         art_mid = art_mid[:inner_w].ljust(inner_w)
         art_bot = art_bot[:inner_w].ljust(inner_w)
 
+        idx_pad = max(0, inner_w - index_w)
         rows = [
             top_border,
-            _line(f"{tl_rank}{' ' * (inner_w - 2)}"),
+            _line(f"{tl_index}{' ' * idx_pad}"),
             _line(art_top),
             _line(art_mid),
             _line(art_bot),
-            _line(f"{' ' * (inner_w - 2)}{br_rank}"),
+            _line(f"{' ' * idx_pad}{br_index}"),
             bottom_border,
         ]
         # If a non-standard taller height was requested, add filler rows above
@@ -204,18 +251,19 @@ def _card_face_internal(
         return rows[:card_h]
 
     # Compact path (card_h == 5 typically): 3 inner rows, no Art Nouveau.
-    # Layout: top-rank | suit/face indicator | bottom-rank.
+    # Layout: top-index | suit/face indicator | bottom-index.
     if is_face:
         center = f"{suit_sym}{rank_str}{suit_sym}".center(inner_w)
     else:
         center = suit_sym.center(inner_w)
     center = center[:inner_w].ljust(inner_w)
 
+    idx_pad = max(0, inner_w - index_w)
     rows = [
         top_border,
-        _line(f"{tl_rank}{' ' * (inner_w - 2)}"),
+        _line(f"{tl_index}{' ' * idx_pad}"),
         _line(center),
-        _line(f"{' ' * (inner_w - 2)}{br_rank}"),
+        _line(f"{' ' * idx_pad}{br_index}"),
         bottom_border,
     ]
     while len(rows) < card_h:
@@ -312,12 +360,129 @@ def _felt_placeholder(layout: LayoutPreset = STANDARD) -> list[str]:
     return [top] + [mid] * (layout.card_h - 2) + [bottom]
 
 
+def _slot_anchors(center_w: int, cw: int) -> tuple[int, int, int]:
+    """Horizontal column starts for the N/S, W, E slots inside the centre band."""
+    n_s_start = max(0, (center_w - cw) // 2)
+    w_start = max(0, center_w // 4 - cw // 2)
+    e_start = max(0, 3 * center_w // 4 - cw // 2)
+    return n_s_start, w_start, e_start
+
+
+def _slot_frame_row(center_w: int, layout: LayoutPreset, segments: tuple[str, ...]) -> str:
+    """Build a felt row with `─` segments above/below the named slots.
+
+    segments is a subset of {"N", "S", "W", "E"}; the corresponding slot
+    columns receive a thin horizontal frame line in the felt-placeholder dim
+    colour. All other cells stay blank felt.
+    """
+    cw = layout.card_w
+    n_s_start, w_start, e_start = _slot_anchors(center_w, cw)
+    h_char = "─" if TERMINAL.has_utf8 else "-"
+    dim = felt_placeholder_fg()
+
+    cells = [" "] * center_w
+    seg_starts = {"N": n_s_start, "S": n_s_start, "W": w_start, "E": e_start}
+    for seg in segments:
+        start = seg_starts[seg]
+        for c in range(start, min(center_w, start + cw)):
+            cells[c] = h_char
+
+    out = [felt_bg()]
+    in_frame = False
+    for c in cells:
+        is_frame = c == h_char
+        if is_frame and not in_frame:
+            out.append(dim)
+            in_frame = True
+        elif not is_frame and in_frame:
+            out.append(RESET)
+            out.append(felt_bg())
+            in_frame = False
+        out.append(c)
+    out.append(RESET)
+    return "".join(out)
+
+
+def _felt_pad_ns(content: str, center_w: int, layout: LayoutPreset) -> str:
+    """Centre a N/S card line on felt and inject │ borders one cell outside it."""
+    cw = layout.card_w
+    n_s_start, _, _ = _slot_anchors(center_w, cw)
+    v = "│" if TERMINAL.has_utf8 else "|"
+    dim = felt_placeholder_fg()
+
+    has_left = n_s_start > 0
+    right_total = max(0, center_w - n_s_start - cw)
+    has_right = right_total > 0
+    left_blank = max(0, n_s_start - 1)
+    right_blank = max(0, right_total - 1)
+
+    parts: list[str] = []
+    parts.append(felt_bg() + " " * left_blank + RESET)
+    if has_left:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(content)
+    if has_right:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(felt_bg() + " " * right_blank + RESET)
+    return "".join(parts)
+
+
+def _slot_label_ns(label_text: str, center_w: int, layout: LayoutPreset) -> str:
+    """N/S compass label centred inside the slot, with │ slot borders."""
+    cw = layout.card_w
+    vlen = visible_len(label_text)
+    pad = max(0, cw - vlen)
+    lpad = pad // 2
+    rpad = pad - lpad
+    inner = felt_bg() + " " * lpad + RESET + label_text + felt_bg() + " " * rpad + RESET
+    return _felt_pad_ns(inner, center_w, layout)
+
+
+def _we_row(
+    w_line: str, e_line: str, center_w: int, layout: LayoutPreset
+) -> str:
+    """Build the W+E card row with │ borders flanking each card."""
+    cw = layout.card_w
+    _, w_start, e_start = _slot_anchors(center_w, cw)
+    mid_gap = max(0, e_start - w_start - cw)
+    r_pad = max(0, center_w - e_start - cw)
+    v = "│" if TERMINAL.has_utf8 else "|"
+    dim = felt_placeholder_fg()
+
+    has_w_left = w_start > 0
+    has_w_right_and_e_left = mid_gap >= 2
+    has_e_right = r_pad > 0
+
+    w_left_blank = max(0, w_start - 1)
+    mid_blank = max(0, mid_gap - (2 if has_w_right_and_e_left else 0))
+    e_right_blank = max(0, r_pad - 1)
+
+    parts: list[str] = []
+    parts.append(felt_bg() + " " * w_left_blank + RESET)
+    if has_w_left:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(w_line)
+    if has_w_right_and_e_left:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(felt_bg() + " " * mid_blank + RESET)
+    if has_w_right_and_e_left:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(e_line)
+    if has_e_right:
+        parts.append(felt_bg() + dim + v + RESET)
+    parts.append(felt_bg() + " " * e_right_blank + RESET)
+    return "".join(parts)
+
+
 def _render_trick_mat(
     seat_map: dict[Seat, Card], center_w: int, layout: LayoutPreset = STANDARD
 ) -> list[str]:
     """Green felt mat with full card graphics at compass positions.
 
     Total height = 6 + 3*card_h rows (compact: 21, standard: 27, spacious: 33).
+    Each slot is wrapped by a thin frame drawn in the felt-placeholder colour
+    on the cells immediately surrounding the card area, so a played card
+    always reads as anchored within its player's slot.
     """
 
     def slot(seat: Seat) -> list[str]:
@@ -332,44 +497,25 @@ def _render_trick_mat(
     e_card = slot(Seat.EAST)
     s_card = slot(Seat.SOUTH)
 
-    cw = layout.card_w
     ch = layout.card_h
 
-    # Horizontal anchors: West centred at ¼, East centred at ¾ of center_w
-    w_start = max(0, center_w // 4 - cw // 2)
-    e_start = max(0, 3 * center_w // 4 - cw // 2)
-    mid_gap = max(0, e_start - w_start - cw)
-    r_pad = max(0, center_w - e_start - cw)
-
-    n_label = _felt_pad(f"{light_gray_fg()}N{RESET}", center_w)
-    s_label = _felt_pad(f"{light_gray_fg()}S{RESET}", center_w)
+    n_label = _slot_label_ns(f"{light_gray_fg()}N{RESET}", center_w, layout)
+    s_label = _slot_label_ns(f"{light_gray_fg()}S{RESET}", center_w, layout)
 
     rows: list[str] = []
 
-    rows.append(_get_felt_blank(center_w))  # top padding
-    rows.append(n_label)  # N label
+    rows.append(_slot_frame_row(center_w, layout, ("N",)))  # top frame: ─ over N
+    rows.append(n_label)  # N label inside the frame (with │ sides)
     for line in n_card:  # North card (ch rows)
-        rows.append(_felt_pad(line, center_w))
-    rows.append(_get_felt_blank(center_w))  # gap
+        rows.append(_felt_pad_ns(line, center_w, layout))
+    rows.append(_slot_frame_row(center_w, layout, ("N", "W", "E")))  # N bottom + W/E top
     for i in range(ch):  # West + East (ch rows)
-        rows.append(
-            felt_bg()
-            + " " * w_start
-            + RESET
-            + w_card[i]
-            + felt_bg()
-            + " " * mid_gap
-            + RESET
-            + e_card[i]
-            + felt_bg()
-            + " " * r_pad
-            + RESET
-        )
-    rows.append(_get_felt_blank(center_w))  # gap
+        rows.append(_we_row(w_card[i], e_card[i], center_w, layout))
+    rows.append(_slot_frame_row(center_w, layout, ("W", "E", "S")))  # W/E bottom + S top
     for line in s_card:  # South card (ch rows)
-        rows.append(_felt_pad(line, center_w))
-    rows.append(s_label)  # S label
-    rows.append(_get_felt_blank(center_w))  # bottom padding
+        rows.append(_felt_pad_ns(line, center_w, layout))
+    rows.append(s_label)  # S label inside the frame (with │ sides)
+    rows.append(_slot_frame_row(center_w, layout, ("S",)))  # bottom frame: ─ under S
 
     return rows  # 6 + 3*ch rows total
 
@@ -553,7 +699,7 @@ def _build_hud(state: GameState, term_w: int, layout: LayoutPreset = STANDARD) -
         f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
         f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
         f"Trick {trick_num}/8   Taker: {taker_name}   "
-        f"{DIM}[T]History [Z]Undo [S-T]Theme{RESET}"
+        f"{DIM}[H]Hist [T]Theme [Z]Undo{RESET}"
     )
     bar = left + "   " + mid
     vlen_bar = visible_len(bar)
@@ -562,13 +708,88 @@ def _build_hud(state: GameState, term_w: int, layout: LayoutPreset = STANDARD) -
     return bar + " " * pad + theme_label
 
 
-def render(state: GameState, selection: int | None = None, show_north_hand: bool = False) -> str:
+def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -> list[str]:
+    """Build the in-frame bidding prompt: optional tendency line, then the
+    selector (Round 1: inline highlighted Take/Pass; Round 2: boxed grid).
+
+    Painted as part of the main render so no writes happen after `display()` —
+    that's what was causing the Konsole UI to stack (post-render \\r\\n's
+    scrolled the alt-screen, leaving stale content on rows the next frame's
+    blank padding doesn't repaint).
+    """
+    if state.bidding_round == 1:
+        up_card = state.up_card
+        assert up_card is not None  # guaranteed by Phase.BIDDING + round 1
+        labels = [f"Take {up_card.suit.symbol}", "Pass"]
+    else:
+        all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
+        up_card = state.up_card
+        assert up_card is not None
+        other_suits = [s for s in all_suits if s != up_card.suit]
+        labels = [s.symbol for s in other_suits] + ["TA", "SA", "Pass"]
+        round2_suits: list[Suit | str | None] = [
+            *other_suits,
+            Suit.TOUT_ATOUT,
+            SANS_ATOUT_BID,
+            None,
+        ]
+
+    lines: list[str] = []
+
+    tendency = state._joker_state.get("partner_bid_tendency_text")
+    if isinstance(tendency, str) and tendency:
+        lines.append(ansi_center(f"{DIM}{tendency}{RESET}", term_w))
+
+    if state.bidding_round == 2:
+        inner_w = 60
+        opt_str = ""
+        for i, lbl in enumerate(labels):
+            prefix = f"{BOLD}{gold_fg()}" if i == bid_selection else ""
+            color = ""
+            opt = round2_suits[i]
+            if isinstance(opt, Suit):
+                color = red_fg() if opt.is_red else black_fg()
+            entry = f"{prefix}({i + 1}) {color}{lbl}{RESET}{prefix}"
+            entry = f"{REVERSE} {entry} {RESET}" if i == bid_selection else f" {entry} "
+            opt_str += entry + "  "
+
+        box = [
+            f"┌{'─' * inner_w}┐",
+            f"│{f'ROUND {state.bidding_round} BID'.center(inner_w)}│",
+            f"├{'─' * inner_w}┤",
+            f"│{' ' * inner_w}│",
+            f"│{ansi_center(opt_str.strip(), inner_w)}│",
+            f"│{' ' * inner_w}│",
+            f"└{'─' * inner_w}┘",
+        ]
+        lines.extend(ansi_center(bl, term_w) for bl in box)
+    else:
+        parts = [
+            f"{BOLD}{gold_fg()}({i + 1}){lbl}{RESET}" if i == bid_selection else f"({i + 1}){lbl}"
+            for i, lbl in enumerate(labels)
+        ]
+        prompt = f"{BOLD}{white_fg()}Round {state.bidding_round} Bid: {'  '.join(parts)}{RESET}"
+        lines.append(ansi_center(prompt, term_w))
+
+    return lines
+
+
+def render(
+    state: GameState,
+    selection: int | None = None,
+    show_north_hand: bool = False,
+    bid_selection: int | None = None,
+) -> str:
     """Pure: returns a full-screen ANSI-formatted string. No I/O.
 
     Terminal width is queried fresh on every call so resizing works correctly.
     The layout preset (compact / standard / spacious) is also picked fresh from
     the current dimensions, so resizing the terminal mid-game adapts on the
     next render.
+
+    `bid_selection` paints the bidding selector with the highlighted option
+    inside the frame. Pass `None` for non-interactive renders (the simple
+    static "Bid: [P]ass [1]♠..." hint shows instead).
     """
     term_w, term_h = get_term_size()
     layout = choose_layout(term_w, term_h)
@@ -657,8 +878,11 @@ def render(state: GameState, selection: int | None = None, show_north_hand: bool
     if state.phase == Phase.BIDDING and state.turn == Seat.SOUTH:
         if term_h > 40:
             lines.append("")
-        prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
-        lines.append(ansi_center(prompt, term_w))
+        if bid_selection is not None:
+            lines.extend(_build_bid_prompt_lines(state, term_w, bid_selection))
+        else:
+            prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
+            lines.append(ansi_center(prompt, term_w))
 
     # ── Vertical centering ──────────────────────────────────────────────────
     # If the terminal is taller than the rendered content, pad top + bottom so
@@ -670,12 +894,11 @@ def render(state: GameState, selection: int | None = None, show_north_hand: bool
         bottom_pad = slack - top_pad
         lines = [""] * top_pad + lines + [""] * bottom_pad
 
-    # Only emit clear_to_eol on lines that actually have content; pure-padding
-    # blank lines don't need it (we already cleared the screen on layout
-    # changes and the previous render's content area was clear-to-eol'd).
-    rendered_lines = [
-        line + clear_to_eol() if line else line for line in lines[:term_h]
-    ]
+    # Always emit clear_to_eol on every row, including blank padding. Konsole
+    # (and other strict emulators) don't auto-blank cells when an empty string
+    # passes through, so any debris from external writes (announcements, etc.)
+    # would remain visible. The cost is one extra 3-byte escape per row.
+    rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
 
 
@@ -687,8 +910,13 @@ def display_hud(state: GameState) -> None:
     sys.stdout.flush()
 
 
-def display(state: GameState, selection: int | None = None, show_north_hand: bool = False) -> None:
-    sys.stdout.write(render(state, selection, show_north_hand))
+def display(
+    state: GameState,
+    selection: int | None = None,
+    show_north_hand: bool = False,
+    bid_selection: int | None = None,
+) -> None:
+    sys.stdout.write(render(state, selection, show_north_hand, bid_selection=bid_selection))
     sys.stdout.flush()
 
 

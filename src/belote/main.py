@@ -240,7 +240,7 @@ def main() -> None:
                     # Wait for Enter/R/Q/T
                     sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                     sys.stdout.write(
-                        f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [T] History{RESET} "
+                        f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [H] History{RESET} "
                     )
                     sys.stdout.flush()
 
@@ -254,7 +254,7 @@ def main() -> None:
                             show_final_screen(state)
                             sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                             sys.stdout.write(
-                                f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [t] History{RESET} "
+                                f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [H] History{RESET} "
                             )
                             sys.stdout.flush()
                         if ev.key in (Key.ENTER, Key.QUIT):

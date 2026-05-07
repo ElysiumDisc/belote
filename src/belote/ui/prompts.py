@@ -7,9 +7,7 @@ from ..ansi import (
     BOLD,
     DIM,
     RESET,
-    REVERSE,
     ansi_center,
-    black_fg,
     clear_screen,
     gold_fg,
     green_fg,
@@ -123,81 +121,25 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
     Round 2 offers Tout Atout (TA) and Sans Atout (SA) in addition to the
     three remaining card suits. Per FFBelote rules, round 1 is "take the
     up-card suit at the standard contract" only — TA/SA aren't offered there.
+
+    The selector UI is painted by render() (via display(..., bid_selection=sel))
+    so each frame is a single in-place repaint. Writing additional lines after
+    display() would scroll the alt-screen on stricter terminals (Konsole) and
+    leak previous frames onto blank padding rows.
     """
     from ..game import SANS_ATOUT_BID
 
     if state.bidding_round == 1:
-        # Round 1: Take (up_card suit) or Pass
         options: list[Suit | str | None] = [state.up_card.suit, None]  # type: ignore[union-attr]
-        labels = [f"Take {state.up_card.suit.symbol}", "Pass"]  # type: ignore[union-attr]
     else:
-        # Round 2: Any classic suit except up_card's, plus Tout Atout (every
-        # suit acts as trump) and Sans Atout (no trump). All round-2 specials
-        # gate to round 2 in `place_bid` — calling them in round 1 raises.
         all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
         other_suits = [s for s in all_suits if s != state.up_card.suit]  # type: ignore[union-attr]
         options = [*other_suits, Suit.TOUT_ATOUT, SANS_ATOUT_BID, None]
-        labels = (
-            [s.symbol for s in other_suits]
-            + ["TA", "SA", "Pass"]
-        )
 
     sel = 0
 
     while True:
-        display(state, None)
-        term_w, _ = get_term_size()
-
-        # L'Encyclopédie voucher: surface partner bidding tendency before each bid.
-        tendency = state._joker_state.get("partner_bid_tendency_text")
-        if isinstance(tendency, str) and tendency:
-            sys.stdout.write(
-                "\r\n" + ansi_center(f"{DIM}{tendency}{RESET}", term_w) + "\r\n"
-            )
-
-        if state.bidding_round == 2:
-            # Nice boxed UI for round 2. Widened to fit 7 options (♠/♥/♦/♣
-            # minus up-card suit + TA + SA + Pass) on one row.
-            inner_w = 60
-            box_lines = [
-                f"┌{'─' * inner_w}┐",
-                f"│{f'ROUND {state.bidding_round} BID'.center(inner_w)}│",
-                f"├{'─' * inner_w}┤",
-                f"│{' ' * inner_w}│",
-            ]
-
-            # Options row
-            opt_str = ""
-            for i, opt in enumerate(options):
-                lbl = labels[i]
-                prefix = f"{BOLD}{gold_fg()}" if i == sel else ""
-
-                # Add color to suit symbols
-                color = ""
-                if isinstance(opt, Suit):
-                    color = red_fg() if opt.is_red else black_fg()
-
-                entry = f"{prefix}({i + 1}) {color}{lbl}{RESET}{prefix}"
-                entry = f"{REVERSE} {entry} {RESET}" if i == sel else f" {entry} "
-                opt_str += entry + "  "
-
-            box_lines.append(f"│{ansi_center(opt_str.strip(), inner_w)}│")
-            box_lines.append(f"│{' ' * inner_w}│")
-            box_lines.append(f"└{'─' * inner_w}┘")
-
-            for bl in box_lines:
-                sys.stdout.write("\r\n" + ansi_center(bl, term_w))
-            sys.stdout.write("\r\n")
-        else:
-            # Round 1 simple prompt
-            parts = [
-                f"{BOLD}{gold_fg()}({i + 1}){lbl}{RESET}" if i == sel else f"({i + 1}){lbl}"
-                for i, lbl in enumerate(labels)
-            ]
-            prompt = f"{BOLD}{white_fg()}Round {state.bidding_round} Bid: {'  '.join(parts)}{RESET}"
-            sys.stdout.write("\r\n" + ansi_center(prompt, term_w) + "\r\n")
-
-        sys.stdout.flush()
+        display(state, None, bid_selection=sel)
 
         event = reader.read()
         match event.key:
@@ -258,11 +200,11 @@ def show_help(reader: KeyReader) -> None:
         "=" * 20,
         "",
         f"{white_fg()}General:{RESET}",
-        "  [?] or [H]  Show this help screen",
+        "  [?]         Show this help screen",
         "  [Q]         Quit to menu / Exit",
         "  [M]         Toggle Sound Effects",
         f"              (Currently: {sound_status})",
-        "  [Shift+T]   Cycle Theme",
+        "  [T]         Cycle Theme",
         "  [Esc]       Cancel / Back",
         "",
         f"{white_fg()}Gameplay:{RESET}",
@@ -271,7 +213,7 @@ def show_help(reader: KeyReader) -> None:
         "  [1-8]       Quick card select",
         "  [O]         Sort hand by suit/rank",
         "  [Space]     Skip animations",
-        "  [t]         View Game History",
+        "  [H]         View Game History",
         "  [Z]         Undo last move",
         "",
         f"{white_fg()}Bidding:{RESET}",
@@ -280,7 +222,7 @@ def show_help(reader: KeyReader) -> None:
         "",
         f"{white_fg()}Menus:{RESET}",
         "  [R]         Rematch (Game Over)",
-        "  [t]         View Game History",
+        "  [H]         View Game History",
         "",
         f"{DIM}Press [Any Key] to Return{RESET}",
     ]
@@ -363,6 +305,46 @@ def show_rules(reader: KeyReader) -> None:
                     scroll = 0
 
 
+def _hist_taker_label(rs) -> str:
+    team = "NS" if rs.taker_team == 0 else "EW"
+    if rs.taker_seat is None:
+        return team
+    return f"{rs.taker_seat.name[0]} ({team})"
+
+
+def _hist_contract_label(rs) -> str:
+    if rs.contract == "sans_atout":
+        return "SA"
+    if rs.contract == "tout_atout":
+        return "TA"
+    sym = rs.trump.symbol if rs.trump is not None and hasattr(rs.trump, "symbol") else "?"
+    return f"NORM {sym}"
+
+
+def _hist_status(rs) -> str:
+    if rs.is_capot:
+        return f"{gold_fg()}CAPOT{RESET}"
+    if rs.is_failed:
+        return f"{red_fg()}CHUTE{RESET}"
+    if rs.is_litige:
+        return f"{DIM}LITIGE{RESET}"
+    return "─"
+
+
+def _hist_decl_str(items: tuple[str, ...], width: int) -> str:
+    if not items:
+        return "─"
+    s = " ".join(items)
+    if len(s) > width:
+        s = s[: max(0, width - 1)] + "…"
+    return s
+
+
+def _ljust_visible(s: str, width: int) -> str:
+    pad = max(0, width - visible_len(s))
+    return s + " " * pad
+
+
 def show_history(state: GameState, reader: KeyReader) -> None:
     """Display a scrollable overlay of round-by-round scores."""
     scroll = 0
@@ -370,7 +352,7 @@ def show_history(state: GameState, reader: KeyReader) -> None:
     while True:
         term_w, term_h = get_term_size()
 
-        lines = []
+        lines: list[str] = []
         lines.append(f"{BOLD}{gold_fg()}GAME HISTORY{RESET}")
         lines.append("=" * 12)
         lines.append("")
@@ -378,32 +360,76 @@ def show_history(state: GameState, reader: KeyReader) -> None:
         if not state.score_history:
             lines.append(f"{DIM}No rounds completed yet.{RESET}")
         else:
-            # Table Header
-            header = f"{'RD':<3} | {'TAKER':<5} | {'NS':^15} | {'EW':^15}"
-            lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
-            lines.append("-" * len(header))
+            wide = term_w >= 78
+            if wide:
+                # Single-row layout. Column widths sum to ~76 with separators.
+                W_RD, W_TKR, W_CON, W_TRK, W_DECL, W_NS, W_EW, W_ST = 3, 7, 8, 7, 16, 5, 5, 7
+                header_cells = [
+                    _ljust_visible("RD", W_RD),
+                    _ljust_visible("TAKER", W_TKR),
+                    _ljust_visible("CONTRACT", W_CON),
+                    _ljust_visible("TRICKS", W_TRK),
+                    _ljust_visible("DECLARATIONS", W_DECL),
+                    _ljust_visible("NS", W_NS),
+                    _ljust_visible("EW", W_EW),
+                    _ljust_visible("STATUS", W_ST),
+                ]
+                header = " │ ".join(header_cells)
+                lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
+                lines.append("─" * visible_len(header))
 
-            for i, rs in enumerate(state.score_history):
-                rd = i + 1
-                taker = "NS" if rs.taker_team == 0 else "EW"
+                for i, rs in enumerate(state.score_history):
+                    rd = f"{i + 1:02d}"
+                    taker = _hist_taker_label(rs)
+                    contract = _hist_contract_label(rs)
+                    tricks = f"{rs.tricks_ns} / {rs.tricks_ew}"
+                    decl_ns = _hist_decl_str(rs.decl_summary_ns, W_DECL // 2 - 1)
+                    decl_ew = _hist_decl_str(rs.decl_summary_ew, W_DECL // 2 - 1)
+                    if rs.decl_summary_ns and rs.decl_summary_ew:
+                        decls = f"{decl_ns} / {decl_ew}"
+                    elif rs.decl_summary_ns:
+                        decls = decl_ns
+                    elif rs.decl_summary_ew:
+                        decls = decl_ew
+                    else:
+                        decls = "─"
+                    if visible_len(decls) > W_DECL:
+                        decls = decls[: W_DECL - 1] + "…"
+                    ns = f"{BOLD}{rs.ns_total}{RESET}"
+                    ew = f"{BOLD}{rs.ew_total}{RESET}"
+                    status = _hist_status(rs)
 
-                # Format: "Card+Decl+Bel"
-                ns_break = f"{rs.ns_card_pts}+{rs.ns_decl_pts}+{rs.ns_belote_pts}"
-                ew_break = f"{rs.ew_card_pts}+{rs.ew_decl_pts}+{rs.ew_belote_pts}"
-
-                ns_total = f"{BOLD}{rs.ns_total}{RESET}"
-                ew_total = f"{BOLD}{rs.ew_total}{RESET}"
-
-                row = f"{rd:<3} | {taker:<5} | {ns_total:>3} ({ns_break:<9}) | {ew_total:>3} ({ew_break:<9})"
-
-                if rs.is_capot:
-                    status = f" {gold_fg()}CAPOT!{RESET}"
-                elif rs.is_failed:
-                    status = f" {red_fg()}CHUTE!{RESET}"
-                else:
-                    status = ""
-
-                lines.append(row + status)
+                    row_cells = [
+                        _ljust_visible(rd, W_RD),
+                        _ljust_visible(taker, W_TKR),
+                        _ljust_visible(contract, W_CON),
+                        _ljust_visible(tricks, W_TRK),
+                        _ljust_visible(decls, W_DECL),
+                        _ljust_visible(ns, W_NS),
+                        _ljust_visible(ew, W_EW),
+                        _ljust_visible(status, W_ST),
+                    ]
+                    lines.append(" │ ".join(row_cells))
+            else:
+                # Compact two-line-per-round layout for narrow terminals.
+                lines.append(f"{BOLD}{white_fg()}{'RD':<3} {'TAKER':<7} {'CON':<8} {'TRICKS':<7} STATUS{RESET}")
+                lines.append("─" * 40)
+                for i, rs in enumerate(state.score_history):
+                    rd = f"{i + 1:02d}"
+                    taker = _hist_taker_label(rs)
+                    contract = _hist_contract_label(rs)
+                    tricks = f"{rs.tricks_ns}/{rs.tricks_ew}"
+                    status = _hist_status(rs)
+                    lines.append(
+                        f"{rd:<3} {_ljust_visible(taker, 7)} {contract:<8} {tricks:<7} {status}"
+                    )
+                    decl_n = _hist_decl_str(rs.decl_summary_ns, 14)
+                    decl_e = _hist_decl_str(rs.decl_summary_ew, 14)
+                    lines.append(
+                        f"   NS:{BOLD}{rs.ns_total:>4}{RESET}  EW:{BOLD}{rs.ew_total:>4}{RESET}  "
+                        f"decl: {decl_n} / {decl_e}"
+                    )
+                    lines.append("")
 
         lines.append("")
         lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")

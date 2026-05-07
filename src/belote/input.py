@@ -143,14 +143,16 @@ class _UnixKeyReader:
             ch = chr(byte)
             if ch.lower() == "q":
                 return KeyEvent(Key.QUIT)
-            if ch.lower() == "h":
+            if ch == "?":
                 return KeyEvent(Key.HELP)
-            if ch.lower() == "s":
+            if ch.lower() == "h":
+                return KeyEvent(Key.HIST)
+            if ch.lower() == "t":
+                return KeyEvent(Key.THEME)
+            if ch.lower() == "o":
                 return KeyEvent(Key.SORT)
             if ch.lower() == "m":
                 return KeyEvent(Key.MUTE)
-            if ch.lower() == "t":
-                return KeyEvent(Key.HIST)
             if ch.lower() == "i" or ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
 
@@ -262,14 +264,16 @@ if os.name == "nt":
                 return KeyEvent(Key.SPACE)
             if ch.lower() == b"q":
                 return KeyEvent(Key.QUIT)
-            if ch.lower() == b"h":
+            if ch == b"?":
                 return KeyEvent(Key.HELP)
-            if ch.lower() == b"s":
+            if ch.lower() == b"h":
+                return KeyEvent(Key.HIST)
+            if ch.lower() == b"t":
+                return KeyEvent(Key.THEME)
+            if ch.lower() == b"o":
                 return KeyEvent(Key.SORT)
             if ch.lower() == b"m":
                 return KeyEvent(Key.MUTE)
-            if ch.lower() == b"t":
-                return KeyEvent(Key.HIST)
             if ch.lower() in (b"i", b"v"):
                 return KeyEvent(Key.OVERLAY)
 
