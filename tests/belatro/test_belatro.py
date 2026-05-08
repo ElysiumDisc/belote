@@ -1493,21 +1493,24 @@ class TestBossModifiers:
 
         pgs = self.PatchedGameState(self.gs)
         LaGrandeMuette().apply(pgs)
-        assert pgs._no_belote is True
+        # 3.1.0: read via the unprefixed canonical path (the underscore shim
+        # was removed; see tests/belatro/test_boss_modifiers_integration.py
+        # `test_invariant_no_underscore_boss_attrs`).
+        assert pgs.boss_modifiers.no_belote is True
 
     def test_le_roi_mort_patches_kings_zero(self) -> None:
         from belote.belatro.run.boss import LeRoiMort
 
         pgs = self.PatchedGameState(self.gs)
         LeRoiMort().apply(pgs)
-        assert pgs._kings_zero is True
+        assert pgs.boss_modifiers.kings_zero is True
 
     def test_l_anarchie_patches_dynamic_trump(self) -> None:
         from belote.belatro.run.boss import LAnarchie
 
         pgs = self.PatchedGameState(self.gs)
         LAnarchie().apply(pgs)
-        assert pgs._dynamic_trump is True
+        assert pgs.boss_modifiers.dynamic_trump is True
 
     def test_all_boss_ids_are_unique(self) -> None:
         ids = [cls.id for cls in self.ALL_BOSS_MODIFIERS]
@@ -1700,3 +1703,84 @@ class TestShop:
                 self.shop.buy_item(i)
                 assert len(self.run.vouchers) == before + 1
                 break
+
+    def test_buy_consumable_with_full_slots_does_not_charge_money(self) -> None:
+        """Regression (3.1.0): pre-fix, buy_item charged money even when the
+        Tarot/Planet couldn't fit because consumable_slots were full. Now the
+        capacity check runs before spend_money, and last_buy_failure carries
+        the reason so the UI can surface a 'Slots full' banner."""
+        from belote.belatro.items.base import Tarot
+
+        # Find a Tarot or Planet in inventory; if none rolled, force one.
+        consumable_idx = next(
+            (
+                i
+                for i, item in enumerate(self.shop.inventory)
+                if not hasattr(item, "apply") and not hasattr(item, "edition")
+            ),
+            None,
+        )
+        if consumable_idx is None:
+            from belote.belatro.items.tarots import LeChariot
+
+            self.shop.inventory.append(LeChariot())
+            consumable_idx = len(self.shop.inventory) - 1
+
+        # Pre-fill consumables to capacity.
+        item = self.shop.inventory[consumable_idx]
+        from belote.belatro.items.tarots import LeChariot
+
+        self.run.consumables = [LeChariot() for _ in range(self.run.consumable_slots)]
+        self.run.economy.money = 999
+        money_before = self.run.economy.money
+        inv_before = len(self.shop.inventory)
+
+        result = self.shop.buy_item(consumable_idx)
+
+        assert result is False
+        assert self.run.economy.money == money_before, (
+            "Money was spent even though the consumable couldn't fit."
+        )
+        assert len(self.shop.inventory) == inv_before
+        assert self.shop.last_buy_failure == "slots_full"
+        # Sanity: keep the helper unused-warning quiet.
+        _ = isinstance(item, Tarot)
+
+    def test_buy_joker_with_full_slots_does_not_charge_money(self) -> None:
+        """Regression (3.1.0): same money-leak fix path for jokers. Negative-
+        edition jokers still bypass the capacity check (they grow the slot)."""
+        from belote.belatro.items.base import Edition, Joker
+
+        joker_idx = next(
+            (i for i, item in enumerate(self.shop.inventory) if isinstance(item, Joker)),
+            None,
+        )
+        if joker_idx is None:
+            return  # no joker rolled this time
+        joker = self.shop.inventory[joker_idx]
+        # Force the joker to be non-Negative; Negative gets a free pass.
+        joker.edition = Edition.NONE
+        # Fill jokers to capacity.
+        from belote.belatro.items.jokers.coinche import CoincheStack
+
+        self.run.jokers = [CoincheStack() for _ in range(self.run.joker_slots)]
+        self.run.economy.money = 999
+        money_before = self.run.economy.money
+
+        result = self.shop.buy_item(joker_idx)
+
+        assert result is False
+        assert self.run.economy.money == money_before
+        assert self.shop.last_buy_failure == "slots_full"
+
+    def test_buy_item_no_money_records_no_money_failure(self) -> None:
+        self.run.economy.money = 0
+        result = self.shop.buy_item(0)
+        assert result is False
+        assert self.shop.last_buy_failure == "no_money"
+
+    def test_buy_item_success_clears_failure_reason(self) -> None:
+        self.run.economy.money = 9999
+        result = self.shop.buy_item(0)
+        assert result is True
+        assert self.shop.last_buy_failure is None

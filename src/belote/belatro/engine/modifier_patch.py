@@ -18,10 +18,19 @@ class PatchedGameState:
     # ── Patch registration ──────────────────────────────────────────────
 
     def patch(self, attr: str, value: Any) -> None:
-        """Override a specific attribute for this round."""
-        if attr.startswith("_"):
-            # Strip leading underscore if it was from the old system
-            attr = attr[1:]
+        """Override a specific attribute for this round.
+
+        Boss field names are unprefixed (e.g. "no_belote", not "_no_belote").
+        The 3.0.x backward-compat shim that stripped a leading underscore was
+        removed in 3.1.0 — call sites in `run/boss.py` were rewritten in lock-
+        step. The `getattr(state, "_X", False)` reading anti-pattern is locked
+        against in tests/belatro/test_boss_modifiers_integration.py
+        `test_invariant_no_underscore_boss_attrs`.
+        """
+        assert not attr.startswith("_"), (
+            f"patch() received leading-underscore attr {attr!r}; the 3.0.x shim "
+            "was removed in 3.1.0 — use the unprefixed boss field name."
+        )
 
         # We'll treat all these flat patches as boss_modifiers fields
         boss_fields = {
@@ -47,13 +56,6 @@ class PatchedGameState:
         patches = object.__getattribute__(self, "_patches")
         if name in patches:
             return patches[name]
-
-        # Backward compatibility for old underscored names
-        if name.startswith("_"):
-            stripped = name[1:]
-            if hasattr(self.boss_modifiers, stripped):
-                return getattr(self.boss_modifiers, stripped)
-
         return getattr(object.__getattribute__(self, "_state"), name)
 
     def __setattr__(self, name: str, value: Any) -> None:

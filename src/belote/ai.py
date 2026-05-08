@@ -490,12 +490,31 @@ class AIPlayer:
         )
         partner_winning = current_winner is not None and current_winner == p
 
+        # Precompute per-call counters used by every scoring branch — pre-3.1.0
+        # these were recomputed per candidate card (n×4 walks of the hand and
+        # memory.played for each legal card).
+        from collections import Counter
+
+        my_hand = state.hand_of(self.seat)
+        hand_suit_counts: dict[Suit, int] = Counter(c.suit for c in my_hand)
+        my_trumps = hand_suit_counts.get(trump, 0)
+        opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
+
         # Score each legal card by expected outcome
         best_card = legal[0]
         best_score: float = -999.0
 
         for card in legal:
-            score = self._score_card_play(card, state, trump, trick, partner_winning)
+            score = self._score_card_play(
+                card,
+                state,
+                trump,
+                trick,
+                partner_winning,
+                hand_suit_counts,
+                my_trumps,
+                opp_trumps,
+            )
             if score > best_score:
                 best_score = score
                 best_card = card
@@ -509,6 +528,9 @@ class AIPlayer:
         trump: Suit,
         trick: tuple[TrickCard, ...],
         partner_winning: bool,
+        hand_suit_counts: dict[Suit, int],
+        my_trumps: int,
+        opp_trumps: int,
     ) -> float:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
@@ -517,20 +539,20 @@ class AIPlayer:
         score += points * 0.1
 
         if not trick:
-            return self._score_leading_strategy(card, state, trump)
+            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps)
 
         if partner_winning and trick[0].card.suit != trump:
-            return self._score_discarding_strategy(card, state, trump, points)
+            return self._score_discarding_strategy(card, trump, points, hand_suit_counts)
 
         return self._score_winning_strategy(card, state, trump, trick, partner_winning, points)
 
-    def _score_leading_strategy(self, card: Card, state: GameState, trump: Suit) -> float:
+    def _score_leading_strategy(
+        self, card: Card, trump: Suit, my_trumps: int, opp_trumps: int
+    ) -> float:
         """Heuristics for when we are leading the trick."""
         score = 0.0
         if card.suit == trump:
             # Leading trump is good for pulling if opponents still have them
-            opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
-            my_trumps = sum(1 for c in state.hand_of(self.seat) if c.suit == trump)
             if opp_trumps > my_trumps:
                 score += 4
             else:
@@ -543,7 +565,7 @@ class AIPlayer:
         return score
 
     def _score_discarding_strategy(
-        self, card: Card, state: GameState, trump: Suit, points: int
+        self, card: Card, trump: Suit, points: int, hand_suit_counts: dict[Suit, int]
     ) -> float:
         """Heuristics for when partner is winning and we can discard."""
         score = 0.0
@@ -551,9 +573,7 @@ class AIPlayer:
         score -= points * 0.7  # Penalize throwing away points
 
         # Prefer discarding from short suits (to establish voids)
-        my_hand = state.hand_of(self.seat)
-        suit_count = sum(1 for c in my_hand if c.suit == card.suit)
-        if suit_count == 1:
+        if hand_suit_counts.get(card.suit, 0) == 1:
             score += 3
 
         # Prefer keeping cards that partner is void in (to trump later)

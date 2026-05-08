@@ -133,3 +133,38 @@ def test_boss_invert_scoring():
     # NS won 5 tricks > EW's 3 → invert_scoring zeroes NS total.
     assert breakdown.taker_total == 0
     assert any("Malédiction" in m for m in breakdown.messages)
+
+
+# ── Anti-pattern lock (3.1.0 modifier_patch shim removal) ──────────────────
+
+
+def test_invariant_no_underscore_boss_attrs() -> None:
+    """Architecture-pinned anti-pattern: boss flags must be reached via
+    `state.boss_modifiers.X`, NOT `getattr(state, "_X", False)`. After the
+    underscore-shim removal in modifier_patch.py (3.1.0), no leading-underscore
+    boss attribute should ever resolve on a vanilla GameState. Reading one
+    indicates the foot-gun pattern has crept back into the codebase."""
+    state = GameState(
+        hands=((), (), (), ()),
+        boss_modifiers=BossModifiers(no_belote=True, kings_zero=True),
+    )
+
+    for name in (
+        "_no_belote",
+        "_kings_zero",
+        "_tens_zero",
+        "_aces_zero",
+        "_jacks_zero",
+        "_ban_clubs",
+        "_invert_scoring",
+        "_no_dix_de_der",
+    ):
+        assert getattr(state, name, None) is None, (
+            f"GameState resolved attribute {name!r} — the leading-underscore "
+            "boss-flag access pattern is pinned against (see project memory). "
+            "Read via state.boss_modifiers.<name> instead."
+        )
+
+    # And the canonical access path still works.
+    assert state.boss_modifiers.no_belote is True
+    assert state.boss_modifiers.kings_zero is True

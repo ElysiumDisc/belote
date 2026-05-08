@@ -179,3 +179,31 @@ def test_fused_joker_cannot_be_refused() -> None:
     except FusionError:
         return
     raise AssertionError("Fused jokers should be flagged fusable=False")
+
+
+# ── Endless mode scaling ───────────────────────────────────────────────────
+
+
+def test_endless_ante_target_scaling() -> None:
+    """Pin the calculate_target formula so a future tweak to the scaling
+    constants is intentional. Ante 8, Boss Blind, endless offset 3:
+
+        target = 100 × 1.5^7 × 2.0 × 2.2^3
+    """
+    from belote.belatro.run.ante import endless_ante
+
+    expected = int(100 * (1.5 ** 7) * 2.0 * (2.2 ** 3))
+    ante = endless_ante(8, 2, 3)
+    assert ante.number == 8
+    assert ante.name == "Boss Blind"
+    assert ante.target == expected
+
+
+def test_endless_ante_offset_zero_matches_base_table() -> None:
+    """Sanity: endless_offset=0 must reproduce the static ANTE_TABLE entry so
+    the endless path is a strict superset of the standard 8-ante path."""
+    from belote.belatro.run.ante import ANTE_TABLE, endless_ante
+
+    for a in range(1, 9):
+        for b in range(3):
+            assert endless_ante(a, b, 0).target == ANTE_TABLE[a - 1][b].target

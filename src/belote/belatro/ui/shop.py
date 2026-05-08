@@ -31,6 +31,16 @@ class ShopScreen:
         self.reader = reader
         self.selected = 0
 
+    def _forge_available(self) -> bool:
+        """The Forge action only appears when the player owns the TierceForge
+        voucher and has accumulated 3 charges to spend."""
+        from ..items.vouchers import TierceForge
+
+        return (
+            any(isinstance(v, TierceForge) for v in self.shop.run.vouchers)
+            and self.shop.run.tierce_charges >= 3
+        )
+
     def run(self) -> None:
         """Main shop loop."""
         self.shop.generate_inventory()
@@ -39,22 +49,81 @@ class ShopScreen:
             event = self.reader.read()
             key = event.key
             num_items = len(self.shop.inventory)
-            total_options = num_items + 1  # items + reroll
+            forge_idx = num_items + 1 if self._forge_available() else -1
+            total_options = num_items + 1 + (1 if forge_idx >= 0 else 0)
             if key == Key.LEFT:
                 self.selected = (self.selected - 1) % total_options
             elif key == Key.RIGHT:
                 self.selected = (self.selected + 1) % total_options
             elif key == Key.ENTER:
                 if self.selected < num_items:
-                    self.shop.buy_item(self.selected)
+                    bought = self.shop.buy_item(self.selected)
+                    if not bought and self.shop.last_buy_failure == "slots_full":
+                        from .announce import BelAtroAnnounce
+
+                        BelAtroAnnounce.banner(
+                            "Slots full — sell first to make room", self.reader, hold=1.0
+                        )
                     if self.selected >= len(self.shop.inventory):
                         self.selected = max(0, len(self.shop.inventory) - 1)
-                else:
+                elif self.selected == num_items:
                     self.shop.reroll()
                     self.selected = min(self.selected, len(self.shop.inventory))
+                elif self.selected == forge_idx:
+                    self._handle_forge()
             elif key in (Key.ESC, Key.QUIT):
                 break
             self._render()
+
+    def _handle_forge(self) -> None:
+        """Spend 3 Tierce charges on a player-picked Planet contract level-up."""
+        from ..items.registry import registry
+        from ..items.vouchers import forge_tierce
+
+        planet_id = self._pick_planet()
+        if planet_id is None:
+            return
+        if forge_tierce(self.shop.run, planet_id):
+            planet_cls = registry.get_planet(planet_id)
+            label = getattr(planet_cls, "name", planet_id) if planet_cls else planet_id
+            from .announce import BelAtroAnnounce
+
+            BelAtroAnnounce.banner(f"Forged: {label} levelled up!", self.reader, hold=1.0)
+
+    def _pick_planet(self) -> str | None:
+        """Numbered overlay to pick a planet contract. Returns the chosen
+        planet id, or None if the player cancelled."""
+        from belote.ui.render import get_term_size
+
+        from ..items.registry import registry
+
+        planet_ids = list(registry.planets.keys())
+        if not planet_ids:
+            return None
+
+        term_w, _ = get_term_size()
+        sys.stdout.write(clear_screen())
+        print(move(2, 1) + ansi_center(gold_fg() + BOLD + "FORGE A PLANET" + RESET, term_w))
+        print(
+            move(4, 1)
+            + ansi_center(white_fg() + "Spend 3 Tierce charges to level up:" + RESET, term_w)
+        )
+        for i, p_id in enumerate(planet_ids):
+            planet_cls = registry.get_planet(p_id)
+            name = getattr(planet_cls, "name", p_id) if planet_cls else p_id
+            print(move(6 + i, 4) + white_fg() + f"  [{i + 1}] {name}" + RESET)
+        hint_row = 6 + len(planet_ids) + 2
+        print(move(hint_row, 1) + ansi_center("[1-9] pick   Esc cancel", term_w))
+        sys.stdout.flush()
+
+        while True:
+            event = self.reader.read()
+            if event.key in (Key.ESC, Key.QUIT):
+                return None
+            if event.key == Key.CHAR and event.char and event.char.isdigit():
+                idx = int(event.char) - 1
+                if 0 <= idx < len(planet_ids):
+                    return planet_ids[idx]
 
     def _card_col(self, i: int, num_items: int, term_w: int) -> int:
         spacing = max(18, (term_w - 2) // (num_items + 1))
@@ -137,11 +206,29 @@ class ShopScreen:
         reroll_label = f"Reroll ${self.shop.reroll_cost}"
         print(move(card_start_row + 3, reroll_col) + bc + f"[ {reroll_label} ]" + RESET)
 
+        # Forge option (only when TierceForge voucher owned + 3 charges available)
+        forge_idx = num_items + 1 if self._forge_available() else -1
+        if forge_idx >= 0:
+            forge_col = self._card_col(forge_idx, num_items, term_w)
+            is_forge_sel = self.selected == forge_idx
+            fc = REVERSE if is_forge_sel else ""
+            forge_label = f"Forge x{self.shop.run.tierce_charges}/3"
+            print(move(card_start_row + 3, forge_col) + fc + f"[ {forge_label} ]" + RESET)
+
         # Selected item description
         if self.selected < num_items:
             item = self.shop.inventory[self.selected]
             desc = getattr(item, "description", "")
             print(move(18, 1) + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w))
+        elif self.selected == num_items + 1 and forge_idx >= 0:
+            print(
+                move(18, 1)
+                + ansi_center(
+                    white_fg() + "Spend 3 Tierce charges to level up a Planet contract."
+                    + RESET,
+                    term_w,
+                )
+            )
 
         print(
             move(20, 1)

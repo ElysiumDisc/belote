@@ -160,6 +160,110 @@ def test_tierce_forge_voucher_apply_is_noop_at_apply_time() -> None:
     assert run.tierce_charges == 0
 
 
+def test_forge_tierce_voucher_spends_charges_and_levels_planet() -> None:
+    """Regression: prior to 3.1.0 the TierceForge voucher's apply() was a no-op
+    and forge_tierce() had no UI caller, leaving the feature unreachable. This
+    test pins the backend contract: with 3 charges, calling forge_tierce()
+    must consume them and bump the targeted Planet contract level."""
+    from belote.belatro.items.registry import register_all_items, registry
+    from belote.belatro.items.vouchers import forge_tierce
+
+    register_all_items()
+    run = BelAtroRun()
+    run.tierce_charges = 3
+    run.vouchers.append(TierceForge())
+
+    # Pick the first registered planet so the test is registry-stable.
+    planet_id = next(iter(registry.planets.keys()))
+
+    assert forge_tierce(run, planet_id) is True
+    assert run.tierce_charges == 0
+    # The planet's level-up reward must now be present in contract_levels
+    # for the planet's contract_id (e.g. "spades", "tout_atout").
+    planet_cls = registry.get_planet(planet_id)
+    assert planet_cls is not None
+    contract_id = planet_cls().contract_id
+    assert contract_id in run.contract_levels
+    assert run.contract_levels[contract_id]
+
+
+def test_le_fou_no_prior_consumable_falls_back_to_random_tarot() -> None:
+    """When the player uses LeFou with no previous consumable on record (run
+    just started, or the previous one was LeFou itself), the fallback grants
+    a random non-LeFou tarot to the consumables tray. Pre-3.1.0 this branch
+    was untested; pinning it so the silent-no-op-on-self-copy guard at
+    tarots.py:99 (`last_id != self.id`) can't regress."""
+    from belote.belatro.items.registry import register_all_items
+    from belote.belatro.items.tarots import LeFou
+
+    register_all_items()
+    run = BelAtroRun()
+    # Defensive guard path: last_consumable_id points to LeFou itself.
+    run.last_consumable_id = "le_fou"
+    before = len(run.consumables)
+
+    LeFou().use(run, None)
+
+    assert len(run.consumables) == before + 1, "LeFou fallback didn't grant a tarot"
+    granted = run.consumables[-1]
+    assert not isinstance(granted, LeFou), "LeFou fallback copied itself"
+
+
+def test_le_jugement_no_op_when_joker_slots_full() -> None:
+    """Block-policy regression: LeJugement must NOT silently overflow when the
+    player's joker slots are at capacity. The tarot is consumed (its effect is
+    one-shot) but no joker is added — the player loses the tarot but doesn't
+    have a phantom joker created. Pre-3.1.0 the early-return was implicit; this
+    test pins it so a future refactor can't reintroduce silent overflow."""
+    from belote.belatro.items.jokers.coinche import CoincheStack
+    from belote.belatro.items.registry import register_all_items
+    from belote.belatro.items.tarots import LeJugement
+
+    register_all_items()
+    run = BelAtroRun()
+    run.jokers = [CoincheStack() for _ in range(run.joker_slots)]
+    before = list(run.jokers)
+
+    LeJugement().use(run, None)
+
+    assert run.jokers == before, "LeJugement silently grew jokers past slot cap"
+
+
+def test_la_pretresse_no_op_when_consumable_slots_full() -> None:
+    """Block-policy regression: LaPretresse must NOT silently overflow when
+    consumable slots are full. Pre-3.1.0 it could partial-grant (1 of 2 planets
+    if exactly 1 slot was free); the loop's len-check still blocks any add when
+    full, so the no-op behaviour is what we lock here."""
+    from belote.belatro.items.registry import register_all_items
+    from belote.belatro.items.tarots import LaPretresse, LeChariot
+
+    register_all_items()
+    run = BelAtroRun()
+    run.consumables = [LeChariot() for _ in range(run.consumable_slots)]
+    before = list(run.consumables)
+
+    LaPretresse().use(run, None)
+
+    assert run.consumables == before, "LaPretresse silently grew consumables past slot cap"
+
+
+def test_forge_tierce_blocked_when_charges_below_three() -> None:
+    """Forge must return False (and not consume charges or change levels) when
+    the player only has 2 of the required 3 charges."""
+    from belote.belatro.items.registry import register_all_items, registry
+    from belote.belatro.items.vouchers import forge_tierce
+
+    register_all_items()
+    run = BelAtroRun()
+    run.tierce_charges = 2
+    run.vouchers.append(TierceForge())
+    planet_id = next(iter(registry.planets.keys()))
+
+    assert forge_tierce(run, planet_id) is False
+    assert run.tierce_charges == 2
+    assert not run.contract_levels
+
+
 # ── Trust tier scaling ─────────────────────────────────────────────────────
 
 

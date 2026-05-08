@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-05-08
+
+Audit-action release — implements the prioritized fix list from 3.0.3. One real correctness bug fixed, one unreachable feature wired up, one money-leak path closed, three measurable perf wins, and the long-standing `modifier_patch` underscore shim retired. 525 tests passing (up from 510), ruff and mypy strict still clean across 75 source files.
+
+### Fixed
+
+- **`src/belote/game.py:843-855` (HUD multi-boss running total)** — Under `Les Clubs Bannis + Le Roi Mort` (or any combo of `ban_clubs` with a rank-zero boss), the live HUD running total in `play_card` over-credited a clubs-led trick: the `ban_clubs → trick_pts = 0` branch was immediately overwritten by the rank-zero recompute. The eventual round score was already correct (different code path through `scoring.py`). Now `play_card` delegates to `scoring.trick_card_points`, the canonical helper that composes every boss zero-rank flag, `ban_clubs`, and the SE-trump scale in a single pass — the HUD cannot drift from the round score under any boss combo. Regression: `tests/test_official_rules.py::test_hud_running_total_under_multi_boss_ban_clubs_plus_kings_zero`.
+- **`src/belote/belatro/run/shop.py::buy_item` (consumable money-leak)** — Slot-capacity check is now hoisted *above* `Economy.spend_money`. Pre-3.1.0 the player's money was charged for a Tarot/Planet purchase even when consumable slots were full, and the item was silently dropped. New `Shop.last_buy_failure: str | None` carries the reason ("slots_full" / "no_money") so the shop UI surfaces a `BelAtroAnnounce.banner("Slots full — sell first")` banner. Regressions: `tests/belatro/test_belatro.py::TestShop::test_buy_consumable_with_full_slots_does_not_charge_money`, `test_buy_joker_with_full_slots_does_not_charge_money`, `test_buy_item_no_money_records_no_money_failure`.
+
+### Added
+
+- **TierceForge UI integration** (`src/belote/belatro/ui/shop.py`) — The `TierceForge` voucher shipped in 3.0.0 with a working `forge_tierce(run, planet_id)` backend (`src/belote/belatro/items/vouchers.py:129`) but no UI caller; the feature was unreachable. The shop now shows a "Forge ×N/3" tile when the voucher is owned, opens a numbered planet picker on Enter, and surfaces a confirmation banner on success. Regressions: `tests/belatro/test_phase2_content.py::test_forge_tierce_voucher_spends_charges_and_levels_planet`, `test_forge_tierce_blocked_when_charges_below_three`.
+- **Block-policy regressions for Tarot overflow** — `LeJugement` and `LaPretresse` are now pinned to no-op when joker/consumable slots are at capacity (rather than partial-grant). Tests: `test_le_jugement_no_op_when_joker_slots_full`, `test_la_pretresse_no_op_when_consumable_slots_full`.
+- **`tests/belatro/test_phase1_plumbing.py::test_joker_state_only_contains_scalar_values`** — Walks every registered joker through `on_round_start` + four event hooks and asserts no mutable container leaks into `_joker_state`. Locks the contract that lets the per-event copy stay shallow (3.1.0 dropped the deepcopy).
+- **`tests/belatro/test_phase1_plumbing.py::test_shop_edition_weights_match_distribution`** — 10 000-roll empirical check on `Shop._roll_edition()`, ±1% per bucket. Catches accidental edits to the `_EDITION_WEIGHTS` table.
+- **`tests/belatro/test_phase3_meta.py::test_endless_ante_target_scaling`** + `test_endless_ante_offset_zero_matches_base_table` — pin the `100 × 1.5^(ante-1) × blind × 2.2^offset` formula and the static-table parity invariant.
+- **`tests/belatro/test_phase2_content.py::test_le_fou_no_prior_consumable_falls_back_to_random_tarot`** — covers the `last_id == self.id` defensive branch in `tarots.py::LeFou.use`.
+- **`tests/belatro/test_boss_modifiers_integration.py::test_invariant_no_underscore_boss_attrs`** — anti-pattern lock for the architecture-pinned rule that boss flags must be reached via `state.boss_modifiers.X`, never `getattr(state, "_X", False)`.
+
+### Improved
+
+- **`src/belote/scoring.py` (winners-threading)** — `score_round` already pre-computed the per-trick winner list (3.0.2); the residual `trick_winner_seat` recomputations in the Malédiction branch (lines 776-793) and `apply_round_score` (lines 843-855) are now eliminated. Per-team trick counts ride on the new `ScoringBreakdown.tricks_ns` / `tricks_ew` fields (default 0; `apply_round_score` falls back to walking when a hand-constructed breakdown leaves them at default). Net: ~16 fewer `trick_winner_seat` calls per round.
+- **`src/belote/belatro/core/scoring.py::ScoreAccumulator.update_state` (deepcopy → shallow)** — Replaced the per-event `copy.deepcopy(state._joker_state)` with `dict(state._joker_state)`. All current `_joker_state` writers store scalars (bool/int/str), so the deep-copy was over-defensive — and ran ~20×/round. Module-level `import copy` and `from dataclasses import replace` removed (they were also reimported inside two methods). Contract is locked by the new scalar-invariant test.
+- **`src/belote/ai.py` (Hard AI hot-loop allocations)** — `_hard_play` precomputes `hand_suit_counts: Counter[Suit]`, `my_trumps`, `opp_trumps` once per turn and threads them into `_score_card_play` / `_score_leading_strategy` / `_score_discarding_strategy`. Pre-3.1.0 these counters were rebuilt for every candidate card — a four-card legal set walked the hand and `memory.played` four times each.
+- **`@dataclass(slots=True)` on `Statistics`, `SessionStats`, `ScoreAccumulator`** (`src/belote/stats.py`, `src/belote/belatro/core/scoring.py`). Frequently-instantiated containers; ~40 bytes saved per instance. `BelAtroRun` deliberately stays non-slotted (its `__post_init__` lazy-init pattern fights `slots=True`).
+- **`src/belote/stats.py:97-98`** — `print(..., file=sys.stderr)` on save failure swapped for `logging.getLogger(__name__).warning`. Removed unused `import sys`.
+- **`src/belote/input.py:138, 160`** — bare `except Exception:` in key-press parsing narrowed to `(UnicodeDecodeError,)` and `(ValueError, UnicodeDecodeError)`. Genuine bugs surface; key-press robustness preserved.
+- **`src/belote/replay.py:46`** — explanatory comment added above the `# noqa: BLE001` so the broad-except rationale is visible at the call site.
+- **`src/belote/game.py:213-217, 220-224`** — docstring on `belote_holders` and `_joker_state` documenting the "always replace, never mutate-in-place" contract for mutable dicts inside the frozen `GameState`.
+
+### Removed
+
+- **`modifier_patch.py` underscore shim** — The `state.patch("_X", True)` → `state.patch("X", True)` migration is complete. All 23 boss `apply()` methods in `src/belote/belatro/run/boss.py` were rewritten in lock-step. The leading-underscore strip in `PatchedGameState.patch()` and the `__getattr__` fallback to `boss_modifiers.X` are gone; `patch()` now asserts loud on a leading-underscore key. The `getattr(state, "_X", False)` reading anti-pattern is locked against in `test_invariant_no_underscore_boss_attrs`.
+
+### Internal
+
+- **Tests**: 510 → 525 (+15).
+- **Strict gates**: pytest 525/525, mypy 0 errors, ruff 0 violations across `src/` and `tests/`.
+- **Audit plan**: `~/.claude/plans/bug-hunt-code-performance-sleepy-ritchie.md`.
+
+## [3.0.3] - 2026-05-08
+
+Full-codebase audit pass + documentation accuracy. No behaviour changes; the audit produced a prioritized findings list and corrected three stale README counts. Planned fixes (one P0 functional, two P0 perf/quality, five P1, seven P2) are tracked for follow-up cuts and not yet implemented.
+
+### Fixed (documentation)
+
+- **`README.md`** — "Full Boss Blind Suite: All 18 unique bosses" → "All 21 unique bosses". 3.0.0 added Le Sauvage / L'Iconoclaste / Le Mime to bring `ALL_BOSS_MODIFIERS` (in `src/belote/belatro/run/boss.py`) to 21; the showcase line was never bumped.
+- **`README.md`** — two stale "(435 tests)" / "pytest: 435/435 passed" references corrected to 510, matching `pytest --collect-only` and the figure already present at `README.md:250` ("Currently 510 tests passing").
+
+### Audit findings (planning only — implementation deferred)
+
+A three-agent audit covered the classic engine vs. canonical Belote rules, BelAtro content wiring (jokers / bosses / planets / vouchers / tarots / editions / unlocks), and performance / code-quality hotspots across ~7,100 LOC. Headline: engine is rule-correct; BelAtro content matrix is 93/93 wired (21 bosses, 8 planets, 36 jokers, 4 editions, 12 vouchers, 12 tarots).
+
+Findings tracked at `~/.claude/plans/bug-hunt-code-performance-atomic-sutton.md`:
+- **P0-1** — `EventBus.emit` still never called (carried over from 3.0.2). `L'Exécuteur` / `L'Idéologue` / `Le Fanatique` unlocks silently never fire.
+- **P0-2** — `legal_cards()` LRU wrapper rebuilds `Card` objects on every cache hit (`src/belote/game.py:475-653`); est. 5–8% AI-turn regression vs. caching the resolved tuple.
+- **P0-3** — `play_card()` is 174 LOC / cyclomatic ~20 (`src/belote/game.py:777-950`); split into `_update_belote_tracker` / `_apply_play_modifiers` / `_resolve_trick_complete`.
+- **P0-4** — `_calculate_base_points()` accepts an optional pre-computed `winners` arg; cache-miss callers walk all 8 tricks twice (`src/belote/scoring.py:580-588`). Make required.
+- **P1-1** — `card_points(trump: Suit)` lies about None; 8 `# type: ignore` markers across `game.py` / `scoring.py` should drop once signature becomes `Suit | None`.
+- **P1-2** — Boss zero-rank logic duplicated across three sites (`game.py:856-872`, `scoring.py:390-400`, `scoring.py:429-440`); extract a single `apply_zero_rank_bosses(card, trump, bm)` helper. Highest-leverage maintenance fix.
+- **P1-3..P1-5** — `_hard_bid` recomputes void counts inside the suit loop; `trick_rank()` called twice per overtrump check; missing docstrings on hot APIs.
+- **P2** — carré KeyError harden, `REBELOTE_POINTS = 40` variant doc, AI memory reset hardening, `render()` 129-LOC split, `register_all_items` `__all__`, voucher / tarot integration test (24 effects to cover).
+
+### Internal
+
+- **Tests**: 510 (unchanged).
+- **Strict gates**: pytest 510/510, mypy 0 errors, ruff 0 violations (all unchanged from 3.0.2).
+
+### Carried forward
+
+- `EventBus.emit` wiring fix (P0-1 above) remains deferred. Now planned for 3.0.4 alongside the perf wins.
+
 ## [3.0.2] - 2026-05-08
 
 Audit pass — wired two previously-dead 3.0.0 modules behind opt-in env vars, removed redundant work from `score_round()`, and pinned every boss modifier's patch keys against typo regressions.

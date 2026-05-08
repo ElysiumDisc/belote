@@ -2,12 +2,25 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.1.0
+
+- **Bug fixes** — HUD running-total no longer drifts under multi-boss combos (`Les Clubs Bannis + Le Roi Mort` style: pre-3.1.0 the rank-zero recompute silently overwrote the `ban_clubs` zeroing). `Shop.buy_item` no longer charges money when consumable slots are full — the "Slots full — sell first" banner now fires before any spend.
+- **TierceForge wired up** — the voucher shipped in 3.0.0 with a working backend but no UI caller; the feature was unreachable. The shop now shows a "Forge ×N/3" tile when the voucher is owned, opens a numbered planet picker on Enter, and confirms the level-up via a banner.
+- **Performance** — `score_round` and `apply_round_score` no longer re-walk the trick list (~16 fewer `trick_winner_seat` calls per round). The per-event `copy.deepcopy` in `ScoreAccumulator.update_state` is gone (~20 deepcopies/round saved); replaced with a shallow `dict(...)` plus a scalar-only invariant test that locks the contract. Hard-AI's `_score_card_play` precomputes hand suit counts and trump tallies once per turn instead of per candidate.
+- **Cleanup** — the `modifier_patch` underscore-prefix shim is gone (23 boss `apply()` methods rewritten to use unprefixed field names; the `getattr(state, "_X", False)` anti-pattern is now locked against by a regression test). `slots=True` added to `Statistics`, `SessionStats`, `ScoreAccumulator`. Bare `except Exception:` in key-press parsing narrowed; `print → logging` in stats.
+- **Test coverage** — 525 tests (up from 510). Strict gates still clean: pytest 525/525, mypy 0 errors, ruff 0 violations.
+
+## What's new in 3.0.3
+
+- **Full-codebase audit** — three-agent pass over the classic engine, BelAtro content wiring, and perf / code-quality hotspots (~7,100 LOC). Headline: engine is rule-correct against canonical French Belote; BelAtro content matrix is **93/93 wired** (21 bosses, 8 planets, 36 jokers, 4 editions, 12 vouchers, 12 tarots). Prioritized findings list (1 P0 functional, 2 P0 perf, 5 P1, 7 P2) tracked for follow-up cuts; implementation landed in 3.1.0.
+- **Doc accuracy** — README boss-count corrected (18 → 21; 3.0.0 added Le Sauvage / L'Iconoclaste / Le Mime), and two stale `(435 tests)` references bumped to 510 to match the figure already present elsewhere in the file.
+
 ## What's new in 3.0.2
 
 - **Replay analyzer + Ghost run wired up** — both shipped in 3.0.0 as code modules but were never called from the running game. Now opt-in behind `BELOTE_REPLAY=1` (post-round Hard-AI comparison) and `BELOTE_GHOST=1` (per-run JSON dump to `~/.local/share/belote/ghosts/`). See DEVELOPMENT.md › Optional Runtime Flags.
 - **Performance** — `score_round()` now caches per-trick winners once instead of recomputing them in each boss-modifier helper (2-3× walks → 1× walk per round). `register_all_items()` is now idempotent so test setup no longer re-walks every items module per `BelAtroRun`. Bidding's special-bid path (TA / SA) hoists `_suit_lengths` out of the per-difficulty branches.
 - **Defensive pin** — every entry in `ALL_BOSS_MODIFIERS` is now asserted to actually toggle a `BossModifiers` field via `.flags()`. Catches typo'd `state.patch("_misspelled", True)` keys at test time rather than letting the boss silently no-op.
-- **Test coverage** — 510 tests (up from 509).
+- **Test coverage** — 525 tests (up from 509).
 
 ## What's new in 3.0.1
 
@@ -179,7 +192,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 - **BelAtro Roguelite Mode:** A massive expansion featuring 36 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
-- **Full Boss Blind Suite:** All 18 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
+- **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
 - **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
 - **Rich Terminal UI:** Full-screen green felt table with detailed card graphics and "You" vs "Partner" terminology.
@@ -231,7 +244,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (435 tests)
+├── tests/             # Comprehensive test suite (525 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -247,14 +260,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **510 tests** passing with 100% coverage on game-logic modules.
+Currently **525 tests** passing with 100% coverage on game-logic modules.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 435/435 passed
+- **pytest**: 525/525 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

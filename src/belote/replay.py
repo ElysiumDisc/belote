@@ -44,6 +44,9 @@ def analyze_round(
         try:
             suggested = ai.decide_card(state)
         except Exception:  # noqa: BLE001
+            # Replay covers historical states — older serialisations or
+            # boss-modifier combos can crash the current AI evaluator. Skip
+            # the report rather than abort the whole replay.
             continue
         trick_idx = len(state.completed_tricks) + 1
         reports.append(

@@ -135,7 +135,7 @@ class _UnixKeyReader:
             try:
                 ch = full_buf.decode("utf-8")
                 return KeyEvent(Key.CHAR, ch)
-            except Exception:
+            except UnicodeDecodeError:
                 return KeyEvent(Key.ESC)
 
         # Printable character
@@ -157,7 +157,7 @@ class _UnixKeyReader:
                 return KeyEvent(Key.OVERLAY)
 
             return KeyEvent(Key.CHAR, ch)
-        except Exception:
+        except (ValueError, UnicodeDecodeError):
             return KeyEvent(Key.ESC)
 
     def read_timeout(self, timeout: float) -> KeyEvent | None:

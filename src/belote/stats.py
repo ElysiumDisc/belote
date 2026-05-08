@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .config import GLOBAL_CONFIG
 
+_log = logging.getLogger(__name__)
 
-@dataclass
+
+@dataclass(slots=True)
 class Statistics:
     games_played: int = 0
     games_won: int = 0
@@ -58,7 +60,7 @@ class Statistics:
         return base
 
 
-@dataclass
+@dataclass(slots=True)
 class SessionStats:
     games_played: int = 0
     games_won: int = 0
@@ -94,8 +96,7 @@ class StatisticsManager:
             with self.stats_file.open("w") as f:
                 json.dump(stats.to_dict(), f, indent=2)
         except OSError as e:
-            if __debug__:
-                print(f"DEBUG: Failed to save stats to {self.stats_file}: {e}", file=sys.stderr)
+            _log.warning("Failed to save stats to %s: %s", self.stats_file, e)
 
     def flush_stats(self) -> None:
         """Write cached stats to disk."""

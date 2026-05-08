@@ -128,16 +128,18 @@ def test_boss_modifier_patch_persistence():
         name = "test"
         description = "test"
         def apply(self, state_proxy):
-            state_proxy._invert_scoring = True
-            # Test that we can read it back from proxy
-            assert state_proxy._invert_scoring is True
+            # 3.1.0: unprefixed name only (the underscore-strip shim was
+            # removed in modifier_patch.py).
+            state_proxy.invert_scoring = True
+            # Test that we can read it back from proxy via the canonical path
+            assert state_proxy.boss_modifiers.invert_scoring is True
             # Test that we can read something else from base state
             assert state_proxy.phase == Phase.DEAL
             return state_proxy
 
     MockBoss().apply(proxy)
 
-    assert proxy._invert_scoring is True
+    assert proxy.boss_modifiers.invert_scoring is True
     patches = dict(object.__getattribute__(proxy, "_patches"))
     assert "boss_modifiers" in patches
     assert patches["boss_modifiers"].invert_scoring is True

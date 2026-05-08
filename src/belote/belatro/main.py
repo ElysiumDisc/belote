@@ -369,10 +369,21 @@ class BelAtroGame:
 
 
 def main() -> None:
+    import argparse
     import sys
 
+    from .. import __version__
     from ..ansi import RESET, alt_screen_off, alt_screen_on, clear_screen, hide_cursor, show_cursor
     from ..input import KeyReader
+
+    # Mirrors `belote --version` (src/belote/main.py) so both entry points
+    # report the same, package-canonical version.
+    parser = argparse.ArgumentParser(
+        prog="belatro",
+        description="BelAtro — Balatro-inspired roguelite mode for Belote",
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.parse_args()
 
     with KeyReader() as reader:
         sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())

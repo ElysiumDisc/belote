@@ -545,3 +545,37 @@ def test_place_bid_tout_atout_round1_rejected() -> None:
     assert state.bidding_round == 1
     with pytest.raises(IllegalMoveError):
         place_bid(state, Suit.TOUT_ATOUT)
+
+
+def test_hud_running_total_under_multi_boss_ban_clubs_plus_kings_zero() -> None:
+    """Regression: under ban_clubs + kings_zero, the live HUD running total in
+    play_card used to recompute trick points after the ban_clubs zeroing,
+    silently overwriting it. The 10 of clubs would credit 10 to the HUD even
+    though score_round (canonical) returned 0 for the trick. Now play_card
+    delegates to scoring.trick_card_points so both flags compose correctly."""
+    from belote.game import BossModifiers, play_card
+
+    # 4-card clubs-led trick. South completes it with the 10 of clubs.
+    # Trump = HEARTS (so clubs are non-trump; 10 of clubs = 10 points normally).
+    # ban_clubs must zero the whole trick BEFORE kings_zero gets a turn.
+    south_hand = (Card(Suit.CLUBS, Rank.TEN),)
+    state = GameState(
+        hands=(south_hand, (), (), ()),
+        trump=Suit.HEARTS,
+        contract="hearts",
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        leader=Seat.NORTH,
+        turn=Seat.SOUTH,
+        current_trick=(
+            TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.KING)),
+            TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.SEVEN)),
+            TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.EIGHT)),
+        ),
+        boss_modifiers=BossModifiers(ban_clubs=True, kings_zero=True),
+    )
+    new_state = play_card(state, Card(Suit.CLUBS, Rank.TEN))
+    assert new_state.current_round_points == (0, 0), (
+        f"HUD over-credited trick points: got {new_state.current_round_points}. "
+        "ban_clubs zeroing was overwritten by the kings_zero recompute."
+    )

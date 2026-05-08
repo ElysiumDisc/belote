@@ -45,7 +45,7 @@ class LaGrandeMuette(BossModifier):
     description = "Belote/Rebelote cannot be announced. Flat 20 points removed."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_no_belote", True)
+        state.patch("no_belote", True)
         return state
 
 
@@ -55,7 +55,7 @@ class LAnarchie(BossModifier):
     description = "Trump changes to a random suit after every 2 tricks."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_dynamic_trump", True)
+        state.patch("dynamic_trump", True)
         return state
 
 
@@ -65,7 +65,7 @@ class LeRoiMort(BossModifier):
     description = "All Kings are worth 0 card points this round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_kings_zero", True)
+        state.patch("kings_zero", True)
         return state
 
 
@@ -75,7 +75,7 @@ class LaMalediction(BossModifier):
     description = "The team winning MORE tricks scores ZERO this round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_invert_scoring", True)
+        state.patch("invert_scoring", True)
         return state
 
 
@@ -85,7 +85,7 @@ class LAvocat(BossModifier):
     description = "You must Coinche your own bid — target doubles, payout triples."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_auto_coinche", True)
+        state.patch("auto_coinche", True)
         return state
 
 
@@ -95,7 +95,7 @@ class LeDeluge(BossModifier):
     description = "All 7s and 8s become trump regardless of declared suit."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_seven_eight_trump", True)
+        state.patch("seven_eight_trump", True)
         return state
 
 
@@ -105,7 +105,7 @@ class LaReineNoire(BossModifier):
     description = "Whoever captures the Queen of Spades subtracts 25 points."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_queen_spades_penalty", True)
+        state.patch("queen_spades_penalty", True)
         return state
 
 
@@ -115,7 +115,7 @@ class LeBrouillard(BossModifier):
     description = "Score HUD is hidden until the round ends."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_hide_hud", True)
+        state.patch("hide_hud", True)
         return state
 
 
@@ -125,7 +125,7 @@ class LesClubsBannis(BossModifier):
     description = "Clubs cannot be called as trump. Club tricks score 0."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_ban_clubs", True)
+        state.patch("ban_clubs", True)
         return state
 
 
@@ -135,7 +135,7 @@ class LeZeroFinal(BossModifier):
     description = "The last trick is worth 0 points. Dix de Der is negated."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_no_dix_de_der", True)
+        state.patch("no_dix_de_der", True)
         return state
 
 
@@ -145,7 +145,7 @@ class LesDixMaudits(BossModifier):
     description = "All 10s are treated as 7s (0 point value) for this round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_tens_zero", True)
+        state.patch("tens_zero", True)
         return state
 
 
@@ -158,7 +158,7 @@ class LaRupture(BossModifier):
     description = "You and partner cannot win consecutive tricks."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_no_consecutive_team_wins", True)
+        state.patch("no_consecutive_team_wins", True)
         return state
 
 
@@ -168,7 +168,7 @@ class LeFantomePartenaire(BossModifier):
     description = "Partner's hand is invisible to you for the entire round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_hide_partner_hand", True)
+        state.patch("hide_partner_hand", True)
         return state
 
 
@@ -178,7 +178,7 @@ class LAgentDoubleBoss(BossModifier):
     description = "Partner plays optimally for the opponents for a random 3 tricks."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_agent_double_active", True)
+        state.patch("agent_double_active", True)
         return state
 
 
@@ -188,7 +188,7 @@ class LaSolitude(BossModifier):
     description = "Partner passes every bid. You must bid alone."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_partner_forced_pass", True)
+        state.patch("partner_forced_pass", True)
         return state
 
 
@@ -198,7 +198,7 @@ class LeDivorce(BossModifier):
     description = "Trust track is locked at 0 for this round. No Trust bonuses."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_lock_trust_zero", True)
+        state.patch("lock_trust_zero", True)
         return state
 
 
@@ -208,7 +208,7 @@ class LaCompetition(BossModifier):
     description = "You and partner score separately. Only higher total counts."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_separate_scoring", True)
+        state.patch("separate_scoring", True)
         return state
 
 
@@ -225,12 +225,12 @@ class BetrayalArc(BossModifier):
     description = "Partner trust is silently set to 0; partner sabotages from trick 4 onward."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_lock_trust_zero", True)
+        state.patch("lock_trust_zero", True)
         # Re-use the existing agent_double_active flag to drive sabotage in ai.py.
         # `late_only` makes round_driver populate sabotage_tricks as 4..8 instead
         # of a random 3-trick set — matches the description "from trick 4 onward".
-        state.patch("_agent_double_active", True)
-        state.patch("_agent_double_late_only", True)
+        state.patch("agent_double_active", True)
+        state.patch("agent_double_late_only", True)
         return state
 
 
@@ -245,7 +245,7 @@ class LeSauvage(BossModifier):
     description = "All Aces are worth 0 card points this round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_aces_zero", True)
+        state.patch("aces_zero", True)
         return state
 
 
@@ -257,7 +257,7 @@ class LIconoclaste(BossModifier):
     description = "All Jacks are worth 0 card points — even the trump Jack."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_jacks_zero", True)
+        state.patch("jacks_zero", True)
         return state
 
 
@@ -277,7 +277,7 @@ class LeMime(BossModifier):
     description = "All declarations (Tierce/Quarte/Carré) score 0 this round."
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
-        state.patch("_declarations_zero", True)
+        state.patch("declarations_zero", True)
         return state
 
 

@@ -16,6 +16,9 @@ class Shop:
         self.profile = profile
         self.inventory: list[Any] = []
         self.reroll_cost = 5
+        # Reason the most recent buy_item() returned False, or None on success.
+        # The shop UI consults this to surface "Slots full" vs "Not enough $".
+        self.last_buy_failure: str | None = None
 
     # 3.0.0: edition roll table at shop generation. ~80% NONE, then a tail
     # of Foil/Holo/Polychrome/Negative. Calibrated so a typical 8-ante run
@@ -112,14 +115,42 @@ class Shop:
         return False
 
     def buy_item(self, index: int) -> bool:
-        """Attempt to buy an item from the inventory."""
-        if 0 <= index < len(self.inventory):
-            item = self.inventory[index]
-            if self.run.economy.spend_money(item.cost):
-                self._apply_item(item)
-                self.inventory.pop(index)
-                return True
+        """Attempt to buy an item from the inventory.
+
+        Slot capacity is checked BEFORE charging the player. Pre-3.1.0 the
+        money was spent unconditionally and the item was silently dropped if
+        no slot fit — a money-leak bug under full joker/consumable slots.
+        """
+        if not (0 <= index < len(self.inventory)):
+            return False
+        item = self.inventory[index]
+        if not self._can_accept(item):
+            self.last_buy_failure = "slots_full"
+            return False
+        if self.run.economy.spend_money(item.cost):
+            self._apply_item(item)
+            self.inventory.pop(index)
+            self.last_buy_failure = None
+            return True
+        self.last_buy_failure = "no_money"
         return False
+
+    def _can_accept(self, item: object) -> bool:
+        """True iff `item` can be placed somewhere on the run right now.
+
+        Negative-edition jokers always fit (they grow `joker_slots` instead of
+        consuming one). Vouchers don't compete for a slot. Tarot/Planet land
+        in `run.consumables`.
+        """
+        from ..items.base import Edition, Joker, Voucher
+
+        if isinstance(item, Joker):
+            if item.edition == Edition.NEGATIVE:
+                return True
+            return len(self.run.jokers) < self.run.joker_slots
+        if isinstance(item, Voucher):
+            return True
+        return len(self.run.consumables) < self.run.consumable_slots
 
     def _apply_item(self, item: object) -> None:
         from ..items.base import Edition, Joker, Voucher

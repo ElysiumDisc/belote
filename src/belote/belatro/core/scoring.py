@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ _SUIT_TO_CONTRACT: dict[Suit, str] = {
 }
 
 
-@dataclass
+@dataclass(slots=True)
 class ScoreAccumulator:
     """
     Accumulates Chips and Mult across one round,
@@ -65,7 +65,6 @@ class ScoreAccumulator:
         new_chips = state._chips + self.permanent_chips
         new_mult = state._mult * self.permanent_mult if self.permanent_mult != 1.0 else state._mult
 
-        from dataclasses import replace
         return replace(state, _joker_state=joker_state, _chips=new_chips, _mult=new_mult)
 
     def update_state(self, state: GameState, event: object) -> GameState:
@@ -73,12 +72,11 @@ class ScoreAccumulator:
         new_chips = state._chips
         new_mult = state._mult
         new_money = state._bonus_money
-        # Deep-copy the joker state: a shallow dict() shares mutable values
-        # (lists/dicts/sets nested inside) across rounds, which has bitten us
-        # before with frozenset/list flags persisting after the round ended.
-        import copy
-
-        joker_state = copy.deepcopy(state._joker_state)
+        # Shallow copy is sufficient: every value written into _joker_state
+        # is a scalar (bool / int / str). The pre-3.1.0 deepcopy ran on every
+        # event (~20×/round) — see test_joker_state_only_contains_scalar_values
+        # in tests/belatro/test_phase1_plumbing.py for the locking invariant.
+        joker_state = dict(state._joker_state)
 
         def _apply(result: JokerResult, source: str) -> None:
             nonlocal new_chips, new_mult, new_money
@@ -235,7 +233,6 @@ class ScoreAccumulator:
             _fire_jokers("on_bid", event)
 
         # Update GameState with new values
-        from dataclasses import replace
         return replace(
             state,
             _chips=new_chips,

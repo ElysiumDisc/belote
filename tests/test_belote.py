@@ -972,3 +972,27 @@ class TestHelpers:
         assert Seat.EAST.next_seat() == Seat.NORTH
         assert Seat.NORTH.next_seat() == Seat.WEST
         assert Seat.WEST.next_seat() == Seat.SOUTH
+
+
+def test_package_version_matches_pyproject() -> None:
+    """`belote.__version__` is the source of truth for both `--version` flags
+    (`belote --version` and `belatro --version`). It must match the version
+    declared in pyproject.toml — pre-3.1.0 the two drifted by two releases
+    (pyproject said 3.0.3, __init__.py said 3.0.2). This test catches a future
+    drift before it ships."""
+    import re
+    from pathlib import Path
+
+    from belote import __version__
+
+    pyproject = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, flags=re.MULTILINE)
+    assert match is not None, "pyproject.toml is missing a top-level `version = \"…\"` line"
+    declared = match.group(1)
+    assert __version__ == declared, (
+        f"belote.__version__ is {__version__!r} but pyproject.toml declares {declared!r}. "
+        "Bump src/belote/__init__.py in lockstep with pyproject.toml — both --version flags "
+        "read from __init__.py."
+    )

@@ -6,7 +6,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Final, Literal
 
-from .deck import Card, Rank, Suit, card_points, make_deck, trick_rank
+from .deck import Card, Rank, Suit, make_deck, trick_rank
 from .deck import deal as deal_cards_
 from .deck import shuffle as shuffle_deck_
 
@@ -211,6 +211,10 @@ class GameState:
     bidder_index: int = 0
     bidding_round: int = 1
     announced: str | None = None
+    # Mutable dict held inside a `frozen=True` GameState. Contract: always
+    # rebuild via `dataclasses.replace(state, belote_holders=new_dict)` —
+    # never mutate in place. The `frozen` guarantee covers the field
+    # reference, not the dict contents.
     belote_holders: dict[Suit, Seat] = field(default_factory=dict)
     belote_tracker: tuple[bool, bool] = (False, False)
     first_trick_done: bool = False
@@ -218,6 +222,10 @@ class GameState:
 
     boss_modifiers: BossModifiers = field(default_factory=BossModifiers)
 
+    # Same mutable-dict-inside-frozen contract as `belote_holders`. BelAtro
+    # jokers and the round driver write per-round flags here. Values must be
+    # scalars (bool/int/str) — see tests/belatro/test_phase1_plumbing.py
+    # `test_joker_state_only_contains_scalar_values`.
     _joker_state: dict[str, object] = field(default_factory=dict)
     _chips: int = 0
     _mult: float = 1.0
@@ -840,36 +848,19 @@ def play_card(state: GameState, card: Card) -> GameState:
         new_completed = state.completed_tricks + (new_trick,)
         tricks_count = len(new_completed)
 
-        # Update current round points. `card_points(card, None)` already
-        # produces the Sans Atout non-trump scale, so the only non-trump-set
-        # case is "contract not established" (DEAL/BIDDING) which can't reach
-        # this branch — but keep the guard for defensiveness.
+        # Live HUD running total. Delegate to `scoring.trick_card_points`,
+        # the canonical helper that already centralises every boss zero-rank
+        # flag, `ban_clubs`, and the seven_eight_trump scale — so the HUD
+        # cannot drift from the eventual round score under multi-boss combos
+        # (e.g. ban_clubs + kings_zero on a clubs-led trick).
+        # Local import mirrors `get_declarations` above to avoid the
+        # scoring → game cycle.
         contract_active = state.contract is not None
-        trick_pts: int = (
-            sum(
-                card_points(tc.card, trump, se_trump)  # type: ignore[arg-type, misc]
-                for tc in new_trick
-            )
-            if contract_active
-            else 0
-        )
-        # Boss: Les Clubs Bannis – club-led tricks score 0
-        if state.boss_modifiers.ban_clubs and new_trick and new_trick[0].card.suit == Suit.CLUBS:
+        if contract_active:
+            from .scoring import trick_card_points
+            trick_pts: int = trick_card_points(state, new_trick)
+        else:
             trick_pts = 0
-        # Boss: rank-zero bosses (Le Roi Mort / Les Dix Maudits / Le Sauvage /
-        # L'Iconoclaste). Mirrors the scoring.py canonical zeroing branch so
-        # the live HUD running total matches the eventual round score.
-        bm = state.boss_modifiers
-        if bm.kings_zero or bm.tens_zero or bm.aces_zero or bm.jacks_zero:
-            trick_pts = sum(
-                0
-                if (bm.kings_zero and tc.card.rank == Rank.KING)
-                or (bm.tens_zero and tc.card.rank == Rank.TEN)
-                or (bm.aces_zero and tc.card.rank == Rank.ACE)
-                or (bm.jacks_zero and tc.card.rank == Rank.JACK)
-                else card_points(tc.card, trump, se_trump)  # type: ignore[arg-type, misc]
-                for tc in new_trick
-            ) if contract_active else 0
         ns_pts, ew_pts = state.current_round_points
         if team_of(winner) == 0:
             ns_pts += trick_pts

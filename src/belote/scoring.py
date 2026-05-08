@@ -88,6 +88,11 @@ class ScoringBreakdown:
     is_litige: bool = False
     litige_points_awarded: int = 0
     messages: tuple[str, ...] = ()
+    # Per-team trick counts. Default 0 keeps existing call sites working;
+    # `score_round` populates these from its pre-computed `winners` so
+    # `apply_round_score` doesn't have to re-walk completed_tricks.
+    tricks_ns: int = 0
+    tricks_ew: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,9 +581,10 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_team = team_of(state.taker)
     defender_team = 1 - taker_team
 
-    # Pre-compute the winner of each completed trick once. Both base-points
-    # and the boss modifier helpers iterate the same list — without this the
-    # 8-trick walk runs 2-3× per round in the long run.
+    # Pre-compute the winner of each completed trick once. Base-points, the
+    # boss modifier helpers, the Malédiction branch, and apply_round_score
+    # all iterate the same list — without this the 8-trick walk runs 4× per
+    # round. Per-team trick counts are derived once here too.
     is_sa = state.contract == "sans_atout"
     winners: list[Seat | None] = [
         trick_winner_seat(
@@ -586,6 +592,8 @@ def score_round(state: GameState) -> ScoringBreakdown:
         )
         for trick in state.completed_tricks
     ]
+    tricks_ns = sum(1 for w in winners if w is not None and team_of(w) == 0)
+    tricks_ew = sum(1 for w in winners if w is not None and team_of(w) == 1)
 
     # 1. Base Card Points
     taker_card_pts, defender_card_pts = _calculate_base_points(state, trump, winners)
@@ -732,6 +740,8 @@ def score_round(state: GameState) -> ScoringBreakdown:
             is_capot=True,
             is_failed=is_failed,
             messages=tuple(messages),
+            tricks_ns=tricks_ns,
+            tricks_ew=tricks_ew,
         )
 
     if comp_taker == comp_defender:
@@ -775,14 +785,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
 
     # Boss: La Malediction (Invert scoring)
     if state.boss_modifiers.invert_scoring:
-        t_tricks = 0
-        se_trump = state.boss_modifiers.seven_eight_trump
-        is_sa_local = state.contract == "sans_atout"
-        for trick in state.completed_tricks:
-            w = trick_winner_seat(trick, trump, se_trump, is_sa_local)
-            if w is not None and team_of(w) == taker_team:
-                t_tricks += 1
-
+        t_tricks = tricks_ns if taker_team == 0 else tricks_ew
         defender_tricks = 8 - t_tricks
         if t_tricks > defender_tricks:
             taker_total = 0
@@ -811,6 +814,8 @@ def score_round(state: GameState) -> ScoringBreakdown:
         is_litige=is_litige,
         litige_points_awarded=litige_points_awarded,
         messages=tuple(messages),
+        tricks_ns=tricks_ns,
+        tricks_ew=tricks_ew,
     )
 
 
@@ -840,19 +845,23 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
 
     new_scores = (ns, ew)
 
-    # Trick counts per team across the played round.
-    se_trump = state.boss_modifiers.seven_eight_trump
-    is_sa = state.contract == "sans_atout"
-    tricks_ns = 0
-    tricks_ew = 0
-    for trick in state.completed_tricks:
-        winner = trick_winner_seat(trick, state.trump, se_trump, is_sa)
-        if winner is None:
-            continue
-        if team_of(winner) == 0:
-            tricks_ns += 1
-        else:
-            tricks_ew += 1
+    # Trick counts per team across the played round. score_round populates
+    # these on the breakdown (3.1.0). When the breakdown was hand-constructed
+    # (tests, replay tooling) and trick counts weren't passed, fall back to
+    # the legacy walk so callers don't have to plumb winners themselves.
+    tricks_ns = breakdown.tricks_ns
+    tricks_ew = breakdown.tricks_ew
+    if tricks_ns == 0 and tricks_ew == 0 and state.completed_tricks:
+        se_trump = state.boss_modifiers.seven_eight_trump
+        is_sa = state.contract == "sans_atout"
+        for trick in state.completed_tricks:
+            w = trick_winner_seat(trick, state.trump, se_trump, is_sa)
+            if w is None:
+                continue
+            if team_of(w) == 0:
+                tricks_ns += 1
+            else:
+                tricks_ew += 1
 
     # Declaration summaries — only show the team(s) that actually scored decls,
     # which matches Belote's "best team takes all decls" rule.
