@@ -2,7 +2,30 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
-## Now Featuring: BelAtro Expansion
+## What's new in 3.0.2
+
+- **Replay analyzer + Ghost run wired up** — both shipped in 3.0.0 as code modules but were never called from the running game. Now opt-in behind `BELOTE_REPLAY=1` (post-round Hard-AI comparison) and `BELOTE_GHOST=1` (per-run JSON dump to `~/.local/share/belote/ghosts/`). See DEVELOPMENT.md › Optional Runtime Flags.
+- **Performance** — `score_round()` now caches per-trick winners once instead of recomputing them in each boss-modifier helper (2-3× walks → 1× walk per round). `register_all_items()` is now idempotent so test setup no longer re-walks every items module per `BelAtroRun`. Bidding's special-bid path (TA / SA) hoists `_suit_lengths` out of the per-difficulty branches.
+- **Defensive pin** — every entry in `ALL_BOSS_MODIFIERS` is now asserted to actually toggle a `BossModifiers` field via `.flags()`. Catches typo'd `state.patch("_misspelled", True)` keys at test time rather than letting the boss silently no-op.
+- **Test coverage** — 510 tests (up from 509).
+
+## What's new in 3.0.1
+
+- **Bug fixes** — `play_card()` running total now honours `aces_zero` / `jacks_zero` (Le Sauvage / L'Iconoclaste); the screen-reader trick-winner pts are now boss-aware; the HUD synergy registry no longer references nonexistent joker IDs; the AI void-cache key is now reset across rounds.
+- **Test coverage** — 509 tests (up from 489): HOLO/POLYCHROME editions, multi-boss composition (`separate_scoring × zero-flag`), a11y boss-aware pts, synergy registry self-check.
+
+## What's new in 3.0.0
+
+- **Endless mode** — beat Ante 8 in BelAtro and the run offers a continuation: targets scale ×2.2 per ante and a furthest-ante leaderboard tracks how deep you go.
+- **Joker editions** — Foil (+50 chips), Holo (+10 mult), Polychrome (×1.5 mult), Negative (extra slot) randomly stamp shop jokers.
+- **Three new boss blinds** — Le Sauvage (Aces = 0), L'Iconoclaste (Jacks = 0, even trump-J), Le Mime (Declarations = 0).
+- **Achievements** — six classic-mode milestones tracked across sessions.
+- **Colorblind palette** + **screen-reader hints** (`BELOTE_A11Y=1`) for accessibility.
+- **Replay analyzer** — module added (post-round Hard-AI comparison). User-facing wiring landed in 3.0.2 behind `BELOTE_REPLAY=1`.
+- **Ghost run recording** + **run summary log** — modules added (serialize a run / append per-run JSON). Run-summary fires automatically; ghost-run user-facing wiring landed in 3.0.2 behind `BELOTE_GHOST=1`.
+- **Bug fixes** — Capot under Sans Atout / Tout Atout now uses the correct base (220 / 348, not 252); The Sun and Libra planets actually do something now; AI void inference no longer mis-flags voids under Le Républicain wild 7/8.
+
+## BelAtro Expansion
 
 **BelAtro** is a major roguelite expansion inspired by *Balatro*. Play through 8 Antes of escalating difficulty, build a deck of powerful Jokers, and use Tarot cards and Planets to break the game! 
 
@@ -224,7 +247,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **435 tests** passing with 100% coverage on core logic.
+Currently **510 tests** passing with 100% coverage on game-logic modules.
 
 ## Technical Integrity
 

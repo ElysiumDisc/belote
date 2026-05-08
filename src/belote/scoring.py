@@ -372,11 +372,48 @@ def _detect_all_declarations(
     return decls_per_seat
 
 
-def _calculate_base_points(state: GameState, trump: Suit | None) -> tuple[int, int]:
+def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
+    """Card-point sum for a single trick, applying boss zero-rank flags and
+    `ban_clubs`. Public helper so non-scoring callers (gameflow/a11y, HUD)
+    don't duplicate the flag table.
+
+    Returns 0 if the trick is empty. The dix-de-der bonus is NOT included
+    here — it's a per-round concept, not per-trick.
+    """
+    if not trick:
+        return 0
+    bm = state.boss_modifiers
+    if bm.ban_clubs and trick[0].card.suit == Suit.CLUBS:
+        return 0
+    total = 0
+    for tc in trick:
+        r = tc.card.rank
+        if (
+            (bm.kings_zero and r == Rank.KING)
+            or (bm.tens_zero and r == Rank.TEN)
+            or (bm.aces_zero and r == Rank.ACE)
+            or (bm.jacks_zero and r == Rank.JACK)
+        ):
+            continue
+        if bm.ban_clubs and tc.card.suit == Suit.CLUBS:
+            continue
+        total += card_points_fn(tc.card, state.trump, bm.seven_eight_trump)  # type: ignore[arg-type]
+    return total
+
+
+def _calculate_base_points(
+    state: GameState,
+    trump: Suit | None,
+    winners: list[Seat | None] | None = None,
+) -> tuple[int, int]:
     """Calculate raw card points per team, considering boss modifiers.
 
     `trump=None` is the Sans Atout case. `card_points(c, None)` already returns
     the SA non-trump scale, so the inner arithmetic is unchanged.
+
+    `winners`, when provided, must be aligned with ``state.completed_tricks``;
+    pre-computing it once in ``score_round`` avoids redoing the trick-winner
+    computation in the sibling helpers.
     """
     taker_team = team_of(state.taker) if state.taker is not None else 0
     taker_pts = 0
@@ -385,6 +422,8 @@ def _calculate_base_points(state: GameState, trump: Suit | None) -> tuple[int, i
 
     kings_zero = state.boss_modifiers.kings_zero
     tens_zero = state.boss_modifiers.tens_zero
+    aces_zero = state.boss_modifiers.aces_zero
+    jacks_zero = state.boss_modifiers.jacks_zero
     ban_clubs = state.boss_modifiers.ban_clubs
 
     def get_points(card: Card, t: Suit | None) -> int:
@@ -392,14 +431,23 @@ def _calculate_base_points(state: GameState, trump: Suit | None) -> tuple[int, i
             return 0
         if tens_zero and card.rank == Rank.TEN:
             return 0
+        if aces_zero and card.rank == Rank.ACE:
+            return 0
+        if jacks_zero and card.rank == Rank.JACK:
+            return 0
         if ban_clubs and card.suit == Suit.CLUBS:
             return 0
         return card_points_fn(card, t)  # type: ignore[arg-type]
 
-    for trick in state.completed_tricks:
-        winner = trick_winner_seat(
-            trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-        )
+    if winners is None:
+        winners = [
+            trick_winner_seat(
+                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+            )
+            for trick in state.completed_tricks
+        ]
+
+    for trick, winner in zip(state.completed_tricks, winners, strict=False):
         if winner is None:
             continue
 
@@ -417,13 +465,29 @@ def _calculate_base_points(state: GameState, trump: Suit | None) -> tuple[int, i
 
 
 def _apply_scoring_modifiers(
-    state: GameState, taker_pts: int, defender_pts: int
+    state: GameState,
+    taker_pts: int,
+    defender_pts: int,
+    winners: list[Seat | None] | None = None,
 ) -> tuple[int, int, list[str]]:
-    """Apply complex boss scoring modifiers (Compétition, Reine Noire)."""
+    """Apply complex boss scoring modifiers (Compétition, Reine Noire).
+
+    ``winners`` may be supplied by the caller to avoid re-running
+    ``trick_winner_seat`` for every completed trick — both modifier branches
+    iterate the same trick list as ``_calculate_base_points``.
+    """
     messages: list[str] = []
     trump = state.trump
     is_sa = state.contract == "sans_atout"
     taker_team = team_of(state.taker) if state.taker is not None else 0
+
+    if winners is None:
+        winners = [
+            trick_winner_seat(
+                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+            )
+            for trick in state.completed_tricks
+        ]
 
     # Boss: La Competition (Separate scoring) — applies under any active
     # contract, including Sans Atout (trump=None).
@@ -431,6 +495,8 @@ def _apply_scoring_modifiers(
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
         kings_zero = state.boss_modifiers.kings_zero
         tens_zero = state.boss_modifiers.tens_zero
+        aces_zero = state.boss_modifiers.aces_zero
+        jacks_zero = state.boss_modifiers.jacks_zero
         ban_clubs = state.boss_modifiers.ban_clubs
 
         def get_p(card: Card, t: Suit | None) -> int:
@@ -438,14 +504,15 @@ def _apply_scoring_modifiers(
                 return 0
             if tens_zero and card.rank == Rank.TEN:
                 return 0
+            if aces_zero and card.rank == Rank.ACE:
+                return 0
+            if jacks_zero and card.rank == Rank.JACK:
+                return 0
             if ban_clubs and card.suit == Suit.CLUBS:
                 return 0
             return card_points_fn(card, t)  # type: ignore[arg-type]
 
-        for trick in state.completed_tricks:
-            winner = trick_winner_seat(
-                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-            )
+        for trick, winner in zip(state.completed_tricks, winners, strict=False):
             if winner is None:
                 continue
             tp = 0 if (ban_clubs and trick[0].card.suit == Suit.CLUBS) else sum(get_p(tc.card, trump) for tc in trick)
@@ -466,10 +533,7 @@ def _apply_scoring_modifiers(
     # Boss: La Reine Noire (Queen of Spades penalty)
     if state.boss_modifiers.queen_spades_penalty:
         qs = Card(Suit.SPADES, Rank.QUEEN)
-        for trick in state.completed_tricks:
-            winner = trick_winner_seat(
-                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-            )
+        for trick, winner in zip(state.completed_tricks, winners, strict=False):
             if winner is not None and any(tc.card == qs for tc in trick):
                 if team_of(winner) == taker_team:
                     taker_pts -= 25
@@ -512,8 +576,19 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_team = team_of(state.taker)
     defender_team = 1 - taker_team
 
+    # Pre-compute the winner of each completed trick once. Both base-points
+    # and the boss modifier helpers iterate the same list — without this the
+    # 8-trick walk runs 2-3× per round in the long run.
+    is_sa = state.contract == "sans_atout"
+    winners: list[Seat | None] = [
+        trick_winner_seat(
+            trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
+        )
+        for trick in state.completed_tricks
+    ]
+
     # 1. Base Card Points
-    taker_card_pts, defender_card_pts = _calculate_base_points(state, trump)
+    taker_card_pts, defender_card_pts = _calculate_base_points(state, trump, winners)
 
     # 2. Last trick bonus
     last_trick_winner = state.last_trick_winner
@@ -527,7 +602,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
 
     # 3. Apply complex scoring modifiers
     taker_card_pts, defender_card_pts, messages = _apply_scoring_modifiers(
-        state, taker_card_pts, defender_card_pts
+        state, taker_card_pts, defender_card_pts, winners
     )
 
     # 4. Detect declarations from stored initial hands
@@ -584,6 +659,11 @@ def score_round(state: GameState) -> ScoringBreakdown:
         taker_declarations *= 2
         defender_declarations *= 2
 
+    # 3.0.0 Le Mime boss: all declaration points zeroed for the round.
+    if state.boss_modifiers.declarations_zero:
+        taker_declarations = 0
+        defender_declarations = 0
+
     # Check capot
     capot_winner_team = is_capot(state)
 
@@ -599,9 +679,24 @@ def score_round(state: GameState) -> ScoringBreakdown:
 
     if capot_winner_team is not None:
         messages.append("Capot!")
+        # Capot base scales by contract: SA → 220, TA → 348, normal → 252.
+        if state.contract == "sans_atout":
+            capot_base = GLOBAL_CONFIG.CAPOT_BASE_SANS_ATOUT
+            # Belote/Rebelote requires a unique trump suit (K+Q of trump).
+            # Under Sans Atout there is no trump, so neither side can ever
+            # have earned belote points — pin the invariant so a future
+            # bug that leaks belote points into SA scoring fails loud.
+            assert taker_belote == 0 and defender_belote == 0, (
+                f"Sans Atout cannot have belote points "
+                f"(taker={taker_belote}, defender={defender_belote})"
+            )
+        elif state.contract == "tout_atout":
+            capot_base = GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT
+        else:
+            capot_base = GLOBAL_CONFIG.CAPOT_BASE
         if capot_winner_team == taker_team:
             taker_total = (
-                GLOBAL_CONFIG.CAPOT_BASE
+                capot_base
                 + taker_declarations
                 + defender_declarations
                 + taker_belote
@@ -611,7 +706,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
         else:
             is_failed = True
             defender_total = (
-                GLOBAL_CONFIG.CAPOT_BASE
+                capot_base
                 + defender_declarations
                 + taker_declarations
                 + defender_belote
@@ -770,22 +865,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 1
     ) if ew_decl_total > 0 else ()
 
-    common_kwargs = dict(
-        is_failed=breakdown.is_failed,
-        is_capot=breakdown.is_capot,
-        is_litige=breakdown.is_litige,
-        litige_points=breakdown.litige_points_awarded,
-        contract=state.contract,
-        trump=state.trump,
-        taker_seat=state.taker,
-        tricks_ns=tricks_ns,
-        tricks_ew=tricks_ew,
-        last_trick_winner=state.last_trick_winner,
-        decl_summary_ns=ns_decls,
-        decl_summary_ew=ew_decls,
-    )
-
-    # Create RoundScore for history
+    # Create RoundScore for history. Inlined kwargs (rather than splatting a
+    # dict) so mypy can validate each field's type per-call.
     if breakdown.taker_team == 0:
         round_score = RoundScore(
             taker_team=0,
@@ -799,7 +880,18 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_rebelote=breakdown.defender_rebelote,
             ns_total=breakdown.taker_total,
             ew_total=breakdown.defender_total,
-            **common_kwargs,
+            is_failed=breakdown.is_failed,
+            is_capot=breakdown.is_capot,
+            is_litige=breakdown.is_litige,
+            litige_points=breakdown.litige_points_awarded,
+            contract=state.contract,
+            trump=state.trump,
+            taker_seat=state.taker,
+            tricks_ns=tricks_ns,
+            tricks_ew=tricks_ew,
+            last_trick_winner=state.last_trick_winner,
+            decl_summary_ns=ns_decls,
+            decl_summary_ew=ew_decls,
         )
     else:
         round_score = RoundScore(
@@ -814,7 +906,18 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
             ew_rebelote=breakdown.taker_rebelote,
             ns_total=breakdown.defender_total,
             ew_total=breakdown.taker_total,
-            **common_kwargs,
+            is_failed=breakdown.is_failed,
+            is_capot=breakdown.is_capot,
+            is_litige=breakdown.is_litige,
+            litige_points=breakdown.litige_points_awarded,
+            contract=state.contract,
+            trump=state.trump,
+            taker_seat=state.taker,
+            tricks_ns=tricks_ns,
+            tricks_ew=tricks_ew,
+            last_trick_winner=state.last_trick_winner,
+            decl_summary_ns=ns_decls,
+            decl_summary_ew=ew_decls,
         )
 
     new_history = state.score_history + (round_score,)

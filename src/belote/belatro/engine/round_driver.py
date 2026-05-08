@@ -33,6 +33,7 @@ from .event_bus import (
 
 if TYPE_CHECKING:
     from ..core.scoring import ScoreAccumulator
+    from ..ghost_run import GhostRecorder
     from ..partner.partner_state import PartnerState
     from ..run.boss import BossModifier
 
@@ -72,6 +73,7 @@ def drive_round(
     target_score: int = 0,
     seed: int | None = None,
     card_enhancements: dict[str, object] | None = None,
+    recorder: GhostRecorder | None = None,
 ) -> GameState:
     """
     Core engine loop for a single round in BelAtro.
@@ -194,6 +196,12 @@ def drive_round(
             ),
             state
         )
+        if recorder is not None:
+            recorder.note_bid(
+                seat=bidder.name.lower(),
+                trump=state.trump.name.lower() if state.trump is not None else None,
+                contract=state.contract or "normal",
+            )
 
     # ── Coinche / surcoinche player flow ─────────────────────────────────
     # If a taker emerged on the opposing (EW) team, give the player a chance
@@ -282,6 +290,16 @@ def drive_round(
 
         state = play_card(state, card)
         ui_callbacks.on_card_played(state, player, card)
+        if recorder is not None:
+            # If the 4th card just closed the trick, completed_tricks already
+            # includes it; otherwise we're mid-trick and the in-progress trick
+            # number is one past the completed count.
+            trick_no = (
+                len(state.completed_tricks)
+                if not state.current_trick
+                else len(state.completed_tricks) + 1
+            )
+            recorder.note_play(trick=trick_no, seat=player.name.lower(), card=str(card))
 
         # If this play flipped the belote tracker, emit the announce event.
         # belote_tracker = (belote_played, rebelote_played); compare old vs new.
@@ -363,6 +381,14 @@ def drive_round(
             ),
             state
         )
+        if recorder is not None:
+            recorder.note_round_end({
+                "taker_team": breakdown.taker_team,
+                "taker_total": breakdown.taker_total,
+                "defender_total": breakdown.defender_total,
+                "is_capot": breakdown.is_capot,
+                "is_failed": breakdown.is_failed,
+            })
         ui_callbacks.on_round_end(breakdown)
 
     return state

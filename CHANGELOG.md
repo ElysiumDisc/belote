@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.2] - 2026-05-08
+
+Audit pass — wired two previously-dead 3.0.0 modules behind opt-in env vars, removed redundant work from `score_round()`, and pinned every boss modifier's patch keys against typo regressions.
+
+### Fixed
+
+- **`src/belote/belatro/main.py` + `src/belote/belatro/engine/round_driver.py`** — `GhostRecorder` (`src/belote/belatro/ghost_run.py`) was imported nowhere outside its own tests since it shipped in 3.0.0; ghost recording silently never happened. Wired through `drive_round()` via a new optional `recorder` param so bids, plays, and round-end breakdowns are now captured. Gated on `BELOTE_GHOST=1` so default play is unchanged. Saves to `~/.local/share/belote/ghosts/<label>-<seed>.json` on run end.
+- **`src/belote/gameflow.py`** — `replay.analyze_round()` / `summarize()` (`src/belote/replay.py`) was never called from any runtime path since it shipped in 3.0.0; the post-round Hard-AI comparison the README advertised silently never fired. `run_play()` now optionally accumulates `(state, played_card)` pairs for South; `run_round()` reads `BELOTE_REPLAY=1` once per round, runs the analyzer post-scoring, and prints a one-line `Replay: Optimal plays: N/M (P%)` summary. UNDO clears the buffer so the report matches the play that actually finished the round.
+
+### Improved
+
+- **`src/belote/scoring.py::score_round`** — pre-computes the per-trick winner list once at the top and threads it into `_calculate_base_points` and `_apply_scoring_modifiers`. Both helpers used to re-call `trick_winner_seat()` for every completed trick; under `separate_scoring` + `queen_spades_penalty` the 8-trick walk could run 3× per round.
+- **`src/belote/belatro/items/registry.py::register_all_items`** — now idempotent. A module-level `_registered` flag short-circuits subsequent calls; second clause `and registry.jokers` re-runs when a caller has swapped the global to a fresh empty `ItemRegistry` (the test-suite pattern at `tests/belatro/test_belatro.py::TestItemRegistry.setup_method`). Saves the 4× `dir(mod)` walk on every `BelAtroRun` after the first.
+- **`src/belote/ai.py::_special_bid`** — `_suit_lengths(hand)` is now computed once and threaded into `_easy_special` / `_medium_special` / `_hard_special`. The three branches each used to rebuild it from scratch.
+
+### Added
+
+- **`tests/belatro/test_phase0_coverage.py::test_every_boss_modifier_actually_patches_a_flag`** — pin against a typo'd `state.patch("_misspelled", True)` key silently producing a no-op boss. Iterates `ALL_BOSS_MODIFIERS`, asserts each `.flags()` differs from default `BossModifiers()`. The `boss_fields` allow-list in `engine/modifier_patch.py` is now load-bearing for correctness — this test surfaces drift.
+- **`DEVELOPMENT.md`** — new "Optional Runtime Flags" section documenting `BELOTE_REPLAY` and `BELOTE_GHOST` next to the existing `BELOTE_A11Y` entry.
+
+### Internal
+
+- **Tests**: 509 → 510 (+1).
+- **Strict gates**: pytest 510/510, mypy 0 errors, ruff 0 violations.
+
+### Known issue (not fixed in this cut)
+
+- `src/belote/belatro/engine/event_bus.py::EventBus.emit` is never called anywhere in the source. `unlock_tracker.subscribe_to(bus)` registers `on_event` but receives no events, so `_handle_round_end`'s unlocks for **L'Exécuteur** (first Capot), **L'Idéologue** (Sans Atout NS win), and **Le Fanatique** (Tout Atout NS win) silently never fire under normal play. Out of scope for 3.0.2 (fix would change ordering with `acc.update_state` in `round_driver._emit`); flagged for a follow-up.
+
+## [3.0.1] - 2026-05-07
+
+Post-3.0.0 audit pass — four player-visible / correctness bugs introduced or missed by the 3.0.0 cut, plus a batch of test-coverage and small-correctness improvements. No behaviour changes for code paths that were already correct.
+
+### Fixed
+
+- **`src/belote/game.py:860-873`** — `play_card()`'s per-trick running total honoured `kings_zero` and `tens_zero` but ignored the new 3.0.0 `aces_zero` and `jacks_zero` flags. Final scoring (`scoring.py::_calculate_base_points`) was correct, but the live HUD running total under Le Sauvage / L'Iconoclaste was wrong until the round ended. Mirrored the canonical `scoring.py` zero-rank pattern; `bm` aliased once for readability.
+- **`src/belote/belatro/ui/hud.py::_SYNERGY_PAIRS`** — referenced four joker IDs (`le_finisseur`, `le_dix_de_der`, `le_marseillais`, `carre_aces_x2`) that don't exist in the registry. Two of the four pairs were dead code that could never fire. Removed; `validate_synergy_ids()` now exposes a self-check, and `register_all_items()` asserts every synergy ID resolves so future typos surface at import time.
+- **`src/belote/gameflow.py:248-258`** — the a11y trick-winner announcement used raw `card_points()` and ignored every boss zero-rank flag, so screen-reader users heard inflated trick scores under Le Sauvage / L'Iconoclaste / Le Roi Mort / Les Dix Maudits / Les Clubs Bannis. New canonical helper `scoring.trick_card_points(state, trick)` is now the single source of truth for per-trick boss-aware totals.
+- **`src/belote/ai.py::AIMemory.last_voids_key`** — the new-round reset in `update_memory()` cleared `played`, `known_voids`, and `processed_tricks_count` but not the cache key. After the prior round's final key (e.g. `(7, 4)`), a fresh-round `(0, 0)` or `(0, 1)` could coincidentally match a key seen during round 1 and cause `_update_voids` to skip processing. Added `last_voids_key = None` to the reset.
+
+### Added
+
+- **`src/belote/scoring.py::trick_card_points`** — public helper for "card-point sum of one trick under all active boss zero-rank flags." Used by gameflow's a11y hook.
+- **`src/belote/belatro/ui/hud.py::validate_synergy_ids`** — return the synergy IDs that aren't registered as jokers. Used by `register_all_items()` for the new startup self-check.
+- **Tests**: `tests/test_a11y.py` (8 cases for `trick_card_points` + a11y stderr emit), `tests/belatro/test_hud_synergy.py` (5 cases for the synergy registry), HOLO/POLYCHROME edition tests + four `separate_scoring × zero-flag` composition tests in `tests/belatro/test_dead_flag_fixes.py`, cross-round void-cache regression test in `tests/test_ai.py`. Tests grew 489 → 509 (+20).
+
+### Improved
+
+- **`src/belote/belatro/run_summary.py`** — resolved path is cached at module level after the first call, so `mkdir` is no longer re-attempted on every BelAtro exit.
+- **`src/belote/a11y.py`** — `BELOTE_A11Y` env var resolved once at module import (`_ENABLED` module variable). Tests use `_refresh_enabled_from_env()` to re-read after `monkeypatch.setenv`. Saves ~30 environ lookups per round in the disabled path.
+- **`src/belote/scoring.py:649-668`** — Sans Atout Capot branch now asserts `taker_belote == 0 and defender_belote == 0`. Belote/Rebelote requires a unique trump suit, so this invariant should always hold under SA — the assertion documents it and surfaces any future regression that leaks belote points into the SA path.
+- **`src/belote/belatro/run/boss.py::LeMime`** — docstring notes the redundancy between `declarations_zero` and `separate_scoring` and points to the regression test that pins their composition.
+
+### Internal
+
+- **Tests**: 489 → 509 (+20). All new modules covered: a11y boss-aware pts (8), HUD synergy registry (5), HOLO/POLYCHROME editions (2), separate_scoring × zero-flag matrix (4), cross-round void cache (1).
+- **Strict gates**: pytest 509/509, mypy 0 errors, ruff 0 violations.
+- **Perf baseline**: unchanged from 3.0.0 (sub-millisecond throughout).
+
+## [3.0.0] - 2026-05-07
+
+Bug-hunt + audit pass — three player-visible features that were registered but silently no-ops are now wired, the Capot scoring under Sans Atout / Tout Atout has been corrected, mypy is once again strict-clean, and a batch of P3 features lands behind the new BelAtro Endless mode flow.
+
+### Fixed
+
+- **`src/belote/scoring.py::score_round`** — Capot reward used a flat `CAPOT_BASE = 252` for every contract, over-paying SA Capots (252 vs the contract-correct 220) and under-paying TA Capots (252 vs 348). New `CAPOT_BASE_SANS_ATOUT = 220` and `CAPOT_BASE_TOUT_ATOUT = 348` constants in `config.py`; scoring now branches on `state.contract`. `tests/test_belote.py::TestCapotPerContract` covers all three contracts; `tests/test_official_rules.py::test_sans_atout_score_round_baseline` updated from 252 → 220.
+- **`src/belote/belatro/items/planets.py::TheSun`** — `level_up_reward()` returned `{"bonus_mult_per_trick": 1.0}` but no consumer ever read the key. Wired into `belatro/core/scoring.py::ScoreAccumulator` on `TrickWonEvent` when `event.trump == Suit.TOUT_ATOUT and event.trick_number > 4`.
+- **`src/belote/belatro/items/planets.py::Libra`** — `coinche_multiplier` was set on the contract level but never read. Now consumed at `RoundEndEvent` time, scaled by `event.coinche_level`, and gated on the round being a non-failed taker win for NS.
+- **`src/belote/scoring.py`** — `RoundScore` was constructed via `**common_kwargs` splat; mypy lost the per-field types and reported 8 errors. Inlined into both branches.
+- **`src/belote/ui/render.py::_slot_frame_row`** — variable shadowing (`for c in range(...)` then `for c in cells`) made mypy infer `cells[i]` as `int`. Renamed the inner loop variables (`c → i`, `c → cell`).
+- **`src/belote/ui/prompts.py`** — three untyped helpers (`_hist_taker_label`, `_hist_contract_label`, `_hist_status`) now annotated with `RoundScore`.
+- **`src/belote/ui/prompts.py::show_history`** — N806 lint on `W_RD/W_TKR/...` constants resolved by lowercasing the locals; behaviour unchanged.
+- **`src/belote/ai.py::_process_trick_voids`** — under the `republicain_wild` flag (Le Républicain deck / boss reuse), playing a 7 or 8 off-suit no longer falsely flags the player as void in the lead suit. Hard AI's void inference now skips wild ranks when the flag is active.
+
+### Added
+
+- **`src/belote/belatro/main.py`** — post-Ante-8 endless prompt. After winning Ante 8, the run offers `Continue into Endless Mode? (Ante 9+ scales ×2.2)`. Built on the existing `BelAtroRun.endless` / `endless_ante_offset` infrastructure plus a new `BelAtroAnnounce.yes_no` helper.
+- **`src/belote/belatro/items/base.py::Edition`** — new enum (NONE/FOIL/HOLO/POLYCHROME/NEGATIVE). Shop generation rolls per-joker editions; Foil adds +50 chips per trigger, Holo +10 mult, Polychrome ×1.5 mult, Negative grants an extra joker slot at purchase. Wiring lives in `belatro/run/shop.py` and `belatro/core/scoring.py::_apply_edition`.
+- **`src/belote/belatro/run/boss.py`** — three new boss blinds (Le Sauvage / L'Iconoclaste / Le Mime) and three new `BossModifiers` flags (`aces_zero`, `jacks_zero`, `declarations_zero`) read by the existing scoring path.
+- **`src/belote/belatro/ui/hud.py::detect_synergies`** — small registry of known joker pair combos; renders a `★ SYN×N` badge on the HUD when any pair (or 3+ jokers) is held.
+- **`src/belote/achievements.py`** + **`src/belote/stats.py::Statistics.achievements`** — six classic-mode achievements (first Capot, 3 Capots in a session, 2 Capot streak, 300+ point round, hard win, ten games played) auto-evaluated post-round / post-game.
+- **`src/belote/themes.py::THEMES["colorblind"]`** — deuteranopia/protanopia-friendly palette using blue/cyan/orange instead of red/green.
+- **`src/belote/a11y.py`** — screen-reader hints. Cards played, trick winners, and round results emit one-line plain-text descriptions to stderr when the env var `BELOTE_A11Y=1` is set.
+- **`src/belote/replay.py`** — `analyze_round()` runs the just-played decisions through the Hard AI and reports per-decision agreement; `summarize()` produces a one-line `Optimal: N/M (X%)` string.
+- **`src/belote/belatro/ghost_run.py`** — `GhostRecorder` accumulates seed + bid + play events and serializes them to JSONL under the user data dir. Foundation for a future ghost-replay viewer; the JSON format is versioned (v1).
+- **`src/belote/belatro/run_summary.py`** — appends a one-line per-run summary (deck, ante, jokers, won) to `~/.local/share/belote/run_history.jsonl` on BelAtro exit. Best-effort, OSError-swallowed.
+- **`src/belote/gameflow.py::show_hand_preview`** — short `Dealing…` flourish before the hand preview, gated on the existing speed setting and skippable via Space/Esc.
+
+### Improved
+
+- **`src/belote/ansi.py`** — 16 palette accessors (`felt_bg()`, `red_fg()`, …) previously hit `theme_manager.get_current()` per call. Cached the active `Theme` at module level and registered an invalidation callback with `theme_manager`. Lower per-render dict-lookup overhead.
+- **`src/belote/themes.py::ThemeManager`** — redundant class-level `_current_theme_name` removed; new public `current_name` property; `_initialized` guard now uses `getattr` for clarity. Eight call sites in `ui/menu.py`, `ui/prompts.py`, and `ui/render.py` migrated off `_current_theme_name`.
+- **`src/belote/ui/render.py`** — `_LAST_RENDER_KEY` list-of-one singleton replaced with a module-level variable + `global` declaration; same behaviour, less Python idiom drag.
+- **`src/belote/ai.py::AIMemory.last_voids_key`** — caches `(completed_count, current_trick_len)` so `_update_voids` short-circuits on repeat calls within the same trick decision (lookahead exploration triggered redundant scans).
+
+### Internal
+
+- **Performance baseline (post-fix)**: `scripts/benchmark.py` reports render 0.271ms (±0.044), AI Easy/Med/Hard 0.015 / 0.030 / 0.026 ms, BelAtro update 0.032 ms, scoring 0.169 ms, deal 0.071 ms, legal_cards 0.012 ms.
+- **Tests**: 446 → 489 (+43). New files: `tests/test_ansi_helpers.py`, `tests/test_achievements.py`, `tests/test_replay.py`, `tests/belatro/test_ghost_run.py`. Existing files extended with Capot-per-contract, Sun/Libra wiring, TA→le_fanatique unlock, republicain-void edge case, and three new boss tests.
+- **Strict mode**: README's "0 mypy errors / 0 ruff violations" claim was inaccurate at 2.9.5 (18 mypy + 10 ruff at audit time). Both gates are now actually clean.
+
 ## [2.9.5] - 2026-05-07
 
 In-game keyboard shortcuts cleaned up, the trick mat now anchors every played card inside a visible per-seat slot, the round history overlay carries the full per-round picture, and the cards have been redrawn in a GRIMAUD-1898 style with both-corner indices and patterned pip layouts.

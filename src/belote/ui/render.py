@@ -59,7 +59,7 @@ SIDE_COL_W = STANDARD.side_col_w
 # Tracks the (term_w, term_h, layout.name) of the previous render so we can
 # clear the screen when the layout flavour changes (avoids stale artifacts
 # from a previous larger layout staying drawn under a now-compact one).
-_LAST_RENDER_KEY: list[tuple[int, int, str] | None] = [None]
+_last_render_key: tuple[int, int, str] | None = None
 
 
 def _trick_row_offsets(layout: LayoutPreset) -> dict[Seat, int]:
@@ -282,7 +282,7 @@ def _get_card_face(
         card,
         selected,
         legal,
-        theme_manager._current_theme_name,
+        theme_manager.current_name,
         TERMINAL.has_utf8,
         layout.card_w,
         layout.card_h,
@@ -322,7 +322,7 @@ def _card_back(theme_name: str, has_utf8: bool, card_w: int, card_h: int) -> lis
 
 def _get_card_back(layout: LayoutPreset = STANDARD) -> list[str]:
     return _card_back(
-        theme_manager._current_theme_name, TERMINAL.has_utf8, layout.card_w, layout.card_h
+        theme_manager.current_name, TERMINAL.has_utf8, layout.card_w, layout.card_h
     )
 
 
@@ -338,7 +338,7 @@ def _felt_blank_internal(width: int, theme_name: str) -> str:
 
 
 def _get_felt_blank(width: int) -> str:
-    return _felt_blank_internal(width, theme_manager._current_theme_name)
+    return _felt_blank_internal(width, theme_manager.current_name)
 
 
 def _felt_pad(content: str, width: int) -> str:
@@ -384,13 +384,13 @@ def _slot_frame_row(center_w: int, layout: LayoutPreset, segments: tuple[str, ..
     seg_starts = {"N": n_s_start, "S": n_s_start, "W": w_start, "E": e_start}
     for seg in segments:
         start = seg_starts[seg]
-        for c in range(start, min(center_w, start + cw)):
-            cells[c] = h_char
+        for i in range(start, min(center_w, start + cw)):
+            cells[i] = h_char
 
     out = [felt_bg()]
     in_frame = False
-    for c in cells:
-        is_frame = c == h_char
+    for cell in cells:
+        is_frame = cell == h_char
         if is_frame and not in_frame:
             out.append(dim)
             in_frame = True
@@ -398,7 +398,7 @@ def _slot_frame_row(center_w: int, layout: LayoutPreset, segments: tuple[str, ..
             out.append(RESET)
             out.append(felt_bg())
             in_frame = False
-        out.append(c)
+        out.append(cell)
     out.append(RESET)
     return "".join(out)
 
@@ -796,11 +796,12 @@ def render(
 
     # If the size or layout flavour changed since the last render, prefix a
     # full screen clear so we don't leak artifacts from the previous layout.
+    global _last_render_key
     key = (term_w, term_h, layout.name)
     prefix_clear = ""
-    if _LAST_RENDER_KEY[0] is not None and _LAST_RENDER_KEY[0] != key:
+    if _last_render_key is not None and _last_render_key != key:
         prefix_clear = _clear_screen()
-    _LAST_RENDER_KEY[0] = key
+    _last_render_key = key
 
     out = prefix_clear + move(1, 1) + hide_cursor()
     legal: tuple[Card, ...] = ()

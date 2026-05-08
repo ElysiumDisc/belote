@@ -95,6 +95,20 @@ class ScoreAccumulator:
                 new_money += result.add_money
                 self._log.append(f"{source}: +${result.add_money}")
 
+        def _apply_edition(joker: Any) -> None:
+            """3.0.0: Foil/Holo/Polychrome ride along with each successful
+            joker trigger. Imported lazily to avoid a circular import via
+            base.py at module load."""
+            from ..items.base import Edition, JokerResult
+
+            ed = getattr(joker, "edition", Edition.NONE)
+            if ed == Edition.FOIL:
+                _apply(JokerResult(add_chips=50), source=f"{joker.name} (Foil)")
+            elif ed == Edition.HOLO:
+                _apply(JokerResult(add_mult=10.0), source=f"{joker.name} (Holo)")
+            elif ed == Edition.POLYCHROME:
+                _apply(JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)")
+
         def _fire_jokers(method_name: str, event_obj: Any) -> None:
             for joker in self._jokers:
                 method = getattr(joker, method_name, None)
@@ -102,6 +116,7 @@ class ScoreAccumulator:
                     result = method(event_obj, joker_state)
                     if result:
                         _apply(result, source=joker.name)
+                        _apply_edition(joker)
                         # Phase 2.3: partner-joker tier scaling.
                         # tier 0 (degraded) / 1 (base) → just the baseline apply.
                         # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect),
@@ -163,6 +178,15 @@ class ScoreAccumulator:
                         if honors:
                             new_chips += honors * honor_bonus
                             self._log.append(f"La Lune: +{honors * honor_bonus} chips (honors)")
+                # The Sun (Tout Atout): +X Mult per trick beyond the 4th
+                if event.trump == Suit.TOUT_ATOUT and event.trick_number > 4:
+                    sun_reward = self.contract_levels.get("tout_atout", {})
+                    sun_mult = sun_reward.get("bonus_mult_per_trick", 0)
+                    if sun_mult:
+                        new_mult += sun_mult
+                        self._log.append(
+                            f"Le Soleil: +{sun_mult} Mult (trick #{event.trick_number})"
+                        )
 
             # Fire all Joker triggers
             _fire_jokers("on_trick_won", event)
@@ -189,6 +213,20 @@ class ScoreAccumulator:
                     if pluto_reward.get("capot_bonus"):
                         new_chips += pluto_reward["capot_bonus"]
                         self._log.append(f"Pluton: +{pluto_reward['capot_bonus']} chips (capot)")
+                # Libra (Coinche): +X Mult per coinche level on success
+                if (
+                    event.coinche_level > 0
+                    and event.taker_seat in _NS_TEAM
+                    and not getattr(event.breakdown, "is_failed", False)
+                ):
+                    libra_reward = self.contract_levels.get("coinche", {})
+                    libra_mult = libra_reward.get("coinche_multiplier", 0)
+                    if libra_mult:
+                        bonus = libra_mult * event.coinche_level
+                        new_mult += bonus
+                        self._log.append(
+                            f"Balance: +{bonus} Mult (coinche×{event.coinche_level})"
+                        )
             _fire_jokers("on_round_end", event)
 
         elif isinstance(event, BidMadeEvent):

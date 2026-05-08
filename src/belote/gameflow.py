@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import random
 import sys
 from dataclasses import replace
 
+from . import a11y
 from .ai import AIPlayer, Difficulty
 from .ansi import (
     BOLD,
@@ -48,7 +50,6 @@ from .ui import (
     prompt_bid,
     prompt_card,
 )
-
 
 # Minimum time the four cards stay on the mat before a trick clears. This
 # applies even when the user has skipped earlier animations (so a fast-paced
@@ -135,6 +136,7 @@ def run_play(
     ai_delay: float,
     trick_pause: float,
     history: list[GameState],
+    replay_decisions: list[tuple[GameState, Card]] | None = None,
 ) -> GameState | str | None:
     """Run the play phase (all 8 tricks). Returns None if user quits, 'UNDO' if requested."""
     current = state
@@ -145,6 +147,7 @@ def run_play(
         if player == Seat.SOUTH:
             skip_anims = False  # M6: Reset skip flag when it's the human's turn
             display(current, None)
+            state_before_south = current
             card, current = prompt_card(current, reader)
             if card is None:
                 return None
@@ -155,6 +158,8 @@ def run_play(
                 continue
             if not isinstance(card, Card):
                 return "UNDO"
+            if replay_decisions is not None:
+                replay_decisions.append((state_before_south, card))
         else:
             ai = ai_players[player]
             ai.update_memory(current)
@@ -242,7 +247,21 @@ def run_play(
 
         # 4. Transition to next state
         history.append(current)
+        a11y.announce_play(current.turn, card)
+        prior_completed = len(current.completed_tricks)
         current = play_card(current, card)
+        # If a trick just closed, emit a11y hint for the winner. The pts use
+        # the canonical scoring helper so boss zero-rank flags (Le Sauvage,
+        # L'Iconoclaste, Le Roi Mort, Les Dix Maudits, Les Clubs Bannis)
+        # are honoured — the screen-reader hears the same number the HUD
+        # eventually shows.
+        if (
+            len(current.completed_tricks) > prior_completed
+            and current.last_trick_winner is not None
+        ):
+            from .scoring import trick_card_points as _trick_pts
+            pts = _trick_pts(current, current.completed_tricks[-1])
+            a11y.announce_trick_won(current.last_trick_winner, pts)
 
         if current.announced:
             if "Belote" in current.announced:
@@ -271,6 +290,11 @@ def show_hand_preview(state: GameState, reader: KeyReader) -> None:
 
     pts = get_declaration_points(decls)
 
+    # 3.0.0: brief deal-flourish announcement before the hand preview, so
+    # the deal feels present rather than instant. The duration is short and
+    # piggy-backs on the existing speed system via `announce()`'s reader
+    # interrupt — pressing Space/Esc skips it just like other cutscene beats.
+    announce("Dealing…", duration=0.4, reader=reader)
     display(state, None)
     if pts > 0:
         announce(f"Estimated declarations: {pts} pts", duration=1.5, reader=reader)
@@ -294,6 +318,12 @@ def run_round(
         rng = random.Random()
     current = start_round(state, rng)
     stack_base = len(history_stack)  # mark start of this round in the shared stack
+    # 3.0.0: Opt-in post-round replay analysis. Read the env var once per round
+    # — toggling mid-round has no effect, and we avoid touching os.environ in
+    # the per-card hot path. None disables capture entirely.
+    replay_decisions: list[tuple[GameState, Card]] | None = (
+        [] if os.environ.get("BELOTE_REPLAY") else None
+    )
 
     # Pre-game hand preview
     show_hand_preview(current, reader)
@@ -322,11 +352,18 @@ def run_round(
             return current
 
         # Play Phase
-        res_play = run_play(current, reader, ai_players, ai_delay, trick_pause, history_stack)
+        res_play = run_play(
+            current, reader, ai_players, ai_delay, trick_pause, history_stack,
+            replay_decisions=replay_decisions,
+        )
         if res_play is None:
             return None
         if res_play == "UNDO":
             clear_legal_cards_cache()
+            # Drop captured decisions so the replay matches the play that
+            # actually finished the round, not the rewound branch.
+            if replay_decisions is not None:
+                replay_decisions.clear()
             if len(history_stack) > stack_base:
                 current = history_stack.pop()
                 # If we undo into BIDDING, we continue the outer loop
@@ -358,6 +395,10 @@ def run_round(
             )
             sys.stdout.write(f"  Team NS: {ns_pts} points\r\n")
             sys.stdout.write(f"  Team EW: {ew_pts} points\r\n")
+            if replay_decisions:
+                from .replay import analyze_round, summarize
+                reports = analyze_round(replay_decisions)
+                sys.stdout.write(f"  Replay: {summarize(reports)}\r\n")
             sys.stdout.write(f"{'=' * 50}\r\n\r\n")
             sys.stdout.flush()
 

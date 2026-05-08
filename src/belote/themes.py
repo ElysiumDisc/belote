@@ -143,12 +143,38 @@ THEMES: dict[str, Theme] = {
         menu_art_fg=(255, 255, 255),
         menu_border_fg=(255, 255, 255),
     ),
+    # 3.0.0: colorblind-friendly palette (deuteranopia/protanopia-safe).
+    # Uses blue/orange/yellow/cyan instead of red/green for the suit-card
+    # contrast. Pair with shape glyphs in render.py if more disambiguation
+    # is needed downstream.
+    "colorblind": Theme(
+        name="Colorblind",
+        felt_bg=(40, 40, 50),
+        card_face_bg=(245, 240, 220),
+        face_card_bg=(245, 240, 220),
+        card_back_bg=(50, 80, 150),
+        highlight_bg=(255, 200, 0),  # orange highlight
+        red_fg=(0, 100, 200),         # blue replaces red for ♥/♦
+        black_fg=(20, 20, 20),
+        white_fg=(245, 245, 240),
+        gold_fg=(255, 200, 0),
+        light_gray_fg=(160, 160, 160),
+        green_fg=(0, 150, 200),       # cyan instead of green
+        banner_bg=(50, 50, 80),
+        banner_fg=(255, 200, 0),
+        felt_placeholder_fg=(80, 80, 100),
+        menu_art_fg=(255, 200, 0),
+        menu_border_fg=(0, 150, 200),
+    ),
 }
 
 
 class ThemeManager:
+    """Process-wide theme state. The module-level `theme_manager` instance is
+    the singleton; constructing `ThemeManager()` again returns the same object.
+    """
+
     _instance: ThemeManager | None = None
-    _current_theme_name: str = "classic_green"
 
     def __new__(cls) -> ThemeManager:
         if cls._instance is None:
@@ -156,12 +182,19 @@ class ThemeManager:
         return cls._instance
 
     def __init__(self) -> None:
-        if hasattr(self, "_initialized"):
+        # Re-construction returns the singleton (see __new__) but __init__
+        # still runs on every call. Guard the actual setup.
+        if getattr(self, "_initialized", False):
             return
         self._initialized = True
         self._current_theme_name: str = "classic_green"
         self._on_change_callbacks: list[Callable[[], None]] = []
         self.load_selection()
+
+    @property
+    def current_name(self) -> str:
+        """Public read-only accessor for the active theme's key in THEMES."""
+        return self._current_theme_name
 
     def register_callback(self, callback: Callable[[], None]) -> None:
         """Register a callback to be executed when the theme changes."""

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..input import KeyReader
+    from .ghost_run import GhostRecorder
 
 from .core.run_state import BelAtroRun
 from .core.scoring import ScoreAccumulator
@@ -23,12 +24,18 @@ from .ui.shop import ShopScreen
 
 class BelAtroGame:
     def __init__(self) -> None:
+        import os
+
         register_all_items()
         self.save_manager = SaveManager()
         self.profile = self.save_manager.load_profile()
         self.unlock_tracker = UnlockTracker(self.profile, self.save_manager)
         self.run: BelAtroRun | None = None
         self.reader: KeyReader | None = None
+        # Opt-in feature flags read once at construction time so toggling the
+        # env mid-run has no effect (matches the BELOTE_A11Y pattern).
+        self._ghost_enabled = bool(os.environ.get("BELOTE_GHOST"))
+        self._ghost_recorder: GhostRecorder | None = None
 
     def start(self, reader: KeyReader) -> None:
         # Caller owns the alt-screen / cursor state. We just clear and run.
@@ -48,10 +55,25 @@ class BelAtroGame:
 
             if self.run:
                 self.save_manager.save_profile(self.profile)
+                if self._ghost_enabled:
+                    from .ghost_run import GhostRecorder
+                    self._ghost_recorder = GhostRecorder(
+                        seed=self.run.seed if self.run.seed is not None else 0,
+                        deck_id=self.run.deck_id,
+                    )
                 self._run_loop()
         except KeyboardInterrupt:
             # Catch exit signals to return to the Belote main menu
             return
+        finally:
+            # 3.0.0: append a one-line summary of the just-ended run for the
+            # player's own analysis. Best-effort; swallowed on failure.
+            if self.run is not None:
+                from .run_summary import append_summary
+                append_summary(self.run, won=self.run.run_won)
+                if self._ghost_recorder is not None:
+                    label = "won" if self.run.run_won else f"ante{self.run.ante_number}"
+                    self._ghost_recorder.save(label=label)
 
     def _run_loop(self) -> None:
         """Main game loop: Blind -> Shop -> Next."""
@@ -79,6 +101,17 @@ class BelAtroGame:
                     self.unlock_tracker.notify_run_won()
                     if self.reader is not None:
                         BelAtroAnnounce.banner("YOU WON!", self.reader, hold=2.5)
+                        # 3.0.0: offer Endless mode after the canonical 8 antes.
+                        # Skip the prompt when already in endless to avoid a
+                        # double-offer if a future endless-victory state is
+                        # added.
+                        if not self.run.endless and BelAtroAnnounce.yes_no(
+                            "Continue into Endless Mode? (Ante 9+ scales ×2.2)",
+                            self.reader,
+                        ):
+                            self.run.enter_endless()
+                            self.save_manager.save_profile(self.profile)
+                            continue
                     break
         except KeyboardInterrupt:
             self.run.run_over = True
@@ -248,6 +281,7 @@ class BelAtroGame:
             ui_callbacks=UICallbacks(self.reader),
             acc=acc,
             card_enhancements=round_flags,
+            recorder=self._ghost_recorder,
         )
 
         if lock_trust:

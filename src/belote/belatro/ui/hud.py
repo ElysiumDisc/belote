@@ -23,6 +23,49 @@ _MOOD_GLYPH = {
 }
 
 
+# 3.0.0: known joker synergies — when both ids in a pair are present, the
+# HUD surfaces a SYN★ badge so the player notices the combo. New combos
+# extend this tuple; pairs are order-insensitive (both directions matched).
+# Every id here MUST resolve in the joker registry — see
+# `validate_synergy_ids()` below; a startup self-check raises on typos.
+_SYNERGY_PAIRS: tuple[tuple[str, str], ...] = (
+    # Coinche stacking with the Tout-Atout streak ramp
+    ("coinche_stack", "tout_streak"),
+    # La Sentinelle's trump-Jack lock plus a contract-level Mult booster
+    ("la_sentinelle", "le_fanatique"),
+)
+
+
+def validate_synergy_ids() -> list[str]:
+    """Return the list of synergy IDs that are NOT registered as jokers.
+
+    Called from `register_all_items()` after registration completes. An
+    empty result means the registry is consistent. A non-empty result
+    means a typo or a removed joker — caller decides whether to fail
+    loud (assert) or warn.
+    """
+    from ..items.registry import registry
+
+    seen: set[str] = set()
+    for a, b in _SYNERGY_PAIRS:
+        seen.add(a)
+        seen.add(b)
+    return sorted(s for s in seen if s not in registry.jokers)
+
+
+def detect_synergies(jokers: list[object]) -> list[tuple[str, str]]:
+    ids = {getattr(j, "id", "") for j in jokers}
+    found = []
+    for a, b in _SYNERGY_PAIRS:
+        if a in ids and b in ids:
+            found.append((a, b))
+    # Generic catch-all: if the player has 3+ jokers but no specific pair
+    # matched, still flag a generic "stack" synergy.
+    if not found and len(ids) >= 3:
+        found.append(("stack", str(len(ids))))
+    return found
+
+
 class BelAtroHUD:
     """Renders the roguelite HUD elements during gameplay."""
 
@@ -85,6 +128,12 @@ class BelAtroHUD:
         if run.jokers:
             names = "  ".join(j.name for j in run.jokers)
             print(move(2, max(2, term_w // 2)) + gold_fg() + names[: term_w // 2 - 2] + RESET)
+            # 3.0.0: synergy badge — render below the joker line if any pair
+            # matches. Cheap O(N) per render; the table is short.
+            synergies = detect_synergies(list(run.jokers))
+            if synergies:
+                badge = f"{gold_fg()}{BOLD}★ SYN×{len(synergies)}{RESET}"
+                print(move(4, max(2, term_w // 2)) + badge)
 
     def _render_compact(self, acc: ScoreAccumulator, state: GameState, term_w: int) -> None:
         """Compact HUD: single-line summary, joker count instead of names.

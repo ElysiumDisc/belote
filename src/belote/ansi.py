@@ -3,7 +3,30 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-from .themes import theme_manager
+from .themes import Theme, theme_manager
+
+# ── Theme cache ────────────────────────────────────────────────────────────
+# Each color flavor (felt_bg, red_fg, etc.) is hit dozens of times per render.
+# Pre-3.0.0 each call walked into theme_manager.get_current() (a dict lookup);
+# the 16 flavors × tens of cells × dozens of rows added up. Cache the active
+# Theme here and invalidate on theme change via theme_manager's callback hook.
+_active_theme: Theme | None = None
+
+
+def _refresh_theme_cache() -> None:
+    global _active_theme
+    _active_theme = theme_manager.get_current()
+
+
+def _t() -> Theme:
+    if _active_theme is None:
+        _refresh_theme_cache()
+    assert _active_theme is not None
+    return _active_theme
+
+
+theme_manager.register_callback(_refresh_theme_cache)
+_refresh_theme_cache()
 
 _RESET_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -96,66 +119,67 @@ def scroll_region(top: int, bottom: int) -> str:
     return f"\x1b[{top};{bottom}r"
 
 
-# Palette constants
+# Palette accessors. Each reads the cached active Theme; theme_manager's
+# change callback refreshes the cache on `T` keypress / set_current().
 def felt_bg() -> str:
-    return bg(*theme_manager.get_current().felt_bg)
+    return bg(*_t().felt_bg)
 
 
 def red_fg() -> str:
-    return fg(*theme_manager.get_current().red_fg)
+    return fg(*_t().red_fg)
 
 
 def black_fg() -> str:
-    return fg(*theme_manager.get_current().black_fg)
+    return fg(*_t().black_fg)
 
 
 def card_face_bg() -> str:
-    return bg(*theme_manager.get_current().card_face_bg)
+    return bg(*_t().card_face_bg)
 
 
 def face_card_bg() -> str:
-    return bg(*theme_manager.get_current().face_card_bg)
+    return bg(*_t().face_card_bg)
 
 
 def card_back_bg() -> str:
-    return bg(*theme_manager.get_current().card_back_bg)
+    return bg(*_t().card_back_bg)
 
 
 def highlight_bg() -> str:
-    return bg(*theme_manager.get_current().highlight_bg)
+    return bg(*_t().highlight_bg)
 
 
 def gold_fg() -> str:
-    return fg(*theme_manager.get_current().gold_fg)
+    return fg(*_t().gold_fg)
 
 
 def white_fg() -> str:
-    return fg(*theme_manager.get_current().white_fg)
+    return fg(*_t().white_fg)
 
 
 def light_gray_fg() -> str:
-    return fg(*theme_manager.get_current().light_gray_fg)
+    return fg(*_t().light_gray_fg)
 
 
 def green_fg() -> str:
-    return fg(*theme_manager.get_current().green_fg)
+    return fg(*_t().green_fg)
 
 
 def banner_bg() -> str:
-    return bg(*theme_manager.get_current().banner_bg)
+    return bg(*_t().banner_bg)
 
 
 def banner_fg() -> str:
-    return fg(*theme_manager.get_current().banner_fg)
+    return fg(*_t().banner_fg)
 
 
 def felt_placeholder_fg() -> str:
-    return fg(*theme_manager.get_current().felt_placeholder_fg)
+    return fg(*_t().felt_placeholder_fg)
 
 
 def menu_art_fg() -> str:
-    return fg(*theme_manager.get_current().menu_art_fg)
+    return fg(*_t().menu_art_fg)
 
 
 def menu_border_fg() -> str:
-    return fg(*theme_manager.get_current().menu_border_fg)
+    return fg(*_t().menu_border_fg)

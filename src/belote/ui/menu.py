@@ -124,7 +124,7 @@ def show_theme_selector(reader: KeyReader) -> None:
     """Submenu to cycle through themes with live preview."""
     themes_list = list(THEMES.keys())
     try:
-        sel = themes_list.index(theme_manager._current_theme_name)
+        sel = themes_list.index(theme_manager.current_name)
     except ValueError:
         sel = 0
 
@@ -283,7 +283,7 @@ def show_main_menu(
                 toggle_mute()
             case Key.THEME:
                 themes_list = list(THEMES.keys())
-                curr_theme = theme_manager._current_theme_name
+                curr_theme = theme_manager.current_name
                 new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                 theme_manager.set_current(themes_list[new_idx])
             case Key.UP:
@@ -308,7 +308,7 @@ def show_main_menu(
                 elif sel == 5:
                     # Cycle theme with left/right
                     themes_list = list(THEMES.keys())
-                    curr_theme = theme_manager._current_theme_name
+                    curr_theme = theme_manager.current_name
                     new_idx = (themes_list.index(curr_theme) + delta) % len(themes_list)
                     theme_manager.set_current(themes_list[new_idx])
             case Key.ENTER:
@@ -338,7 +338,7 @@ def show_main_menu(
                     curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
                 elif sel == 5:
                     themes_list = list(THEMES.keys())
-                    curr_theme = theme_manager._current_theme_name
+                    curr_theme = theme_manager.current_name
                     new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                     theme_manager.set_current(themes_list[new_idx])
 

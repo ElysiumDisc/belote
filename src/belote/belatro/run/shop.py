@@ -17,8 +17,30 @@ class Shop:
         self.inventory: list[Any] = []
         self.reroll_cost = 5
 
+    # 3.0.0: edition roll table at shop generation. ~80% NONE, then a tail
+    # of Foil/Holo/Polychrome/Negative. Calibrated so a typical 8-ante run
+    # surfaces 1-2 edited jokers. Negative is rare because it grants a
+    # permanent extra slot.
+    _EDITION_WEIGHTS: tuple[tuple[str, float], ...] = (
+        ("none", 0.80),
+        ("foil", 0.08),
+        ("holo", 0.06),
+        ("poly", 0.04),
+        ("neg",  0.02),
+    )
+
+    def _roll_edition(self) -> str:
+        roll = random.random()
+        cum = 0.0
+        for name, w in self._EDITION_WEIGHTS:
+            cum += w
+            if roll < cum:
+                return name
+        return "none"
+
     def generate_inventory(self) -> None:
         """Populate the shop with a mix of items."""
+        from ..items.base import Edition
         from ..items.registry import registry
         from ..progression.save import Profile
 
@@ -34,6 +56,12 @@ class Shop:
             picks = random.sample(joker_ids, k=min(2, len(joker_ids)))
             for j_id in picks:
                 j_item: Any = available_jokers[j_id]()
+                # Roll edition. Foil/Holo/Polychrome/Negative each adjust the
+                # cost slightly so the tooltip price reflects the bonus.
+                edition_name = self._roll_edition()
+                j_item.edition = Edition(edition_name)
+                if edition_name != "none":
+                    j_item.cost = int(j_item.cost * 1.5)
                 self.inventory.append(j_item)
                 if self.profile:
                     self.profile.discover(j_id)
@@ -94,10 +122,17 @@ class Shop:
         return False
 
     def _apply_item(self, item: object) -> None:
-        from ..items.base import Joker, Voucher
+        from ..items.base import Edition, Joker, Voucher
 
         if isinstance(item, Joker):
-            if len(self.run.jokers) < self.run.joker_slots:
+            # 3.0.0: Negative-edition jokers don't consume a slot — they grow
+            # the run's slot count instead. Other editions follow the normal
+            # capacity check.
+            if item.edition == Edition.NEGATIVE:
+                self.run.joker_slots += 1
+                self.run.jokers.append(item)
+                item.on_purchase(self.run)
+            elif len(self.run.jokers) < self.run.joker_slots:
                 self.run.jokers.append(item)
                 item.on_purchase(self.run)
         elif isinstance(item, Voucher):

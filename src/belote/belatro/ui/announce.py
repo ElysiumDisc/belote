@@ -72,6 +72,34 @@ class BelAtroAnnounce:
             remaining = end - time.time()
 
     @staticmethod
+    def yes_no(prompt: str, reader: KeyReader) -> bool:
+        """Centered Y/N prompt. Returns True on Y/Enter, False on N/Esc/Q.
+
+        Repaints in-place — no scroll on alt-screen-strict terminals. Used by
+        the post-Ante-8 endless-mode offer.
+        """
+        from belote.ui.render import get_term_size
+
+        term_w, term_h = get_term_size()
+        row = max(1, term_h // 2)
+        body = gold_fg() + BOLD + prompt + RESET
+        hint = white_fg() + "[Y]es / [N]o" + RESET
+        print(move(row, 1) + ansi_center(body, term_w), end="")
+        print(move(row + 2, 1) + ansi_center(hint, term_w), end="", flush=True)
+        while True:
+            event = reader.read()
+            if event.key in (Key.ENTER,):
+                return True
+            if event.key in (Key.ESC, Key.QUIT):
+                return False
+            if event.key == Key.CHAR and event.char:
+                ch = event.char.lower()
+                if ch in ("y", "o"):  # Y / O for "Oui"
+                    return True
+                if ch == "n":
+                    return False
+
+    @staticmethod
     def score_popup(lines: list[str], reader: KeyReader) -> None:
         """Show a temporary score breakdown popup."""
         from belote.ui.render import get_term_size

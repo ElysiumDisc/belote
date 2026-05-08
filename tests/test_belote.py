@@ -623,6 +623,97 @@ class TestCapot:
         assert breakdown.taker_total == CAPOT_BASE + BELOTE_POINTS
         assert breakdown.taker_belote == BELOTE_POINTS
 
+# ---------------------------------------------------------------------------
+# 14b. Capot per contract (3.0.0 fix)
+# ---------------------------------------------------------------------------
+
+
+def _make_capot_state(contract: str | None, trump: Suit | None) -> GameState:
+    """Build an 8-trick state where NS wins all tricks.
+
+    South holds all 8 hearts; North/East/West each hold 8 cards of a single
+    other suit. Each trick is led by South in HEARTS; the others discard from
+    their (different) suits. Lead-suit-only winner = South.
+    """
+    south_hand = [Card(Suit.HEARTS, r) for r in Rank]
+    north_hand = [Card(Suit.DIAMONDS, r) for r in Rank]
+    east_hand = [Card(Suit.CLUBS, r) for r in Rank]
+    west_hand = [Card(Suit.SPADES, r) for r in Rank]
+
+    tricks = []
+    for i in range(8):
+        tc = (
+            TrickCard(Seat.SOUTH, south_hand[i]),
+            TrickCard(Seat.WEST, west_hand[i]),
+            TrickCard(Seat.NORTH, north_hand[i]),
+            TrickCard(Seat.EAST, east_hand[i]),
+        )
+        tricks.append(tc)
+
+    initial_hands = (
+        tuple(south_hand),
+        tuple(west_hand),
+        tuple(north_hand),
+        tuple(east_hand),
+    )
+
+    return GameState(
+        hands=tuple(() for _ in range(4)),
+        initial_hands=initial_hands,
+        trump=trump,
+        dealer=Seat.SOUTH,
+        leader=Seat.SOUTH,
+        turn=Seat.SOUTH,
+        phase=Phase.SCORING,
+        bids=(),
+        taker=Seat.SOUTH,
+        current_trick=(),
+        completed_tricks=tuple(tricks),
+        last_trick_winner=Seat.SOUTH,
+        declarations=(),
+        team_scores=(0, 0),
+        current_round_points=(0, 0),
+        score_history=(),
+        target=1000,
+        up_card=None,
+        remaining_cards=(),
+        bidder_index=0,
+        bidding_round=2,
+        announced=None,
+        belote_holders={},
+        belote_tracker=(False, False),
+        first_trick_done=True,
+        contract=contract,
+    )
+
+
+class TestCapotPerContract:
+    """Capot base scales by contract: SA→220, TA→348, normal→252."""
+
+    def test_capot_base_sans_atout(self) -> None:
+        state = _make_capot_state(contract="sans_atout", trump=None)
+        breakdown = score_round(state)
+        assert breakdown.is_capot is True
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_SANS_ATOUT, (
+            f"SA Capot must use base 220, got {breakdown.taker_total}"
+        )
+
+    def test_capot_base_tout_atout(self) -> None:
+        state = _make_capot_state(contract="tout_atout", trump=Suit.TOUT_ATOUT)
+        breakdown = score_round(state)
+        assert breakdown.is_capot is True
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT, (
+            f"TA Capot must use base 348, got {breakdown.taker_total}"
+        )
+
+    def test_capot_base_normal_unchanged(self) -> None:
+        state = _make_capot_state(contract=None, trump=Suit.HEARTS)
+        breakdown = score_round(state)
+        assert breakdown.is_capot is True
+        # Hearts trump means South's K+Q hearts trigger Belote (BELOTE_POINTS=20).
+        # Compare against base+belote rather than bare base.
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE + breakdown.taker_belote
+
 
 # ---------------------------------------------------------------------------
 # 15. Bid failure

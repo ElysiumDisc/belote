@@ -35,6 +35,9 @@ class AIMemory:
         self.known_voids: dict[Seat, set[Suit]] = {s: set() for s in Seat}
         self.partner_hand: set[Card] = set()
         self.processed_tricks_count: int = 0
+        # (completed_count, current_trick_len) of the last _update_voids call.
+        # Lets us skip re-scanning a stable transient trick on each decision.
+        self.last_voids_key: tuple[int, int] | None = None
 
 
 class AIPlayer:
@@ -50,12 +53,16 @@ class AIPlayer:
     def update_memory(self, state: GameState) -> None:
         """Update memory with currently visible information."""
         if len(state.completed_tricks) == 0 and len(state.current_trick) == 0:
-            # New round - reset memory
+            # New round - reset memory. Including the void-cache key — without
+            # this a (0, 0) / (0, 1) key from the first decision of *this* round
+            # could coincidentally match a leftover from the previous round and
+            # cause _update_voids to skip processing entirely.
             self.memory.played.clear()
             for s in Seat:
                 self.memory.known_voids[s].clear()
             self.memory.partner_hand.clear()
             self.memory.processed_tricks_count = 0
+            self.memory.last_voids_key = None
 
         # Track all cards in completed tricks
         for trick in state.completed_tricks:
@@ -123,11 +130,15 @@ class AIPlayer:
         - Medium: weighted sum + personality jitter.
         - Hard: card-points-based + Jack/Ace bonuses.
         """
+        # The three special-bid heuristics each need a per-suit length count.
+        # Compute once and thread through; recomputing inside every branch
+        # was a measurable redundancy noted in the May-2026 perf audit.
+        lengths = self._suit_lengths(hand)
         if self.difficulty == Difficulty.EASY:
-            return self._easy_special(hand)
+            return self._easy_special(hand, lengths)
         if self.difficulty == Difficulty.MEDIUM:
-            return self._medium_special(hand, state)
-        return self._hard_special(hand, state)
+            return self._medium_special(hand, state, lengths)
+        return self._hard_special(hand, state, lengths)
 
     @staticmethod
     def _suit_lengths(hand: tuple[Card, ...]) -> dict[Suit, int]:
@@ -139,7 +150,9 @@ class AIPlayer:
                 lengths[c.suit] += 1
         return lengths
 
-    def _easy_special(self, hand: tuple[Card, ...]) -> BidValue:
+    def _easy_special(
+        self, hand: tuple[Card, ...], lengths: dict[Suit, int]
+    ) -> BidValue:
         """Pick the contract that best fits the hand shape:
         - Tout Atout if Jack-heavy (≥3 Jacks/9s across ≥3 suits) — Jacks are
           the dominant card under TA in every suit.
@@ -153,12 +166,13 @@ class AIPlayer:
             return Suit.TOUT_ATOUT
 
         ace_ten_count = sum(1 for c in hand if c.rank in (Rank.ACE, Rank.TEN))
-        lengths = self._suit_lengths(hand)
         if ace_ten_count >= 3 and max(lengths.values(), default=0) <= 3:
             return SANS_ATOUT_BID
         return None
 
-    def _medium_special(self, hand: tuple[Card, ...], state: GameState) -> BidValue:
+    def _medium_special(
+        self, hand: tuple[Card, ...], state: GameState, lengths: dict[Suit, int]
+    ) -> BidValue:
         """Weighted score: TA leans on Jacks (each acts like a trump master in
         its own suit), SA leans on Aces and 10s with a flat-distribution bonus."""
         personality = self._rng.uniform(-0.5, 0.5)
@@ -173,7 +187,6 @@ class AIPlayer:
         # SA score: Aces and 10s win lead-suit tricks; flat distribution helps.
         sa_weights = {Rank.ACE: 3.0, Rank.TEN: 2.0, Rank.KING: 1.0}
         sa_score = sum(sa_weights.get(c.rank, 0.0) for c in hand)
-        lengths = self._suit_lengths(hand)
         if max(lengths.values(), default=0) <= 3 and min(lengths.values(), default=8) >= 1:
             sa_score += 1.5  # flat-distribution bonus
 
@@ -188,7 +201,9 @@ class AIPlayer:
             return SANS_ATOUT_BID
         return None
 
-    def _hard_special(self, hand: tuple[Card, ...], state: GameState) -> BidValue:
+    def _hard_special(
+        self, hand: tuple[Card, ...], state: GameState, lengths: dict[Suit, int]
+    ) -> BidValue:
         """Use actual card_points scales as the heuristic.
 
         TA: every card scores on the trump scale; threshold against the average
@@ -203,7 +218,6 @@ class AIPlayer:
             card_points_fn(c, None) for c in hand  # type: ignore[arg-type, misc]
         )
         # Long suits are bad under SA — opponents won't follow your suit.
-        lengths = self._suit_lengths(hand)
         long_suit_penalty = sum(max(0, n - 3) ** 2 for n in lengths.values()) * 4
         sa_score = sa_pts - long_suit_penalty
 
@@ -624,20 +638,40 @@ class AIPlayer:
 
     def _update_voids(self, state: GameState) -> None:
         """Infer voids incrementally."""
+        # Skip the work if neither the completed-count nor the current-trick
+        # length has changed since last call (decide_card may run multiple
+        # times for the same trick during e.g. lookahead exploration).
+        completed_count = len(state.completed_tricks)
+        key = (completed_count, len(state.current_trick))
+        if self.memory.last_voids_key == key:
+            return
+
+        # Le Républicain (or any deck/voucher that sets the flag): 7s and 8s
+        # are wild and may be played on any suit, so an off-suit 7/8 doesn't
+        # prove void in lead suit.
+        wild_active = bool(state._joker_state.get("republicain_wild"))
+
         # 1. Process new completed tricks
-        while self.memory.processed_tricks_count < len(state.completed_tricks):
+        while self.memory.processed_tricks_count < completed_count:
             trick = state.completed_tricks[self.memory.processed_tricks_count]
-            self._process_trick_voids(trick)
+            self._process_trick_voids(trick, wild_active)
             self.memory.processed_tricks_count += 1
 
         # 2. Process current trick (transient, so we don't increment processed_tricks_count)
-        self._process_trick_voids(state.current_trick)
+        self._process_trick_voids(state.current_trick, wild_active)
+        self.memory.last_voids_key = key
 
-    def _process_trick_voids(self, trick: tuple[TrickCard, ...]) -> None:
+    def _process_trick_voids(
+        self, trick: tuple[TrickCard, ...], wild_active: bool = False
+    ) -> None:
         """Analyze a trick for voids."""
         if len(trick) < 2:
             return
         lead_suit = trick[0].card.suit
         for tc in trick[1:]:
             if tc.card.suit != lead_suit:
+                # Under republicain_wild a 7 or 8 may be played on any suit,
+                # so an off-suit 7/8 doesn't prove void in the lead suit.
+                if wild_active and tc.card.rank in (Rank.SEVEN, Rank.EIGHT):
+                    continue
                 self.memory.known_voids[tc.seat].add(lead_suit)

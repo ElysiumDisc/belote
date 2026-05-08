@@ -13,6 +13,14 @@ class Config:
     BELOTE_POINTS: int = 20
     REBELOTE_POINTS: int = 40
     CAPOT_BASE: int = 252
+    # Capot bases for special contracts. Standard FFB practice scales the
+    # Capot reward to the contract's total card points: Capot pays the deck
+    # total + 100 (the standard "Capot bonus"). For SA: 120 + 100 = 220.
+    # For TA: 248 + 100 = 348. Pre-3.0.0 the engine awarded a flat 252 for
+    # all contracts, which over-paid SA Capots (252 vs. 220) and under-paid
+    # TA Capots (252 vs. 348).
+    CAPOT_BASE_SANS_ATOUT: int = 220
+    CAPOT_BASE_TOUT_ATOUT: int = 348
     TOTAL_POINTS: int = 152
     # Sum over the 32-card deck under each contract. TA scores every card on
     # the trump scale (J=20, 9=14, A=11, 10=10, K=4, Q=3, 7/8=0 → 62/suit ×4).

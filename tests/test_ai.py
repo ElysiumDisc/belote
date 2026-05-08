@@ -73,6 +73,72 @@ def test_ai_hard_void_inference() -> None:
     assert Suit.SPADES in player.memory.known_voids[Seat.WEST]
 
 
+def test_ai_void_inference_skips_wild_seven_under_republicain() -> None:
+    """Republicain wild: a 7 played off-suit doesn't prove void in lead suit."""
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    trick1 = (
+        TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),
+        # West plays a 7 of hearts off-suit. Under republicain_wild this is a
+        # legal "wild" — does NOT imply West is void in spades.
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.SEVEN)),
+    )
+    state = GameState(
+        hands=[(), (), (), ()],
+        completed_tricks=(trick1,),
+        phase=Phase.PLAYING,
+        trump=Suit.DIAMONDS,
+        _joker_state={"republicain_wild": True},
+    )
+    player._update_voids(state)
+    # No void should be inferred for West.
+    assert Suit.SPADES not in player.memory.known_voids[Seat.WEST]
+
+
+def test_void_cache_invalidates_across_rounds() -> None:
+    """A new round must NOT inherit the previous round's last_voids_key —
+    otherwise _update_voids may skip processing on a coincidental match."""
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+
+    # Simulate a completed round 1 leaving a stale key.
+    player.memory.last_voids_key = (0, 1)
+    player.memory.processed_tricks_count = 8
+    # Plant a stale void (West "void" in spades from the prior round).
+    player.memory.known_voids[Seat.WEST].add(Suit.SPADES)
+
+    # Round 2 begins — empty completed/current.
+    fresh = GameState(
+        hands=[(), (), (), ()],
+        completed_tricks=(),
+        current_trick=(),
+        phase=Phase.PLAYING,
+        trump=Suit.DIAMONDS,
+    )
+    player.update_memory(fresh)
+
+    # The stale void must have been cleared by the new-round reset.
+    assert Suit.SPADES not in player.memory.known_voids[Seat.WEST]
+    # The cache key must have been invalidated so _update_voids() will run.
+    assert player.memory.last_voids_key is None
+
+
+def test_ai_void_inference_still_flags_non_wild_offsuit_under_republicain() -> None:
+    """Under republicain_wild, off-suit non-7/8 cards still prove void."""
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    trick1 = (
+        TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.JACK)),  # Jack — not wild
+    )
+    state = GameState(
+        hands=[(), (), (), ()],
+        completed_tricks=(trick1,),
+        phase=Phase.PLAYING,
+        trump=Suit.DIAMONDS,
+        _joker_state={"republicain_wild": True},
+    )
+    player._update_voids(state)
+    assert Suit.SPADES in player.memory.known_voids[Seat.WEST]
+
+
 # ── F5: AI bidding for Tout Atout / Sans Atout ─────────────────────────────
 
 

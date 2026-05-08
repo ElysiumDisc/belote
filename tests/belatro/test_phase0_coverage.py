@@ -286,3 +286,30 @@ def test_round_end_event_carries_trump_and_capot() -> None:
     assert evt.trump is None
     assert evt.capot is False
     assert evt.taker_seat == Seat.SOUTH
+
+
+def test_every_boss_modifier_actually_patches_a_flag() -> None:
+    """Pin every entry in ALL_BOSS_MODIFIERS so a typo'd patch key cannot
+    silently produce a no-op boss.
+
+    Background: bosses register their flags via ``state.patch("_kings_zero",
+    True)``. The PatchedGameState proxy strips the leading underscore and
+    looks the result up against the ``boss_fields`` allow-list in
+    ``engine/modifier_patch.py``. A typo (e.g. ``"_kingz_zero"``) would
+    simply land in the generic ``_patches`` dict and never reach
+    ``BossModifiers``, so the boss would do nothing at runtime.
+
+    For every registered boss we assert that calling ``.flags()`` produces
+    a BossModifiers whose representation differs from the default — i.e.
+    that at least one allow-listed flag was actually toggled.
+    """
+    from belote.belatro.run.boss import ALL_BOSS_MODIFIERS
+
+    default = BossModifiers()
+    for boss_cls in ALL_BOSS_MODIFIERS:
+        flags = boss_cls().flags()
+        assert flags != default, (
+            f"{boss_cls.__name__}.apply() did not change BossModifiers — "
+            f"check that every state.patch(...) key is in the boss_fields "
+            f"allow-list at engine/modifier_patch.py:27."
+        )

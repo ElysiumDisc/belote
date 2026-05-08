@@ -34,6 +34,17 @@ class Statistics:
     best_round_score: int = 0
     worst_round_score: int = 999  # Higher than max possible (162 + decls)
 
+    # 3.0.0: Achievement registry — IDs of unlocked achievements. List
+    # rather than set for JSON-friendliness; uniqueness enforced on insert.
+    achievements: list[str] = field(default_factory=list)
+
+    def unlock_achievement(self, ach_id: str) -> bool:
+        """Returns True if newly unlocked; False if already had it."""
+        if ach_id in self.achievements:
+            return False
+        self.achievements.append(ach_id)
+        return True
+
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
@@ -116,6 +127,13 @@ class StatisticsManager:
         stats.best_round_score = max(stats.best_round_score, points_scored)
         stats.worst_round_score = min(stats.worst_round_score, points_scored)
 
+        # 3.0.0: evaluate achievements. Unlocks are recorded on `stats` and
+        # the announcement is left to the caller (we don't want stats.py to
+        # depend on the UI). Callers can read stats.achievements to detect
+        # the new entries.
+        from .achievements import evaluate_round
+        evaluate_round(stats, points_scored=points_scored, was_capot=is_capot)
+
     def update_stats_game(self, won: bool, num_rounds: int, difficulty: str) -> None:
         stats = self.load_stats()
         stats.games_played += 1
@@ -131,6 +149,9 @@ class StatisticsManager:
             stats.difficulty_stats[difficulty]["played"] += 1
             if won:
                 stats.difficulty_stats[difficulty]["won"] += 1
+
+        from .achievements import evaluate_game
+        evaluate_game(stats, won=won, difficulty=difficulty)
 
         self.flush_stats()
 

@@ -97,8 +97,22 @@ class ItemRegistry:
 # Global registry instance
 registry = ItemRegistry()
 
+# Module-level guard against repeated full re-walks. Tests that build many
+# BelAtroRun instances (each calls register_all_items lazily) used to redo the
+# 4× dir(mod) walk + class registration on every run; the cache bump in
+# ItemRegistry meant downstream `get_available_*` cached views were also
+# invalidated. The first call wins; subsequent calls are no-ops.
+_registered: bool = False
+
 
 def register_all_items() -> None:
+    global _registered
+    # Guard against repeated full re-walks. The second clause re-runs when a
+    # caller has swapped in a fresh empty ItemRegistry (the test-suite pattern
+    # at tests/belatro/test_belatro.py::TestItemRegistry.setup_method) — those
+    # callers expect a populated registry on return.
+    if _registered and registry.jokers:
+        return
     from . import planets, tarots, vouchers
     from .jokers import (
         annonces,
@@ -146,3 +160,16 @@ def register_all_items() -> None:
         attr = getattr(vouchers, attr_name)
         if isinstance(attr, type) and issubclass(attr, Voucher) and attr is not Voucher:
             registry.register_voucher(attr)
+
+    # 3.0.1: assert the HUD synergy registry references only real joker IDs.
+    # Catches typos at module-init time rather than letting the badge silently
+    # never fire. Imported lazily to avoid a circular import at module load.
+    from ..ui.hud import validate_synergy_ids
+
+    missing = validate_synergy_ids()
+    assert not missing, (
+        f"belatro/ui/hud.py::_SYNERGY_PAIRS references unregistered joker IDs: "
+        f"{missing}. Either register the joker or remove the pair."
+    )
+
+    _registered = True

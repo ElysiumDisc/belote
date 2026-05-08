@@ -78,21 +78,28 @@ PYTHONPATH=src pytest --cov=belote --cov-report=term-missing
 The project maintains zero lint and type-check violations. Run all checks with:
 
 ```bash
-# Type checking (0 errors expected)
-PYTHONPATH=src mypy .
+# Type checking (0 errors expected, strict mode)
+PYTHONPATH=src mypy --strict src/
 
 # Linting (0 violations expected)
-ruff check .
-# Full test suite (435 tests expected)
+ruff check src/ tests/
+
+# Full test suite (510 tests expected)
 PYTHONPATH=src pytest
+```
 
-# ...
-
-Current baseline:
+Current baseline (3.0.2):
 - **mypy**: 0 errors (strict mode)
 - **ruff**: 0 violations
-- **pytest**: 435 tests, 0 failures
+- **pytest**: 510 tests, 0 failures
 
+Run all gates before committing:
+
+```bash
+PYTHONPATH=src python -m pytest --tb=short -q && \
+  python -m mypy --strict src/ && \
+  python -m ruff check src/ tests/
+```
 
 ## Benchmarking
 
@@ -100,6 +107,36 @@ A benchmarking script is provided to measure rendering and AI performance:
 ```bash
 PYTHONPATH=src python scripts/benchmark.py
 ```
+
+3.0.0 baseline numbers (Linux, Python 3.10+, 1000 iterations):
+- Render: 0.27 ms (±0.04)
+- AI Hard decide_card: 0.026 ms (±0.003)
+- BelAtro state update: 0.032 ms (±0.004)
+- score_round: 0.169 ms
+- legal_cards: 0.012 ms
+
+Use these as a regression-detection floor for future changes.
+
+## Accessibility
+
+Set `BELOTE_A11Y=1` to emit one-line plain-text descriptions of card plays,
+trick winners, and round results to stderr — readable by terminal screen
+readers (Orca, NVDA over WSL, VoiceOver via iTerm2).
+
+## Optional Runtime Flags
+
+The following environment variables enable opt-in features. Each is read
+once at startup; toggling mid-run has no effect.
+
+- `BELOTE_REPLAY=1` — after every Classic round, print a one-line summary
+  of how often South's plays matched the Hard-AI's preferred line
+  (e.g. `Replay: Optimal plays: 6/8 (75%)`). Educational only — never
+  affects scoring. Backed by `src/belote/replay.py`.
+- `BELOTE_GHOST=1` — silently record every BelAtro run (seed, deck,
+  bids, plays, round outcomes) to
+  `~/.local/share/belote/ghosts/<label>-<seed>.json`. The file is written
+  once when the run ends. Useful for sharing or replaying interesting
+  runs. Backed by `src/belote/belatro/ghost_run.py`.
 
 ## Releasing a New Version
 

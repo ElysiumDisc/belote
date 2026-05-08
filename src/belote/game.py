@@ -180,6 +180,10 @@ class BossModifiers:
     partner_forced_pass: bool = False
     lock_trust_zero: bool = False
     separate_scoring: bool = False
+    # 3.0.0: three new boss flags (Le Sauvage, L'Iconoclaste, Le Mime).
+    aces_zero: bool = False
+    jacks_zero: bool = False
+    declarations_zero: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -852,12 +856,17 @@ def play_card(state: GameState, card: Card) -> GameState:
         # Boss: Les Clubs Bannis – club-led tricks score 0
         if state.boss_modifiers.ban_clubs and new_trick and new_trick[0].card.suit == Suit.CLUBS:
             trick_pts = 0
-        # Boss: Le Roi Mort / Les Dix Maudits – Kings/10s worth 0
-        if state.boss_modifiers.kings_zero or state.boss_modifiers.tens_zero:
+        # Boss: rank-zero bosses (Le Roi Mort / Les Dix Maudits / Le Sauvage /
+        # L'Iconoclaste). Mirrors the scoring.py canonical zeroing branch so
+        # the live HUD running total matches the eventual round score.
+        bm = state.boss_modifiers
+        if bm.kings_zero or bm.tens_zero or bm.aces_zero or bm.jacks_zero:
             trick_pts = sum(
                 0
-                if (state.boss_modifiers.kings_zero and tc.card.rank == Rank.KING)
-                or (state.boss_modifiers.tens_zero and tc.card.rank == Rank.TEN)
+                if (bm.kings_zero and tc.card.rank == Rank.KING)
+                or (bm.tens_zero and tc.card.rank == Rank.TEN)
+                or (bm.aces_zero and tc.card.rank == Rank.ACE)
+                or (bm.jacks_zero and tc.card.rank == Rank.JACK)
                 else card_points(tc.card, trump, se_trump)  # type: ignore[arg-type, misc]
                 for tc in new_trick
             ) if contract_active else 0

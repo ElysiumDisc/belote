@@ -25,6 +25,21 @@ class Rarity(str, Enum):
     LEGENDARY = "legendary"
 
 
+class Edition(str, Enum):
+    """3.0.0: optional Balatro-style joker editions, rolled at shop generation.
+
+    Each edition stacks on top of the joker's normal triggers — Foil/Holo/
+    Polychrome via ScoreAccumulator's per-trigger application path; Negative
+    is consumed at purchase time (extra slot via run.joker_slots).
+    """
+
+    NONE = "none"
+    FOIL = "foil"          # +50 chips per trigger
+    HOLO = "holo"          # +10 mult per trigger
+    POLYCHROME = "poly"    # ×1.5 mult per trigger
+    NEGATIVE = "neg"       # +1 joker slot, doesn't consume one
+
+
 @dataclass(frozen=True)
 class JokerResult:
     add_chips: int = 0
@@ -42,6 +57,10 @@ class Joker(ABC):
     fusable: bool = True
     is_partner_joker: bool = False
     is_corrupted: bool = False
+    # 3.0.0: edition is mutable per-instance and stamped by the shop. Default
+    # NONE for backward compatibility with existing tests that instantiate
+    # jokers directly.
+    edition: Edition = Edition.NONE
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         return None

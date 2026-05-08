@@ -29,7 +29,8 @@ class PatchedGameState:
             "invert_scoring", "kings_zero", "auto_coinche", "queen_spades_penalty",
             "hide_hud", "ban_clubs", "no_dix_de_der", "tens_zero", "hide_partner_hand",
             "agent_double_active", "agent_double_late_only", "partner_forced_pass",
-            "lock_trust_zero", "separate_scoring"
+            "lock_trust_zero", "separate_scoring",
+            "aces_zero", "jacks_zero", "declarations_zero",
         }
 
         if attr in boss_fields:

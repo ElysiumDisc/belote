@@ -19,6 +19,7 @@ from ..ansi import (
 from ..deck import Card, Suit
 from ..game import (
     GameState,
+    RoundScore,
     Seat,
     legal_cards,
     sort_south_hand,
@@ -94,7 +95,7 @@ def prompt_card(
                 continue
             case Key.THEME:
                 themes_list = list(THEMES.keys())
-                curr_theme = theme_manager._current_theme_name
+                curr_theme = theme_manager.current_name
                 new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                 theme_manager.set_current(themes_list[new_idx])
                 continue
@@ -159,7 +160,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 continue
             case Key.THEME:
                 themes_list = list(THEMES.keys())
-                curr_theme = theme_manager._current_theme_name
+                curr_theme = theme_manager.current_name
                 new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                 theme_manager.set_current(themes_list[new_idx])
                 continue
@@ -305,14 +306,14 @@ def show_rules(reader: KeyReader) -> None:
                     scroll = 0
 
 
-def _hist_taker_label(rs) -> str:
+def _hist_taker_label(rs: RoundScore) -> str:
     team = "NS" if rs.taker_team == 0 else "EW"
     if rs.taker_seat is None:
         return team
     return f"{rs.taker_seat.name[0]} ({team})"
 
 
-def _hist_contract_label(rs) -> str:
+def _hist_contract_label(rs: RoundScore) -> str:
     if rs.contract == "sans_atout":
         return "SA"
     if rs.contract == "tout_atout":
@@ -321,7 +322,7 @@ def _hist_contract_label(rs) -> str:
     return f"NORM {sym}"
 
 
-def _hist_status(rs) -> str:
+def _hist_status(rs: RoundScore) -> str:
     if rs.is_capot:
         return f"{gold_fg()}CAPOT{RESET}"
     if rs.is_failed:
@@ -363,16 +364,16 @@ def show_history(state: GameState, reader: KeyReader) -> None:
             wide = term_w >= 78
             if wide:
                 # Single-row layout. Column widths sum to ~76 with separators.
-                W_RD, W_TKR, W_CON, W_TRK, W_DECL, W_NS, W_EW, W_ST = 3, 7, 8, 7, 16, 5, 5, 7
+                w_rd, w_tkr, w_con, w_trk, w_decl, w_ns, w_ew, w_st = 3, 7, 8, 7, 16, 5, 5, 7
                 header_cells = [
-                    _ljust_visible("RD", W_RD),
-                    _ljust_visible("TAKER", W_TKR),
-                    _ljust_visible("CONTRACT", W_CON),
-                    _ljust_visible("TRICKS", W_TRK),
-                    _ljust_visible("DECLARATIONS", W_DECL),
-                    _ljust_visible("NS", W_NS),
-                    _ljust_visible("EW", W_EW),
-                    _ljust_visible("STATUS", W_ST),
+                    _ljust_visible("RD", w_rd),
+                    _ljust_visible("TAKER", w_tkr),
+                    _ljust_visible("CONTRACT", w_con),
+                    _ljust_visible("TRICKS", w_trk),
+                    _ljust_visible("DECLARATIONS", w_decl),
+                    _ljust_visible("NS", w_ns),
+                    _ljust_visible("EW", w_ew),
+                    _ljust_visible("STATUS", w_st),
                 ]
                 header = " │ ".join(header_cells)
                 lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
@@ -383,8 +384,8 @@ def show_history(state: GameState, reader: KeyReader) -> None:
                     taker = _hist_taker_label(rs)
                     contract = _hist_contract_label(rs)
                     tricks = f"{rs.tricks_ns} / {rs.tricks_ew}"
-                    decl_ns = _hist_decl_str(rs.decl_summary_ns, W_DECL // 2 - 1)
-                    decl_ew = _hist_decl_str(rs.decl_summary_ew, W_DECL // 2 - 1)
+                    decl_ns = _hist_decl_str(rs.decl_summary_ns, w_decl // 2 - 1)
+                    decl_ew = _hist_decl_str(rs.decl_summary_ew, w_decl // 2 - 1)
                     if rs.decl_summary_ns and rs.decl_summary_ew:
                         decls = f"{decl_ns} / {decl_ew}"
                     elif rs.decl_summary_ns:
@@ -393,21 +394,21 @@ def show_history(state: GameState, reader: KeyReader) -> None:
                         decls = decl_ew
                     else:
                         decls = "─"
-                    if visible_len(decls) > W_DECL:
-                        decls = decls[: W_DECL - 1] + "…"
+                    if visible_len(decls) > w_decl:
+                        decls = decls[: w_decl - 1] + "…"
                     ns = f"{BOLD}{rs.ns_total}{RESET}"
                     ew = f"{BOLD}{rs.ew_total}{RESET}"
                     status = _hist_status(rs)
 
                     row_cells = [
-                        _ljust_visible(rd, W_RD),
-                        _ljust_visible(taker, W_TKR),
-                        _ljust_visible(contract, W_CON),
-                        _ljust_visible(tricks, W_TRK),
-                        _ljust_visible(decls, W_DECL),
-                        _ljust_visible(ns, W_NS),
-                        _ljust_visible(ew, W_EW),
-                        _ljust_visible(status, W_ST),
+                        _ljust_visible(rd, w_rd),
+                        _ljust_visible(taker, w_tkr),
+                        _ljust_visible(contract, w_con),
+                        _ljust_visible(tricks, w_trk),
+                        _ljust_visible(decls, w_decl),
+                        _ljust_visible(ns, w_ns),
+                        _ljust_visible(ew, w_ew),
+                        _ljust_visible(status, w_st),
                     ]
                     lines.append(" │ ".join(row_cells))
             else:

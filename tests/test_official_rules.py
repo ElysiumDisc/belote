@@ -477,9 +477,10 @@ def test_sans_atout_score_round_baseline() -> None:
     )
     breakdown = score_round(state)
     # NS won every trick. Total non-trump points = 120 + 10 dix de der = 130.
-    # Note: 8 tricks × all-NS-take-it-all = capot (252).
+    # 8 tricks × all-NS = capot. Pre-3.0.0 used flat CAPOT_BASE=252 across
+    # contracts; corrected to scale with SA total (120 + 100 bonus = 220).
     assert breakdown.is_capot is True
-    assert breakdown.taker_total == 252
+    assert breakdown.taker_total == 220
 
 
 def test_sans_atout_no_belote_ever() -> None:

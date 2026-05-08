@@ -234,6 +234,53 @@ class BetrayalArc(BossModifier):
         return state
 
 
+# ── 3.0.0: Three new boss blinds ──────────────────────────────────────────
+
+
+class LeSauvage(BossModifier):
+    """All Aces are worth 0 card points this round."""
+
+    id = "le_sauvage"
+    name = "Le Sauvage"
+    description = "All Aces are worth 0 card points this round."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        state.patch("_aces_zero", True)
+        return state
+
+
+class LIconoclaste(BossModifier):
+    """All Jacks are worth 0 card points this round (devastates trump suits)."""
+
+    id = "l_iconoclaste"
+    name = "L'Iconoclaste"
+    description = "All Jacks are worth 0 card points — even the trump Jack."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        state.patch("_jacks_zero", True)
+        return state
+
+
+class LeMime(BossModifier):
+    """Declarations (Tierce/Quarte/Carré) score zero this round.
+
+    Note: when `separate_scoring` (La Compétition) is also active for the
+    same round, declarations are already zeroed by that branch. The
+    `declarations_zero` flag is then redundant but harmless — both paths
+    yield 0, and `tests/belatro/test_dead_flag_fixes.py::
+    test_declarations_zero_with_separate_scoring_no_double_count` pins
+    that this composition stays stable.
+    """
+
+    id = "le_mime"
+    name = "Le Mime"
+    description = "All declarations (Tierce/Quarte/Carré) score 0 this round."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        state.patch("_declarations_zero", True)
+        return state
+
+
 # ── Registry ───────────────────────────────────────────────────────────────
 
 ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
@@ -255,4 +302,7 @@ ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
     LeDivorce,
     LaCompetition,
     BetrayalArc,
+    LeSauvage,
+    LIconoclaste,
+    LeMime,
 ]

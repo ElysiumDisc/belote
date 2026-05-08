@@ -1,6 +1,13 @@
+from unittest.mock import MagicMock
+
 from belote.belatro.core.run_state import BelAtroRun
+from belote.belatro.engine.event_bus import RoundEndEvent
 from belote.belatro.items.planets import Saturn
+from belote.belatro.progression.save import Profile
+from belote.belatro.progression.unlocks import UnlockTracker
 from belote.belatro.run.ante import calculate_target
+from belote.deck import Suit
+from belote.game import Seat
 
 
 def test_planet_level_up():
@@ -95,3 +102,59 @@ def test_current_blind_uses_static_table_when_not_endless():
     run.endless_ante_offset = 0
     blind = run.current_blind
     assert blind.target == calculate_target(3, 0, 0)
+
+
+# ── 3.0.0: Tout Atout win unlocks le_fanatique ─────────────────────────────
+
+
+def _ta_win_event(taker: Seat = Seat.SOUTH, is_failed: bool = False) -> RoundEndEvent:
+    bd = MagicMock()
+    bd.is_failed = is_failed
+    return RoundEndEvent(
+        breakdown=bd,
+        taker_seat=taker,
+        trump=Suit.TOUT_ATOUT,
+        capot=False,
+        contract="tout_atout",
+    )
+
+
+def test_tout_atout_win_increments_counter_and_unlocks_le_fanatique() -> None:
+    """A successful TA round taken by South must increment tout_atout_wins
+    and unlock le_fanatique on the first occurrence."""
+    profile = Profile()
+    save = MagicMock()
+    tracker = UnlockTracker(profile, save)
+
+    assert profile.stats["tout_atout_wins"] == 0
+    assert not profile.is_unlocked("le_fanatique")
+
+    tracker.on_event(_ta_win_event())
+
+    assert profile.stats["tout_atout_wins"] == 1
+    assert profile.is_unlocked("le_fanatique")
+    save.save_profile.assert_called()
+
+
+def test_tout_atout_failed_round_does_not_unlock() -> None:
+    """A FAILED TA round must NOT increment the counter or trigger the unlock."""
+    profile = Profile()
+    save = MagicMock()
+    tracker = UnlockTracker(profile, save)
+
+    tracker.on_event(_ta_win_event(is_failed=True))
+
+    assert profile.stats["tout_atout_wins"] == 0
+    assert not profile.is_unlocked("le_fanatique")
+
+
+def test_tout_atout_win_by_opponents_does_not_unlock() -> None:
+    """If East/West takes TA and wins, NS doesn't get the unlock."""
+    profile = Profile()
+    save = MagicMock()
+    tracker = UnlockTracker(profile, save)
+
+    tracker.on_event(_ta_win_event(taker=Seat.EAST))
+
+    assert profile.stats["tout_atout_wins"] == 0
+    assert not profile.is_unlocked("le_fanatique")
