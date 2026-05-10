@@ -140,13 +140,18 @@ def test_republicain_wild_off_unsets_seven_when_must_follow() -> None:
 # ── La Sentinelle: ownership check ──────────────────────────────────────────
 
 
-def test_la_sentinelle_ignores_jack_played_by_partner() -> None:
-    """The trump Jack played by NORTH should not arm South's bonus."""
+def test_la_sentinelle_arms_when_partner_plays_trump_jack() -> None:
+    """3.2.0: La Sentinelle arms for the NS *team*, not just South.
+
+    Pre-3.2 the joker only fired when South personally was dealt the trump
+    Jack, ignoring North (the partner) entirely. Belote is a team game and
+    'you' in the joker's description means the NS team, so a trump Jack
+    held by North must also arm the bonus."""
     joker = LaSentinelle()
     js: dict[str, object] = {}
     joker.on_round_start(js)
 
-    # NORTH led the trump Jack → NORTH played it → South wasn't dealt it.
+    # NORTH led the trump Jack → NORTH played it from their hand.
     event = TrickWonEvent(
         winner=Seat.NORTH,
         cards=(
@@ -162,7 +167,36 @@ def test_la_sentinelle_ignores_jack_played_by_partner() -> None:
         leader_seat=Seat.NORTH,
     )
     joker.on_trick_won(event, js)
+    # NS team was dealt the trump Jack (via North), so had_jack flips.
+    assert js[f"{joker.id}_had_jack"] is True
+    # NORTH (team NS) also won the trick → team won with the Jack.
+    assert js[f"{joker.id}_won_with_jack"] is True
+
+
+def test_la_sentinelle_does_not_arm_for_opponent_jack() -> None:
+    """When an EW seat is dealt the trump Jack, NS's joker must not arm."""
+    joker = LaSentinelle()
+    js: dict[str, object] = {}
+    joker.on_round_start(js)
+
+    # EAST led the trump Jack.
+    event = TrickWonEvent(
+        winner=Seat.EAST,
+        cards=(
+            Card(Suit.HEARTS, Rank.JACK),  # EAST (leader)
+            Card(Suit.HEARTS, Rank.SEVEN),  # NORTH
+            Card(Suit.HEARTS, Rank.EIGHT),  # WEST
+            Card(Suit.HEARTS, Rank.NINE),   # SOUTH
+        ),
+        trick_number=1,
+        is_last=False,
+        card_points=20,
+        trump=Suit.HEARTS,
+        leader_seat=Seat.EAST,
+    )
+    joker.on_trick_won(event, js)
     assert js[f"{joker.id}_had_jack"] is False
+    assert js[f"{joker.id}_won_with_jack"] is False
 
 
 def test_la_sentinelle_arms_when_south_plays_trump_jack() -> None:
@@ -170,7 +204,7 @@ def test_la_sentinelle_arms_when_south_plays_trump_jack() -> None:
     js: dict[str, object] = {}
     joker.on_round_start(js)
 
-    # SOUTH led the trump Jack; partner won via overtrump.
+    # SOUTH led the trump Jack; partner (NORTH) won via overtrump.
     event = TrickWonEvent(
         winner=Seat.NORTH,
         cards=(
@@ -187,7 +221,9 @@ def test_la_sentinelle_arms_when_south_plays_trump_jack() -> None:
     )
     joker.on_trick_won(event, js)
     assert js[f"{joker.id}_had_jack"] is True
-    assert js[f"{joker.id}_won_with_jack"] is False
+    # 3.2.0: NORTH winning the trick is a team-NS win, so won_with_jack
+    # is True (pre-3.2 this was False because the check was Seat.SOUTH only).
+    assert js[f"{joker.id}_won_with_jack"] is True
 
 
 # ── Boss flag-driven behavior (#1 + #14 + #15) ──────────────────────────────

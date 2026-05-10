@@ -647,9 +647,21 @@ class TestLeDernierMot:
         )
         assert result is None
 
-    def test_north_last_trick_returns_none(self) -> None:
+    def test_north_last_trick_returns_result(self) -> None:
+        # 3.2.0: LeDernierMot now keys on team (NS), not seat (SOUTH) — the
+        # Dix de Der goes to whoever wins the LAST trick, regardless of who
+        # personally took it, so the joker must fire when North wins it too.
         result = self.joker.on_trick_won(
             make_trick_event(winner=Seat.NORTH, is_last=True), self.state
+        )
+        assert result is not None
+        assert result.add_chips == -10
+        assert result.times_mult == 2.0
+
+    def test_east_last_trick_returns_none(self) -> None:
+        # EW team winning the last trick must NOT fire LeDernierMot.
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.EAST, is_last=True), self.state
         )
         assert result is None
 

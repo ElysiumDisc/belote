@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from belote.deck import Rank
-from belote.game import Seat
+from belote.game import Seat, team_of
 
 from ...engine.event_bus import RoundEndEvent, TrickWonEvent
 from ..base import Joker, JokerResult
@@ -31,11 +31,9 @@ class LaSentinelle(Joker):
     cost = 9
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        # We can't see the dealt hand from on_round_start, but we can detect
-        # whether South was the player who held the trump Jack by inspecting
-        # the trick in which it was played (each player plays only their own
-        # cards, so the seat that played the Jack is the seat that was dealt
-        # it). See on_trick_won.
+        # Detect whether *our team* (NS) was dealt the trump Jack by inspecting
+        # the trick it was played in. Each player plays only their own cards,
+        # so the seat that plays the Jack is the seat that was dealt it.
         state[f"{self.id}_had_jack"] = False
         state[f"{self.id}_won_with_jack"] = False
         return None
@@ -49,10 +47,10 @@ class LaSentinelle(Joker):
         # Seat order: SOUTH→EAST→NORTH→WEST→SOUTH.
         seat = event.leader_seat
         for card in event.cards:
-            if card.suit == trump and card.rank == Rank.JACK and seat == Seat.SOUTH:
-                # Only South being dealt the Jack matters for this joker.
+            if card.suit == trump and card.rank == Rank.JACK and team_of(seat) == 0:
+                # NS team was dealt the trump Jack (either South or North).
                 state[f"{self.id}_had_jack"] = True
-                if event.winner == Seat.SOUTH:
+                if team_of(event.winner) == 0:
                     state[f"{self.id}_won_with_jack"] = True
             seat = seat.next_seat()
         return None

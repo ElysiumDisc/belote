@@ -2,6 +2,17 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.2.0
+
+- **Joker correctness** — La Sentinelle and Le Dernier Mot both used to key on `Seat.SOUTH` instead of the NS team, so the joker silently no-op'd when North (the AI partner) held the trump Jack or won the last trick. Both now correctly fire on team membership.
+- **Score floor** — L'Égoïste's `add_chips = -event.card_points` per partner-won trick could drive the running total negative and produce a negative final round score; `ScoreAccumulator.get_total` now clamps at 0 so the intermediate log can still show the deduction without the visible score going below zero.
+- **Auto-coinche event parity** — The NS-taker `auto_coinche` boss path now re-emits `BidMadeEvent` with the new `coinche_level`, matching the EW-taker branch. Pre-3.2 jokers and HUD subscribed to `on_bid` silently missed this code path.
+- **Determinism** — The shop and the three RNG-using tarots (`LeJugement`, `LaPretresse`, `LeFou`) now all draw from the run's seeded `_get_rng()` instead of the module-level `random`. Ghost-run replays are now reproducible across shop generations. `LaPretresse` additionally `sample`s instead of `choice`-ing twice, so the two planets it grants are always distinct.
+- **Registry / boss-field hygiene** — `register_joker/planet/tarot/voucher` now assert against duplicate IDs (typo'd registrations used to silently overwrite the original). `boss_fields` in `modifier_patch.py` is now derived from `BossModifiers`' dataclass fields, so adding a new flag no longer requires updating an out-of-band allowlist.
+- **UI fix** — `patch_trick_card` now re-applies `render`'s vertical-centering offset; on tall terminals (>40 rows) it used to draw single-card patches too high.
+- **Audit reconciliation** — This release consolidates the verified findings from two independent LLM code audits (Qwen 3.6 27B + Ring 1T). Both audits had load-bearing false positives — Qwen's two P0 "dead voucher / dead boss flag" claims were both wrong (the flags are consumed); Ring's "critical IllegalMoveError" only fires under test mocks. Eleven rejected claims are catalogued in the changelog so they aren't re-investigated.
+- **Test coverage** — 528 tests (up from 525). Strict gates still clean: pytest 528/528, mypy 0 errors, ruff 0 violations.
+
 ## What's new in 3.1.0
 
 - **Bug fixes** — HUD running-total no longer drifts under multi-boss combos (`Les Clubs Bannis + Le Roi Mort` style: pre-3.1.0 the rank-zero recompute silently overwrote the `ban_clubs` zeroing). `Shop.buy_item` no longer charges money when consumable slots are full — the "Slots full — sell first" banner now fires before any spend.
@@ -244,7 +255,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (525 tests)
+├── tests/             # Comprehensive test suite (528 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -260,14 +271,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **525 tests** passing with 100% coverage on game-logic modules.
+Currently **528 tests** passing with 100% coverage on game-logic modules.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 525/525 passed
+- **pytest**: 528/528 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

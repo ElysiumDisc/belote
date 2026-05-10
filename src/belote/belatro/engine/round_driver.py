@@ -236,6 +236,19 @@ def drive_round(
     elif state.boss_modifiers.auto_coinche and state.phase == Phase.PLAYING:
         # Boss forces coinche even if taker is on NS team.
         coinche_level = 1
+        # Re-emit BidMadeEvent so jokers/HUD subscribed to on_bid see the
+        # coinche level. The EW-taker branch above does this; this NS branch
+        # used to skip it, silently dropping the event for on_bid subscribers.
+        if state.taker is not None:
+            state = _emit(
+                BidMadeEvent(
+                    seat=state.taker,
+                    trump=state.trump,
+                    contract=state.contract or "normal",
+                    coinche_level=coinche_level,
+                ),
+                state,
+            )
 
     # Le Coincheur deck: every round starts pre-coinched (deck mod plumbed via
     # card_enhancements → state._joker_state).

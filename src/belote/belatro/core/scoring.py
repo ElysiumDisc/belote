@@ -242,8 +242,11 @@ class ScoreAccumulator:
         )
 
     def get_total(self, state: GameState) -> int:
-        # Avoid float precision issues for large integers if mult is effectively an int
-        chips: int = state._chips
+        # Clamp at 0: corrupted jokers (L'Égoïste in particular) can subtract
+        # chips per trick won by partner, and with enough partner tricks the
+        # running total can go negative, producing a negative final score.
+        # Final score should never be negative — clamp at the scoring boundary.
+        chips: int = max(0, state._chips)
         mult: float = state._mult
         if mult == float(int(mult)):
             return chips * int(mult)

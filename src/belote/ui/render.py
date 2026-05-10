@@ -889,6 +889,13 @@ def render(
     # If the terminal is taller than the rendered content, pad top + bottom so
     # the game centers vertically instead of clinging to the top.
     rendered_h = len(lines)
+    # Cache the unpadded line count so patch_trick_card() — which writes single
+    # cards into the trick mat after render() — can compute the same vertical-
+    # centering offset render() applied. Pre-3.2 it passed 0 (the "I don't
+    # know" sentinel) and skipped the offset entirely, drawing rows too high
+    # on tall terminals (>40 rows).
+    global _last_rendered_unpadded_h
+    _last_rendered_unpadded_h = rendered_h
     if rendered_h < term_h - 1:
         slack = (term_h - 1) - rendered_h
         top_pad = slack // 2
@@ -901,6 +908,12 @@ def render(
     # would remain visible. The cost is one extra 3-byte escape per row.
     rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
+
+
+# Set by render() so patch_trick_card() can re-apply the same vertical-
+# centering offset. 0 means "render() hasn't run yet" — _calculate_base_row
+# treats that as the no-adjustment fallback.
+_last_rendered_unpadded_h: int = 0
 
 
 def display_hud(state: GameState) -> None:
@@ -954,7 +967,7 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     cw = layout.card_w
     center_w = max(0, term_w - side_col_w * 2)
 
-    base_row = _calculate_base_row(term_h)
+    base_row = _calculate_base_row(term_h, _last_rendered_unpadded_h)
 
     row_offsets = _trick_row_offsets(layout)
 

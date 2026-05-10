@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from belote.game import Seat
+from belote.game import Seat, team_of
 
 from ...engine.event_bus import TrickWonEvent
 from ..base import Joker, JokerResult
@@ -58,7 +58,12 @@ class LeDernierMot(Joker):
     cost = 8
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.is_last and event.winner == Seat.SOUTH:
+        # Dix de Der is awarded to whichever team wins the last trick — so the
+        # joker must fire whenever the NS team won it (South *or* North), not
+        # only when South personally won. The pre-3.2 code keyed on
+        # event.winner == Seat.SOUTH and silently failed to apply when North
+        # took the last trick.
+        if event.is_last and team_of(event.winner) == 0:
             # Remove the flat Dix de Der bonus and replace with ×2 mult.
             # If no_dix_de_der boss is active the bonus was already 0, so don't subtract.
             dix_de_der = 0 if state.get("no_dix_de_der", False) else 10

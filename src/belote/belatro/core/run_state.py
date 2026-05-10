@@ -70,6 +70,12 @@ class BelAtroRun:
     # ── Last consumable used (read by LeFou tarot) ─────────
     last_consumable_id: str | None = None
 
+    # ── Last tarot status message ──────────────────────────
+    # Set by tarots that need to surface a non-fatal failure (e.g. LeJugement
+    # rolling a joker when joker_slots are full). The UI may read and display
+    # this; tests assert it. Cleared whenever a new tarot is used.
+    last_tarot_message: str | None = None
+
     # ── Determinism ────────────────────────────────────────
     seed: int | None = None
     _rng: Any = None
@@ -178,10 +184,15 @@ class BelAtroRun:
             self.endless_ante_offset += 1
             self.blind_index = 0
             return
-        # Standard run completion.
+        # Standard run completion. Set both flags so the terminal-state
+        # invariant (run_over ⇔ run is over, run_won ⇔ run is over AND we won)
+        # is consistent; main.py's loop break still handles the exit but
+        # downstream callers can now rely on run_over alone.
         self.run_won = True
+        self.run_over = True
 
     def enter_endless(self) -> None:
         """Toggle endless mode after beating ante 8."""
         self.endless = True
         self.run_won = False  # endless overrides run-won state
+        self.run_over = False  # ...and re-opens the run so the main loop continues

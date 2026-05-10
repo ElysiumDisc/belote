@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -32,8 +31,8 @@ class Shop:
         ("neg",  0.02),
     )
 
-    def _roll_edition(self) -> str:
-        roll = random.random()
+    def _roll_edition(self, rng: Any) -> str:
+        roll = rng.random()
         cum = 0.0
         for name, w in self._EDITION_WEIGHTS:
             cum += w
@@ -49,19 +48,24 @@ class Shop:
 
         prof = self.profile or Profile()
         self.inventory = []
+        # Use the run's seeded RNG so shop generation is deterministic when
+        # run.seed is set. Pre-3.2 the shop used the module-level `random`,
+        # which made shop contents non-deterministic even with a seeded run
+        # — breaking ghost-run replays.
+        rng = self.run._get_rng()
 
-        # 2 distinct Jokers (filtered by unlock). random.sample so the same
-        # joker can't show up twice in one shop. If the unlocked pool is
-        # smaller than 2, take whatever's available without padding.
+        # 2 distinct Jokers (filtered by unlock). sample so the same joker
+        # can't show up twice in one shop. If the unlocked pool is smaller
+        # than 2, take whatever's available without padding.
         available_jokers = registry.get_available_jokers(prof)
         joker_ids = list(available_jokers.keys())
         if joker_ids:
-            picks = random.sample(joker_ids, k=min(2, len(joker_ids)))
+            picks = rng.sample(joker_ids, k=min(2, len(joker_ids)))
             for j_id in picks:
                 j_item: Any = available_jokers[j_id]()
                 # Roll edition. Foil/Holo/Polychrome/Negative each adjust the
                 # cost slightly so the tooltip price reflects the bonus.
-                edition_name = self._roll_edition()
+                edition_name = self._roll_edition(rng)
                 j_item.edition = Edition(edition_name)
                 if edition_name != "none":
                     j_item.cost = int(j_item.cost * 1.5)
@@ -71,10 +75,10 @@ class Shop:
 
         # 1 Tarot or Planet (Le Grimoire guarantees a tarot)
         force_tarot = getattr(self.run, "guarantee_tarot_in_shop", False)
-        if force_tarot or random.random() < 0.5:
+        if force_tarot or rng.random() < 0.5:
             tarot_ids = list(registry.tarots.keys())
             if tarot_ids:
-                t_id = random.choice(tarot_ids)
+                t_id = rng.choice(tarot_ids)
                 tarot_cls = registry.get_tarot(t_id)
                 if tarot_cls:
                     t_item: Any = tarot_cls()
@@ -84,7 +88,7 @@ class Shop:
         else:
             planet_ids = list(registry.planets.keys())
             if planet_ids:
-                p_id = random.choice(planet_ids)
+                p_id = rng.choice(planet_ids)
                 planet_cls = registry.get_planet(p_id)
                 if planet_cls:
                     p_item: Any = planet_cls()
@@ -100,7 +104,7 @@ class Shop:
             if not any(isinstance(v, v_cls) for v in self.run.vouchers)
         ]
         if voucher_ids:
-            v_id = random.choice(voucher_ids)
+            v_id = rng.choice(voucher_ids)
             v_item: Any = available_vouchers[v_id]()
             self.inventory.append(v_item)
             if self.profile:

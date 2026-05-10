@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-05-10
+
+Two-audit reconciliation release — the prioritized fix list distilled from Qwen 3.6 27B + Ring 1T audits (~30 raw claims, ~half held up under verification). Twelve real bugs fixed across joker logic, registry hygiene, RNG determinism, and UI offsets; one new finding (Tarot RNG was also unseeded) caught by the fresh-hunt pass. Eleven audit claims rejected as false positives are catalogued in the plan file so they aren't re-investigated. 528 tests passing (up from 525), ruff and mypy strict still clean.
+
+### Fixed
+
+- **`src/belote/belatro/items/jokers/hand_comp.py::LaSentinelle`** — Detection of the trump Jack now keys on the NS *team* via `team_of(seat) == 0` instead of `seat == Seat.SOUTH`. Pre-3.2 the joker was silently no-op when North (the partner) was dealt the trump Jack, even though Belote's "you" is team-level. Trick-win detection follows the same team rule. Regressions: `tests/belatro/test_dead_flag_fixes.py::test_la_sentinelle_arms_when_partner_plays_trump_jack`, `test_la_sentinelle_does_not_arm_for_opponent_jack`.
+- **`src/belote/belatro/items/jokers/trick_timing.py::LeDernierMot`** — Dix de Der replacement now fires whenever the NS team wins the last trick (`team_of(event.winner) == 0`), not only when South personally takes it. Pre-3.2 the joker silently did nothing when partner won the closing trick. Regressions: `tests/belatro/test_belatro.py::TestLeDernierMot::test_north_last_trick_returns_result`, `test_east_last_trick_returns_none`.
+- **`src/belote/belatro/items/jokers/corrupted.py::LEgoiste` → `src/belote/belatro/core/scoring.py::ScoreAccumulator.get_total`** — Final chip total is now `max(0, state._chips)`. L'Égoïste subtracts `event.card_points` for every partner-won trick; with enough partner wins the running total could cross zero, producing a negative final round score. Clamping at the scoring boundary preserves the intermediate accounting log while guaranteeing the visible score is never negative.
+- **`src/belote/belatro/engine/round_driver.py:236-249`** — NS-taker `auto_coinche` path now re-emits `BidMadeEvent` with the new `coinche_level` so jokers/HUD subscribed to `on_bid` see the bump. The EW-taker branch above always emitted; this NS-side branch silently set `coinche_level = 1` without notifying subscribers.
+- **`src/belote/belatro/core/run_state.py::BelAtroRun.advance_blind`** — Victory now sets both `run_won = True` and `run_over = True`, so downstream callers can rely on `run_over` alone as the terminal-state signal. `enter_endless()` resets both, re-opening the run for endless mode. Pre-3.2 the main loop only terminated via a `break` after a `run_won` check — semantically correct but fragile under refactors.
+- **`src/belote/belatro/items/registry.py::ItemRegistry.register_*`** — All four register methods (`joker` / `planet` / `tarot` / `voucher`) now assert that an existing entry under the same `id` is the *same class*. Pre-3.2 a typo'd duplicate ID would silently overwrite the prior class, and the override would never surface until the original behaviour visibly broke. Idempotent re-registration of the same class still works for the test-suite swap pattern.
+- **`src/belote/belatro/engine/modifier_patch.py`** — `boss_fields` is now derived from `BossModifiers`' dataclass fields via `dataclasses.fields(BossModifiers)` instead of a hardcoded set. Pre-3.2 a new boss flag added to `BossModifiers` would be silently no-op'd until someone remembered to add it to the hardcoded allowlist in lock-step.
+
+### Determinism
+
+- **`src/belote/belatro/run/shop.py::Shop.generate_inventory`** — All RNG calls (`random.random` / `random.choice` / `random.sample` across edition rolls, joker pick, tarot/planet pick, voucher pick) now use `self.run._get_rng()` instead of the module-level `random`. Pre-3.2 shop contents were non-deterministic even with a seeded run, which broke ghost-run reproducibility. `Shop._roll_edition` signature changed to accept an explicit `rng` argument; the `test_shop_edition_weights_match_distribution` test was updated to pass the seeded RNG directly instead of monkey-patching `shop_mod.random.random`.
+- **`src/belote/belatro/items/tarots.py`** — `LeJugement`, `LaPretresse`, and `LeFou` all now draw from `run._get_rng()` instead of the module-level `random`. Module-level `import random` removed.
+
+### Improved
+
+- **`LaPretresse` planet picks now deduplicate** — switched from two independent `random.choice(planets)` calls to `rng.sample(planets, k=2)`, so the tarot can no longer pick the same planet twice. Falls back to a single pick when the planet pool has fewer than 2 entries.
+- **`LeJugement` slot-full notification** — new `BelAtroRun.last_tarot_message: str | None` field carries a non-fatal failure reason ("joker slots are full — no joker granted") when the tarot can't complete. Pre-3.2 the joker was silently dropped with no UI signal. Cleared whenever a tarot is used.
+- **`src/belote/ui/render.py::patch_trick_card`** — Now reads `_last_rendered_unpadded_h` (set by `render()`) and threads it into `_calculate_base_row`, so single-card patches re-apply the same vertical-centering offset `render()` used. Pre-3.2 it passed the "I don't know" sentinel (0) and skipped the offset entirely, drawing cards too high on tall terminals (>40 rows).
+- **`src/belote/ui/layout.py`** — `hud_style` docstring corrected. Pre-3.2 it claimed `"verbose" / "standard" / "compact"`, but no preset used `"standard"` and no consumer recognized it — only `"verbose"` and `"compact"` are real.
+
+### Rejected (catalogued so they aren't re-investigated)
+
+Eleven claims from the input audits were rejected after verification against the actual code:
+
+- LaBalance voucher (`tie_breaks_for_taker`) and LaCompetition (`separate_scoring`) flags — **both consumed** in `src/belote/scoring.py` and `src/belote/belatro/main.py`. Qwen flagged both as P0 dead-flag bugs; verification falsified both.
+- LeFou tarot "chain broken" — `run_state.py::consume` sets `last_consumable_id` *before* `item.use()` runs, so chaining works as intended.
+- `no_belote_rebelote` deck-mod flag — consumed at `src/belote/scoring.py:630`.
+- `_pending_tierce_charge` cross-round leak — each blind constructs a fresh `ScoreAccumulator` (main.py:126) and `drive_round` builds a fresh `GameState` via `new_game()` (round_driver.py:84), so `_joker_state` is empty at every round start. No cross-round persistence path exists.
+- `fuse_jokers` "loses `on_purchase` effects" — `on_purchase` mutates `run` state (which survives fusion); re-applying on the fused instance would *double-apply* cumulative effects (LeDemon's trust drop). Pre-3.2 behaviour is correct.
+- IllegalMoveError in `round_driver.py:291` — reachable only via test MockCallbacks; production `prompt_card` has a guard.
+- `_card_beats` defensive `assert trump is not None` — unreachable under current contract invariants.
+- `display_hud` no clear-to-EOL — HUD is rebuilt fresh per call; the claim was wrong.
+- Libra planet description — "×4 instead of ×3" matches the payout; mechanism is additive per coinche level but the description references the result.
+- `get_total()` float precision — explicit `int()` guard at scoring.py:248-249.
+- KeyboardInterrupt save — profile is saved *before* the loop starts; only intra-run delta is lost.
+
+### Internal
+
+- **Tests**: 525 → 528 (+3 net: −1 test renamed/repurposed for LeDernierMot team check, +2 new for La Sentinelle partner-detection and EW opponent rejection).
+- **Strict gates**: pytest 528/528, mypy 0 errors, ruff 0 violations across `src/` and `tests/`.
+- **Audit plan**: `~/.claude/plans/between-these-two-plans-graceful-puppy.md` — captures the two source audits, the verification pass that filtered them, the implementation order, and the catalogue of rejected claims.
+
 ## [3.1.0] - 2026-05-08
 
 Audit-action release — implements the prioritized fix list from 3.0.3. One real correctness bug fixed, one unreachable feature wired up, one money-leak path closed, three measurable perf wins, and the long-standing `modifier_patch` underscore shim retired. 525 tests passing (up from 510), ruff and mypy strict still clean across 75 source files.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from typing import TYPE_CHECKING
 
 from .base import Tarot
@@ -34,12 +33,19 @@ class LeJugement(Tarot):
 
     def use(self, run: BelAtroRun, context: object) -> None:
         from .registry import registry
+        run.last_tarot_message = None
         avail = registry.get_available_jokers(run.profile)
-        if avail:
-            j_id = random.choice(list(avail.keys()))
-            joker = avail[j_id]()
-            if len(run.jokers) < run.joker_slots:
-                run.jokers.append(joker)
+        if not avail:
+            run.last_tarot_message = "Le Jugement: no jokers available to grant."
+            return
+        if len(run.jokers) >= run.joker_slots:
+            run.last_tarot_message = (
+                "Le Jugement: joker slots are full — no joker granted."
+            )
+            return
+        rng = run._get_rng()
+        j_id = rng.choice(list(avail.keys()))
+        run.jokers.append(avail[j_id]())
 
 
 class LeMonde(Tarot):
@@ -58,9 +64,15 @@ class LaPretresse(Tarot):
 
     def use(self, run: BelAtroRun, context: object) -> None:
         from .registry import registry
+        run.last_tarot_message = None
         planets = list(registry.planets.values())
-        for _ in range(2):
-            p_cls = random.choice(planets)
+        if not planets:
+            return
+        # sample (not choice ×2) so the two planets are always distinct when the
+        # pool has ≥ 2 entries. Falls back to choice when the pool has just one.
+        rng = run._get_rng()
+        picks = rng.sample(planets, k=2) if len(planets) >= 2 else [planets[0]]
+        for p_cls in picks:
             if len(run.consumables) < run.consumable_slots:
                 run.consumables.append(p_cls())
 
@@ -109,7 +121,7 @@ class LeFou(Tarot):
         # started): grant a random tarot to the consumables tray.
         tarots = [t for t in registry.tarots.values() if t is not type(self)]
         if tarots and len(run.consumables) < run.consumable_slots:
-            run.consumables.append(random.choice(tarots)())
+            run.consumables.append(run._get_rng().choice(tarots)())
 
 
 class LaForce(Tarot):

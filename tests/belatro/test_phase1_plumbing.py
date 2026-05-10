@@ -131,19 +131,11 @@ def test_shop_edition_weights_match_distribution() -> None:
     n = 10_000
     counts: Counter[str] = Counter()
 
-    # Patch the module-level random.random to use our seeded generator so the
-    # test is deterministic. _roll_edition() is a pure stateless method.
+    # 3.2.0: _roll_edition now takes an explicit rng instead of using the
+    # module-level random — we pass our seeded generator directly.
     shop = Shop.__new__(Shop)  # bypass __init__; we only need _roll_edition
-    # Monkey-patch the random.random call site by stashing into globals.
-    import belote.belatro.run.shop as shop_mod
-
-    original = shop_mod.random.random
-    shop_mod.random.random = rng.random  # type: ignore[assignment]
-    try:
-        for _ in range(n):
-            counts[shop.__class__._roll_edition(shop)] += 1
-    finally:
-        shop_mod.random.random = original  # type: ignore[assignment]
+    for _ in range(n):
+        counts[shop._roll_edition(rng)] += 1
 
     declared = dict(Shop._EDITION_WEIGHTS)
     # Tolerance: ±2σ for a Bernoulli(p) trial over n rolls is ~2*sqrt(p*(1-p)/n)

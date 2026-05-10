@@ -30,7 +30,9 @@ class LayoutPreset:
     min_cols: int
     min_rows: int
 
-    # HUD verbosity: "verbose" (full labels), "standard" (current), "compact" (abbrev)
+    # HUD verbosity: "verbose" (full labels) or "compact" (abbreviated one-liner).
+    # The STANDARD preset uses "compact" because the verbose HUD (~132 chars)
+    # overflows at 96 cols — "verbose" only fires at spacious widths.
     hud_style: str
 
     # Whether the W/E "Last Trick" sidebar shows in side columns at this size.

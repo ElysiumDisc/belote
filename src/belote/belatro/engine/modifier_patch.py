@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
-from belote.game import GameState
+from belote.game import BossModifiers, GameState
+
+# Derived from BossModifiers so new flags added there are picked up
+# automatically; previously this was a hardcoded set that silently no-op'd
+# any new boss field not added here in lockstep.
+_BOSS_FIELDS: frozenset[str] = frozenset(f.name for f in dataclasses.fields(BossModifiers))
 
 
 class PatchedGameState:
@@ -32,17 +38,7 @@ class PatchedGameState:
             "was removed in 3.1.0 — use the unprefixed boss field name."
         )
 
-        # We'll treat all these flat patches as boss_modifiers fields
-        boss_fields = {
-            "no_belote", "dynamic_trump", "no_consecutive_team_wins", "seven_eight_trump",
-            "invert_scoring", "kings_zero", "auto_coinche", "queen_spades_penalty",
-            "hide_hud", "ban_clubs", "no_dix_de_der", "tens_zero", "hide_partner_hand",
-            "agent_double_active", "agent_double_late_only", "partner_forced_pass",
-            "lock_trust_zero", "separate_scoring",
-            "aces_zero", "jacks_zero", "declarations_zero",
-        }
-
-        if attr in boss_fields:
+        if attr in _BOSS_FIELDS:
             current_bm = self.boss_modifiers
             from belote.game import replace
             new_bm = replace(current_bm, **{attr: value})

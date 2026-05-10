@@ -32,18 +32,38 @@ class ItemRegistry:
         self._vouchers_cache.clear()
 
     def register_joker(self, joker_cls: type[Joker]) -> None:
+        existing = self.jokers.get(joker_cls.id)
+        assert existing is None or existing is joker_cls, (
+            f"duplicate joker id {joker_cls.id!r}: "
+            f"{existing.__name__} vs {joker_cls.__name__}"
+        )
         self.jokers[joker_cls.id] = joker_cls
         self._bump()
 
     def register_planet(self, planet_cls: type[Planet]) -> None:
+        existing = self.planets.get(planet_cls.id)
+        assert existing is None or existing is planet_cls, (
+            f"duplicate planet id {planet_cls.id!r}: "
+            f"{existing.__name__} vs {planet_cls.__name__}"
+        )
         self.planets[planet_cls.id] = planet_cls
         self._bump()
 
     def register_tarot(self, tarot_cls: type[Tarot]) -> None:
+        existing = self.tarots.get(tarot_cls.id)
+        assert existing is None or existing is tarot_cls, (
+            f"duplicate tarot id {tarot_cls.id!r}: "
+            f"{existing.__name__} vs {tarot_cls.__name__}"
+        )
         self.tarots[tarot_cls.id] = tarot_cls
         self._bump()
 
     def register_voucher(self, voucher_cls: type[Voucher]) -> None:
+        existing = self.vouchers.get(voucher_cls.id)
+        assert existing is None or existing is voucher_cls, (
+            f"duplicate voucher id {voucher_cls.id!r}: "
+            f"{existing.__name__} vs {voucher_cls.__name__}"
+        )
         self.vouchers[voucher_cls.id] = voucher_cls
         self._bump()
 
