@@ -47,7 +47,7 @@ BELATRO_RULES: dict[str, RulesPage] = {
                     "After each Blind you enter the Shop. Spend money to buy Jokers, Planet cards, and Tarots. "
                     "Jokers trigger during the round for bonus Chips or Mult. "
                     "Planet cards level up your scoring for a specific suit's trump contracts. "
-                    "You can also Reroll the shop for $2."
+                    "You can also Reroll the shop for $5."
                 ),
             },
             {

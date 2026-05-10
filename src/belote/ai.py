@@ -41,18 +41,31 @@ class AIMemory:
 
 
 class AIPlayer:
-    def __init__(self, seat: Seat, difficulty: Difficulty = Difficulty.MEDIUM) -> None:
+    def __init__(
+        self,
+        seat: Seat,
+        difficulty: Difficulty = Difficulty.MEDIUM,
+        rng: random.Random | None = None,
+    ) -> None:
         self.seat = seat
         self.difficulty = difficulty
         self.memory = AIMemory()
-        self._rng = random.Random()
+        # Accept the caller's seeded RNG (round driver / replay tooling) so
+        # easy-AI plays, personality jitter, and any other stochastic AI
+        # decisions are reproducible under a fixed seed. Falls back to an
+        # unseeded Random() for legacy callers that construct an AIPlayer
+        # directly (e.g. test fixtures).
+        self._rng = rng if rng is not None else random.Random()
         # Set per decide_card() call from state.boss_modifiers.seven_eight_trump.
         # All ranking helpers in this class read it via self._se.
         self._se = False
 
     def update_memory(self, state: GameState) -> None:
         """Update memory with currently visible information."""
-        if len(state.completed_tricks) == 0 and len(state.current_trick) == 0:
+        completed_count = len(state.completed_tricks)
+        current_count = len(state.current_trick)
+
+        if completed_count == 0 and current_count == 0:
             # New round - reset memory. Including the void-cache key — without
             # this a (0, 0) / (0, 1) key from the first decision of *this* round
             # could coincidentally match a leftover from the previous round and
@@ -61,6 +74,20 @@ class AIPlayer:
             for s in Seat:
                 self.memory.known_voids[s].clear()
             self.memory.partner_hand.clear()
+            self.memory.processed_tricks_count = 0
+            self.memory.last_voids_key = None
+        elif (
+            self.memory.last_voids_key is not None
+            and (completed_count, current_count) < self.memory.last_voids_key
+        ):
+            # Mid-round undo: the state regressed below the highest point
+            # we've processed. `known_voids` and `processed_tricks_count`
+            # are monotonic and would carry stale inferences forward
+            # (a void inferred from a now-rolled-back trick). Rebuild from
+            # the current state instead of trying to subtract.
+            self.memory.played.clear()
+            for s in Seat:
+                self.memory.known_voids[s].clear()
             self.memory.processed_tricks_count = 0
             self.memory.last_voids_key = None
 
@@ -473,7 +500,12 @@ class AIPlayer:
         trick = state.current_trick
 
         if not trump:
-            return legal[0]
+            # Sans Atout: the lookahead scoring uses `trick_rank(c, trump, ...)`
+            # which is meaningless without a trump suit. Fall back to easy
+            # (random over legal) rather than `legal[0]` so we don't degrade
+            # to a fully deterministic worst-case under SA — matches what
+            # `_medium_play` does at its own trump==None guard.
+            return self._easy_play(state, legal)
 
         # Update void inferences from completed tricks
         self._update_voids(state)

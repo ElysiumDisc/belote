@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-05-10
+
+Audit-of-audit release — an inbound LLM audit produced a 18-bug list with mixed accuracy (B1/B2/B7/B8/B9/B10/B14/B16/B17 real; B3/B5/B12/B18 and the ruff-violation claim either self-refuted or hallucinated). The verified subset was fixed, then a fresh independent pass turned up seven additional high-confidence bugs the original audit missed — chiefly La Rupture and L'Anarchie scoring divergences, an unseeded AI RNG that broke ghost-run determinism, and a stale-void inference leak across mid-round undo. All 17 fixes ship in this release. 535 tests passing, ruff and mypy strict still clean.
+
+### Fixed — audit findings
+
+- **`src/belote/scoring.py::trick_card_points` (B1)** — `ban_clubs` zero rule now matches `_calculate_base_points`: the whole trick zeros when *any* card is a club, not just when the lead is. Pre-3.3.1 the live HUD running total diverged from the final round score whenever a non-lead card was a club under the `LesClubsBannis` boss.
+- **`src/belote/stats.py::StatisticsManager.update_stats_round` (B2)** — Now calls `flush_stats()` after every round, not just at end-of-game. A crash between rounds no longer silently loses round-level stats and achievement unlocks.
+- **`src/belote/belatro/items/base.py::fuse_jokers` (B7)** — Fused joker now carries over the better edition of the two inputs (POLY > HOLO > FOIL > NONE; NEGATIVE collapses to NONE since its slot bonus was already granted at purchase) and inherits `is_corrupted` if either input was corrupted. Pre-3.3.1 `type(a)()` returned a class-default instance, silently erasing any Foil/Holo/Polychrome the player had paid for.
+- **`src/belote/belatro/ui/rules.py` (B8)** — Reroll cost doc text now reads `$5` to match `Shop.reroll_cost = 5` in code.
+- **`src/belote/belatro/engine/modifier_patch.py::patch` (B9)** — Replaced `assert not attr.startswith("_")` with an explicit `if … raise ValueError(...)`. The `assert` was strippable with `python -O`.
+- **`src/belote/belatro/progression/unlocks.py` + `src/belote/belatro/main.py::BelAtroGame._drain_unlock_announcements` (B10)** — Unlock notifications no longer `print()` raw to stdout (which scrolled and corrupted the alt-screen). Notices are queued on `UnlockTracker.pending_announcements` and drained by the host loop through `BelAtroAnnounce.banner`.
+- **`src/belote/belatro/run/ante_themes.py` + `src/belote/belatro/main.py::_play_blind` + `src/belote/belatro/core/run_state.py::target_score` (B14)** — The Phase 3.1 ante-themes module is now wired into the live game loop: `roll_theme(rng_value)` fires at the start of each ante (`blind_index == 0`) using the run's seeded RNG, `target_score` applies the theme's `target_multiplier(blind_index)`, and `on_blind_won` runs after each successful blind. Tests already covered the module in isolation; production code never invoked it.
+- **`src/belote/belatro/ui/trust_bar.py` (B16)** — Three-tier color: ≤3 red, 4–6 gold (neutral), ≥7 green. Default trust value 5 used to render red under the old `> 5` threshold, falsely signalling distrust at the start of every run.
+- **`src/belote/belatro/partner/personality.py::should_coinche` (B17 + wiring gap)** — Signature now takes a `Random` parameter; `LeFlambeur` consumes the round-driver's seeded RNG instead of the bare module-level `random.random()`. The round driver (`engine/round_driver.py:215-235`) also now calls `partner.personality.should_coinche(state, rng)` when the human player declines a coinche on an EW taker, giving the AI partner a chance to act on its own initiative (gated by `partner.trust.ai_degraded`). Pre-3.3.1 `should_coinche` had no production caller at all.
+
+### Fixed — independent bug-hunt pass (not in original audit)
+
+- **`src/belote/scoring.py::compute_trick_winners` (new helper in `game.py`) — La Rupture scoring divergence** — `play_card` reassigned the trick winner for the live HUD whenever `no_consecutive_team_wins` (La Rupture boss) would flip the win, but `score_round`, `_calculate_base_points`, `_apply_scoring_modifiers`, and `is_capot` all re-derived winners via raw `trick_winner_seat` calls — silently restoring the un-flipped winner and producing impossible capots / double-credited rounds. A new `compute_trick_winners(state, trump, is_sa)` helper in `game.py` carries the Rupture rule once and is used by every scoring path. Live HUD and final score now agree under La Rupture.
+- **`src/belote/game.py::GameState.belote_announcer` + `src/belote/scoring.py::score_round` — L'Anarchie + Belote/Rebelote** — Under L'Anarchie (dynamic trump), `state.trump` rotates mid-round. Scoring's `belote_holders.get(state.trump)` lookup then keyed on the *post-rotation* trump and missed any Belote announced on the original trump, silently zeroing the 20/40 bonus. New `belote_announcer: Seat | None` field on `GameState` captures the announcing seat at the moment `belote_tracker[0]` flips True; scoring reads it directly instead of going through the rotated-trump lookup.
+- **`src/belote/scoring.py::score_round` chute branch — `no_dix_de_der` ignored on chute** — The chute formula at line ~774 unconditionally added `LAST_TRICK_BONUS` (+10) to the defender total, even when the `Le Zéro Final` boss was active. The in-round path at line ~606 already gated the bonus on `no_dix_de_der`; the chute branch is now gated symmetrically.
+- **`src/belote/scoring.py::_apply_scoring_modifiers` — La Compétition (`separate_scoring`) parity** — Two parallel bugs to B1 / the chute fix above: (a) the separate-scoring branch zeroed only the *lead-clubs* trick under `ban_clubs` (same divergence we fixed in `trick_card_points`); (b) it unconditionally added +10 de der to the individual last-trick winner, ignoring `no_dix_de_der`. Both now mirror the main scoring path.
+- **`src/belote/ai.py::AIPlayer.__init__` + `src/belote/belatro/engine/round_driver.py` — AI RNG was unseeded** — `AIPlayer.__init__` constructed `random.Random()` (no seed) regardless of the round's seed. Easy-AI random plays, personality jitter, and any other stochastic AI decision randomised per process even at a fixed run seed — silently breaking ghost-run reproducibility, replay determinism, and seeded benchmarks. The round driver now passes its seeded `rng` into every AIPlayer it constructs; the constructor accepts an optional `rng` arg with the old unseeded `Random()` as fallback for legacy callers.
+- **`src/belote/ai.py::AIPlayer.update_memory` — stale void inference across undo** — `known_voids` and `processed_tricks_count` were monotonic; a mid-round undo (which reverts `state` from `gameflow.history`) left voids inferred from now-rolled-back tricks in place, causing the AI to misplay based on cards that no longer existed in the game. `update_memory` now detects regression (current `(completed_count, current_trick_len)` strictly less than `last_voids_key`) and rebuilds the inference set from the live state.
+- **`src/belote/ai.py::_hard_play` — first-legal-card under Sans Atout** — `_hard_play` bailed to `return legal[0]` when `state.trump is None` (the legitimate SA contract), making hard AI strictly worse than medium under SA — `_medium_play` falls through to `_easy_play` (uniform random) in the same case. Hard now does the same; the deterministic-worst-case path is gone.
+
+### Internal
+
+- **Tests**: 535 / 535 still passing.
+- **Strict gates**: mypy 0 errors (75 files), ruff 0 violations.
+- **One new GameState field**: `belote_announcer: Seat | None = None`, threaded through `play_card` and `reset_round_fields`. Default-None matches pre-3.3.1 serialisation for the legacy non-Anarchie path.
+- **One new public helper**: `belote.game.compute_trick_winners(state, trump, is_sans_atout) -> list[Seat | None]` — the single source of truth for La Rupture-aware winner resolution. `play_card`'s own Rupture branch is retained for the live HUD; the helper is what scoring now uses.
+
+## [3.3.0] - 2026-05-10
+
+BelAtro history overlay release — the [H] key in BelAtro mode now opens a populated, run-aware overlay instead of always showing "No rounds completed yet." Classic Belote's H-key path is unchanged. 535 tests passing (up from 528), ruff and mypy strict still clean.
+
+### Fixed
+
+- **`src/belote/belatro/ui/history.py` (new) + `src/belote/belatro/core/run_state.py::BelAtroRun.history` + `src/belote/belatro/main.py::BelAtroGame._record_history_entry`** — Pressing **H** in BelAtro now shows a per-blind ledger (ante, blind label, target, boss, taker, contract, score, status, money Δ, declarations) instead of an empty "No rounds completed yet." screen. Root cause: the classic [H] overlay (`belote.ui.prompts.show_history`) reads `state.score_history`, but the BelAtro round driver (`belatro.engine.round_driver.drive_round`) never invokes `apply_round_score` — the sole writer of `score_history` — and the existing BelAtro `on_round_end` callback was just `pass`. Fix: `BelAtroRun` now carries a parallel `history: list[BelAtroHistoryEntry]`, populated after each round in `_play_blind` from the score breakdown + run snapshot, and rendered by the new `show_belatro_history` overlay (wide table on ≥90-col terminals, three-line-per-row compact layout below).
+
+### Added
+
+- **`src/belote/ui/prompts.py::set_history_override`** — Module-level hook the BelAtro launcher installs in `BelAtroGame.start` (closure over `self.run.history`) and clears in its `finally` block. `show_history` short-circuits to the override when set, otherwise falls through to the classic `state.score_history` renderer. This is the seam that lets BelAtro own its overlay without forking `prompt_card` or threading a renderer through every UI call site.
+- **`tests/belatro/test_history_overlay.py`** — 7 new tests covering `BelAtroRun.history` default-empty, the four status branches (WON / FAILED / CAPOT / SURVIVED), and the override hook's routing + cleanup contract. An autouse fixture clears `_history_override` between tests so leaks across the test session are impossible.
+
+### Internal
+
+- **Tests**: 528 → 535 (+7).
+- **Strict gates**: pytest 535/535, mypy 0 errors, ruff 0 violations across `src/` and `tests/`.
+
 ## [3.2.0] - 2026-05-10
 
 Two-audit reconciliation release — the prioritized fix list distilled from Qwen 3.6 27B + Ring 1T audits (~30 raw claims, ~half held up under verification). Twelve real bugs fixed across joker logic, registry hygiene, RNG determinism, and UI offsets; one new finding (Tarot RNG was also unseeded) caught by the fresh-hunt pass. Eleven audit claims rejected as false positives are catalogued in the plan file so they aren't re-investigated. 528 tests passing (up from 525), ruff and mypy strict still clean.

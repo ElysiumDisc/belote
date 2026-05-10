@@ -84,14 +84,14 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (528 tests expected)
+# Full test suite (535 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.2.0):
+Current baseline (3.3.1):
 - **mypy**: 0 errors (strict mode)
 - **ruff**: 0 violations
-- **pytest**: 528 tests, 0 failures
+- **pytest**: 535 tests, 0 failures
 
 Run all gates before committing:
 

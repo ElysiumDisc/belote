@@ -15,6 +15,7 @@ from .game import (
     Seat,
     Sequence,
     TrickCard,
+    compute_trick_winners,
     reset_round_fields,
     team_of,
     trick_winner_seat,
@@ -315,21 +316,30 @@ def resolve_declarations(
 
 
 def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> int | None:
-    """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None."""
-    all_tricks = tricks if tricks is not None else list(state.completed_tricks)
-    if not all_tricks or len(all_tricks) < 8:
-        return None
+    """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None.
 
-    se_trump = state.boss_modifiers.seven_eight_trump
+    Honors La Rupture (`no_consecutive_team_wins`) when reading the state's
+    own tricks — capot under La Rupture is effectively impossible, but the
+    resolved winners are what the round was actually scored against.
+    """
     is_sa = state.contract == "sans_atout"
-    first_winner = trick_winner_seat(all_tricks[0], state.trump, se_trump, is_sa)
+    if tricks is None:
+        winners = compute_trick_winners(state, state.trump, is_sa)
+    else:
+        if not tricks or len(tricks) < 8:
+            return None
+        se_trump = state.boss_modifiers.seven_eight_trump
+        winners = [trick_winner_seat(t, state.trump, se_trump, is_sa) for t in tricks]
+
+    if not winners or len(winners) < 8:
+        return None
+    first_winner = winners[0]
     if first_winner is None:
         return None
     winning_team = team_of(first_winner)
 
-    for trick in all_tricks[1:]:
-        winner = trick_winner_seat(trick, state.trump, se_trump, is_sa)
-        if winner is None or team_of(winner) != winning_team:
+    for w in winners[1:]:
+        if w is None or team_of(w) != winning_team:
             return None
     return winning_team
 
@@ -388,7 +398,11 @@ def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
     if not trick:
         return 0
     bm = state.boss_modifiers
-    if bm.ban_clubs and trick[0].card.suit == Suit.CLUBS:
+    # ban_clubs zeros the whole trick if ANY card is a club — must match the
+    # final-scoring rule in _calculate_base_points (line ~459). Earlier this
+    # checked only the lead card, which caused the HUD running total to
+    # diverge from the final round score when a non-lead card was a club.
+    if bm.ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
         return 0
     total = 0
     for tc in trick:
@@ -399,8 +413,6 @@ def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
             or (bm.aces_zero and r == Rank.ACE)
             or (bm.jacks_zero and r == Rank.JACK)
         ):
-            continue
-        if bm.ban_clubs and tc.card.suit == Suit.CLUBS:
             continue
         total += card_points_fn(tc.card, state.trump, bm.seven_eight_trump)  # type: ignore[arg-type]
     return total
@@ -445,12 +457,7 @@ def _calculate_base_points(
         return card_points_fn(card, t)  # type: ignore[arg-type]
 
     if winners is None:
-        winners = [
-            trick_winner_seat(
-                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-            )
-            for trick in state.completed_tricks
-        ]
+        winners = compute_trick_winners(state, trump, is_sa)
 
     for trick, winner in zip(state.completed_tricks, winners, strict=False):
         if winner is None:
@@ -487,12 +494,7 @@ def _apply_scoring_modifiers(
     taker_team = team_of(state.taker) if state.taker is not None else 0
 
     if winners is None:
-        winners = [
-            trick_winner_seat(
-                trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-            )
-            for trick in state.completed_tricks
-        ]
+        winners = compute_trick_winners(state, trump, is_sa)
 
     # Boss: La Competition (Separate scoring) — applies under any active
     # contract, including Sans Atout (trump=None).
@@ -520,11 +522,20 @@ def _apply_scoring_modifiers(
         for trick, winner in zip(state.completed_tricks, winners, strict=False):
             if winner is None:
                 continue
-            tp = 0 if (ban_clubs and trick[0].card.suit == Suit.CLUBS) else sum(get_p(tc.card, trump) for tc in trick)
+            # ban_clubs zeros the trick when ANY card is a club — must match
+            # _calculate_base_points (`any(...)`). The lead-only check this
+            # branch used would silently award points for off-lead clubs.
+            if ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
+                tp = 0
+            else:
+                tp = sum(get_p(tc.card, trump) for tc in trick)
             scores[winner] += tp
 
-        # Add 10 de der to individual winner
-        if state.last_trick_winner in scores:
+        # Add 10 de der to individual winner (suppressed by Le Zéro Final).
+        if (
+            state.last_trick_winner in scores
+            and not state.boss_modifiers.no_dix_de_der
+        ):
             scores[state.last_trick_winner] += 10
 
         if taker_team == 0:
@@ -586,12 +597,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # all iterate the same list — without this the 8-trick walk runs 4× per
     # round. Per-team trick counts are derived once here too.
     is_sa = state.contract == "sans_atout"
-    winners: list[Seat | None] = [
-        trick_winner_seat(
-            trick, trump, state.boss_modifiers.seven_eight_trump, is_sa
-        )
-        for trick in state.completed_tricks
-    ]
+    winners: list[Seat | None] = compute_trick_winners(state, trump, is_sa)
     tricks_ns = sum(1 for w in winners if w is not None and team_of(w) == 0)
     tricks_ew = sum(1 for w in winners if w is not None and team_of(w) == 1)
 
@@ -620,7 +626,14 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # 5. Compute belote points. Belote is disabled under Sans Atout / Tout
     # Atout (no unique K+Q-of-trump) — `belote_holders` is empty post-bid in
     # those contracts, so this path naturally collapses.
-    belote_holder = state.belote_holders.get(trump) if trump is not None else None
+    # Prefer the captured announcer seat (recorded at the moment belote was
+    # declared) over re-deriving from belote_holders — under L'Anarchie the
+    # current state.trump differs from the trump at announcement time, and
+    # the dict lookup would miss the announcer entirely.
+    if state.belote_announcer is not None:
+        belote_holder: Seat | None = state.belote_announcer
+    else:
+        belote_holder = state.belote_holders.get(trump) if trump is not None else None
     taker_belote = 0
     defender_belote = 0
     taker_rebelote = False
@@ -769,9 +782,13 @@ def score_round(state: GameState) -> ScoringBreakdown:
             chute_total = GLOBAL_CONFIG.TOTAL_POINTS_TOUT_ATOUT
         else:
             chute_total = GLOBAL_CONFIG.TOTAL_POINTS
+        # Le Zéro Final boss zeros the dix-de-der; the chute pool must drop
+        # the +10 too. The in-round scoring path at line ~606 already gates
+        # the bonus on no_dix_de_der; this branch used to ignore it.
+        dix_de_der = 0 if state.boss_modifiers.no_dix_de_der else GLOBAL_CONFIG.LAST_TRICK_BONUS
         defender_total = (
             chute_total
-            + GLOBAL_CONFIG.LAST_TRICK_BONUS
+            + dix_de_der
             + defender_declarations
             + taker_declarations
             + defender_belote
@@ -852,10 +869,8 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
     tricks_ns = breakdown.tricks_ns
     tricks_ew = breakdown.tricks_ew
     if tricks_ns == 0 and tricks_ew == 0 and state.completed_tricks:
-        se_trump = state.boss_modifiers.seven_eight_trump
         is_sa = state.contract == "sans_atout"
-        for trick in state.completed_tricks:
-            w = trick_winner_seat(trick, state.trump, se_trump, is_sa)
+        for w in compute_trick_winners(state, state.trump, is_sa):
             if w is None:
                 continue
             if team_of(w) == 0:

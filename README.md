@@ -2,6 +2,22 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.3.1
+
+- **Scoring correctness under bosses** — La Rupture (`no_consecutive_team_wins`) used to be applied to the live HUD but silently ignored by `score_round`, so the running total and final score diverged and impossible capots could be reported. L'Anarchie (dynamic trump) rotated `state.trump` mid-round, after which scoring's `belote_holders.get(trump)` lookup missed any Belote announced on the original trump and silently zeroed the 20/40 bonus. Both are fixed: a new `compute_trick_winners` helper is the single source of truth for La Rupture-aware winner resolution, and a new `belote_announcer: Seat` field captures the announcing seat at declaration time so the rotated trump no longer matters.
+- **Boss interactions** — Le Zéro Final (`no_dix_de_der`) is now honored by the chute branch and by La Compétition's per-player tally (both used to unconditionally add +10 de der). La Compétition's `ban_clubs` check now matches the main scoring path (`any` rather than `lead-only`).
+- **Determinism** — `AIPlayer` now accepts and threads a seeded `Random` from the round driver. Pre-3.3.1 it constructed an unseeded `Random()` regardless of the run seed, breaking ghost-run reproducibility and replay determinism. Partner's `should_coinche` (Le Flambeur) was also using the global `random` module; now uses the driver's seeded RNG and is actually wired into the coinche flow (it had no production caller before).
+- **AI memory across undo** — Hard AI's void inference is no longer stuck with stale voids after a mid-round undo: `update_memory` detects state regression and rebuilds inferences from the live tricks.
+- **Hard AI under Sans Atout** — Used to deterministically return `legal[0]`; now falls back to easy (random) like medium, removing the worst-case under SA.
+- **Audit fixes** — `ban_clubs` HUD/final divergence (was real); per-round stats now flush to disk (achievement unlocks no longer lost on crash); `fuse_jokers` now carries over edition (FOIL/HOLO/POLY) and corruption; `assert` in `modifier_patch` replaced with `raise ValueError` (was strippable by `python -O`); unlock notifications routed through the TUI banner instead of raw `print()` (no more alt-screen scroll); ante themes (Café/Tournoi) wired into the live game loop (the Phase 3.1 module was previously test-only).
+- **UI** — Trust bar is three-tier (red ≤3, gold 4–6, green ≥7). Pre-3.3.1 the default trust of 5 rendered red, falsely signalling distrust at run start.
+- **Test coverage** — 535 tests still passing. Strict gates clean: pytest 535/535, mypy 0 errors, ruff 0 violations.
+
+## What's new in 3.3.0
+
+- **BelAtro [H] history overlay** — Pressing **H** during a BelAtro run now opens a populated, run-aware ledger: one row per blind with ante, blind label (Small/Big/Boss), target, boss name (when active), taker, contract, NS/EW trick split, BelAtro score, status (`WON` / `FAILED` / `CAPOT` / `SURVIVED`), and money delta. Before 3.3, [H] always showed "No rounds completed yet." in BelAtro because the round driver never invoked `apply_round_score` — the classic-mode writer of `state.score_history`. The fix keeps a parallel `BelAtroRun.history` ledger and routes [H] to a new BelAtro renderer via a small override hook in `belote.ui.prompts`. Classic Belote's [H] path is unchanged.
+- **Test coverage** — 535 tests (up from 528). Strict gates still clean: pytest 535/535, mypy 0 errors, ruff 0 violations.
+
 ## What's new in 3.2.0
 
 - **Joker correctness** — La Sentinelle and Le Dernier Mot both used to key on `Seat.SOUTH` instead of the NS team, so the joker silently no-op'd when North (the AI partner) held the trump Jack or won the last trick. Both now correctly fire on team membership.

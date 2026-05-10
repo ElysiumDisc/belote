@@ -15,11 +15,22 @@ class UnlockTracker:
     """
     Subscribes to the EventBus and evaluates unlock conditions.
     Updates the Profile and saves progress immediately.
+
+    Unlock notifications are queued on ``pending_announcements`` rather than
+    printed directly — raw stdout writes corrupt the alt-screen the TUI runs
+    in. The host loop drains the queue and renders each entry through the
+    BelAtroAnnounce banner.
     """
 
     def __init__(self, profile: Profile, save_manager: SaveManager) -> None:
         self.profile = profile
         self.save_manager = save_manager
+        self.pending_announcements: list[str] = []
+
+    def drain_announcements(self) -> list[str]:
+        """Return queued announcements and clear the buffer."""
+        out, self.pending_announcements = self.pending_announcements, []
+        return out
 
     def subscribe_to(self, bus: EventBus) -> None:
         bus.subscribe(self.on_event)
@@ -45,7 +56,9 @@ class UnlockTracker:
 
             # Unlock L'Exécuteur on first Capot
             if self.profile.unlock("l_executeur"):
-                print("\n[!] UNLOCKED: L'Exécuteur Joker (Scored a Capot)")
+                self.pending_announcements.append(
+                    "UNLOCKED: L'Exécuteur Joker (Scored a Capot)"
+                )
 
         # Sans Atout win: NS declared it and succeeded
         if (
@@ -56,7 +69,9 @@ class UnlockTracker:
             self.profile.stats["sans_atout_wins"] += 1
             dirty = True
             if self.profile.unlock("l_ideologue"):
-                print("\n[!] UNLOCKED: L'Idéologue Joker (Won a Sans Atout round)")
+                self.pending_announcements.append(
+                    "UNLOCKED: L'Idéologue Joker (Won a Sans Atout round)"
+                )
 
         # Tout Atout win: NS declared it and succeeded.
         from belote.deck import Suit
@@ -69,14 +84,18 @@ class UnlockTracker:
             self.profile.stats["tout_atout_wins"] += 1
             dirty = True
             if self.profile.unlock("le_fanatique"):
-                print("\n[!] UNLOCKED: Le Fanatique Joker (Won a Tout Atout round)")
+                self.pending_announcements.append(
+                    "UNLOCKED: Le Fanatique Joker (Won a Tout Atout round)"
+                )
 
         return dirty
 
     def check_ante_unlocks(self, ante_number: int) -> None:
         """Called when advancing to a new Ante."""
         if ante_number >= 6 and self.profile.unlock("la_surcoinche"):
-            print("\n[!] UNLOCKED: La Surcoinche Voucher (Reached Ante 6)")
+            self.pending_announcements.append(
+                "UNLOCKED: La Surcoinche Voucher (Reached Ante 6)"
+            )
             self.save_manager.save_profile(self.profile)
 
     def notify_run_won(self) -> None:
@@ -89,6 +108,8 @@ class UnlockTracker:
         unlocked_any |= self.profile.unlock("l_ermite")
 
         if unlocked_any:
-            print("\n[!] UNLOCKED: New Starting Decks (Won a Run)")
+            self.pending_announcements.append(
+                "UNLOCKED: New Starting Decks (Won a Run)"
+            )
 
         self.save_manager.save_profile(self.profile)

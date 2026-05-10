@@ -33,10 +33,11 @@ class PatchedGameState:
         against in tests/belatro/test_boss_modifiers_integration.py
         `test_invariant_no_underscore_boss_attrs`.
         """
-        assert not attr.startswith("_"), (
-            f"patch() received leading-underscore attr {attr!r}; the 3.0.x shim "
-            "was removed in 3.1.0 — use the unprefixed boss field name."
-        )
+        if attr.startswith("_"):
+            raise ValueError(
+                f"patch() received leading-underscore attr {attr!r}; the 3.0.x shim "
+                "was removed in 3.1.0 — use the unprefixed boss field name."
+            )
 
         if attr in _BOSS_FIELDS:
             current_bm = self.boss_modifiers

@@ -19,7 +19,15 @@ class TrustBar:
         val = self.trust.value
         filled = "█" * val
         empty = "░" * (10 - val)
-        color = green_fg() if val > 5 else red_fg()
+        # Three-tier color: ≤3 red (danger), 4–6 gold (neutral), ≥7 green
+        # (healthy). The default trust=5 used to render red under the old
+        # `> 5` threshold, which falsely signalled distrust at game start.
+        if val <= 3:
+            color = red_fg()
+        elif val >= 7:
+            color = green_fg()
+        else:
+            color = gold_fg()
         bar = color + filled + white_fg() + empty + RESET
 
         if self.trust.ai_degraded:

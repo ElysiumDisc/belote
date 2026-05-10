@@ -175,6 +175,29 @@ def fuse_jokers(a: Joker, b: Joker) -> Joker:
     new_idx = min(base_idx + 1, _RARITY_LADDER.index(Rarity.RARE))
     fused.rarity = _RARITY_LADDER[new_idx]
     fused.fusable = False  # one-time fusion only
+    # Carry over the better edition. type(a)() returns a fresh instance with
+    # the class default (NONE), so without this the player would silently lose
+    # any Foil/Holo/Polychrome they paid for. NEGATIVE is purchase-time only
+    # (the extra slot was already granted) so it doesn't propagate through
+    # fusion — fall back to NONE in that case.
+    fused.edition = _better_edition(a.edition, b.edition)
+    # Corruption is sticky — if either input was corrupted, so is the fusion.
+    fused.is_corrupted = a.is_corrupted or b.is_corrupted
     # Stamp a marker so callers can identify fused jokers
     fused.name = f"{a.name} + {b.name}"
     return fused
+
+
+_EDITION_RANK: dict[Edition, int] = {
+    Edition.NONE: 0,
+    Edition.NEGATIVE: 0,  # purchase-time only, doesn't survive fusion
+    Edition.FOIL: 1,
+    Edition.HOLO: 2,
+    Edition.POLYCHROME: 3,
+}
+
+
+def _better_edition(a: Edition, b: Edition) -> Edition:
+    pick = a if _EDITION_RANK[a] >= _EDITION_RANK[b] else b
+    # NEGATIVE collapses to NONE post-fusion (slot already counted).
+    return Edition.NONE if pick == Edition.NEGATIVE else pick

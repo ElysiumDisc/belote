@@ -217,6 +217,13 @@ class GameState:
     # reference, not the dict contents.
     belote_holders: dict[Suit, Seat] = field(default_factory=dict)
     belote_tracker: tuple[bool, bool] = (False, False)
+    # Set when belote_tracker[0] first flips True — captures *which seat*
+    # announced belote at the moment of announcement. Needed because the
+    # L'Anarchie boss rotates state.trump mid-round, which would otherwise
+    # make the scoring-side `belote_holders.get(state.trump)` lookup return
+    # the wrong seat (or None) for a belote that was announced on the
+    # original trump.
+    belote_announcer: Seat | None = None
     first_trick_done: bool = False
     litige_points: int = 0
 
@@ -259,6 +266,7 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "declarations": (),
         "announced": None,
         "belote_tracker": (False, False),
+        "belote_announcer": None,
         "first_trick_done": False,
         "boss_modifiers": BossModifiers(),
     }
@@ -745,6 +753,50 @@ _NONTRUMP_RANK: dict[Rank, int] = {
 }
 
 
+def compute_trick_winners(
+    state: GameState,
+    trump: Suit | None,
+    is_sans_atout: bool,
+) -> list[Seat | None]:
+    """Resolve the winner of each completed trick, honoring La Rupture.
+
+    La Rupture (`no_consecutive_team_wins`) flips the win to the opposing
+    team when a trick's raw winner would be on the same team as the previous
+    trick's resolved winner. Without this helper, `play_card` applied Rupture
+    to live HUD but the final scoring path re-derived winners from raw
+    `trick_winner_seat` — silently restoring the original winner and double-
+    crediting the round.
+    """
+    se_trump = state.boss_modifiers.seven_eight_trump
+    rupture = state.boss_modifiers.no_consecutive_team_wins
+    winners: list[Seat | None] = []
+    prev_winner: Seat | None = None
+    for trick in state.completed_tricks:
+        w = trick_winner_seat(trick, trump, se_trump, is_sans_atout)
+        if (
+            rupture
+            and prev_winner is not None
+            and w is not None
+            and team_of(w) == team_of(prev_winner)
+        ):
+            other_team_cards = [
+                tc for tc in trick if team_of(tc.seat) != team_of(prev_winner)
+            ]
+            if other_team_cards and (trump is not None or is_sans_atout):
+                best_other = _current_trick_winner(
+                    other_team_cards,
+                    trump,
+                    trick[0].card.suit,
+                    se_trump,
+                    is_sans_atout,
+                )
+                if best_other is not None:
+                    w = best_other
+        winners.append(w)
+        prev_winner = w
+    return winners
+
+
 def trick_winner_seat(
     trick: tuple[TrickCard, ...],
     trump: Suit | None,
@@ -800,12 +852,17 @@ def play_card(state: GameState, card: Card) -> GameState:
     announced = None
     trump = state.trump  # always set during PLAYING phase
     belote_tracker = list(state.belote_tracker)
+    belote_announcer = state.belote_announcer
     if trump and state.belote_holders.get(trump) == state.turn and not state.boss_modifiers.no_belote:
         is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
 
         if is_k_q:
             if not belote_tracker[0]:
                 belote_tracker[0] = True
+                # Capture the announcing seat — needed so scoring doesn't lose
+                # the announcement when L'Anarchie rotates state.trump later
+                # in the round.
+                belote_announcer = state.turn
                 announced = "Belote!"
             elif not belote_tracker[1]:
                 belote_tracker[1] = True
@@ -904,6 +961,7 @@ def play_card(state: GameState, card: Card) -> GameState:
                 phase=Phase.SCORING,
                 announced=announced,
                 belote_tracker=(belote_tracker[0], belote_tracker[1]),
+                belote_announcer=belote_announcer,
                 first_trick_done=True,
                 current_round_points=new_round_points,
                 trump=current_trump,
@@ -921,6 +979,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             phase=Phase.PLAYING,
             announced=announced,
             belote_tracker=(belote_tracker[0], belote_tracker[1]),
+            belote_announcer=belote_announcer,
             first_trick_done=first_trick_done,
             current_round_points=new_round_points,
             trump=current_trump,
@@ -934,6 +993,7 @@ def play_card(state: GameState, card: Card) -> GameState:
         turn=next_turn,
         announced=announced,
         belote_tracker=(belote_tracker[0], belote_tracker[1]),
+        belote_announcer=belote_announcer,
     )
 
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import random
 from abc import ABC, abstractmethod
 from collections import Counter
+from random import Random
 
 from belote.game import SANS_ATOUT_BID, BidValue, GameState, Seat, Suit
 
@@ -27,8 +27,12 @@ class PartnerPersonality(ABC):
         """
         ...
 
-    def should_coinche(self, state: GameState) -> bool:
-        """Return True if partner should Coinche."""
+    def should_coinche(self, state: GameState, rng: Random) -> bool:
+        """Return True if partner should Coinche the opposing taker's bid.
+
+        The seeded `rng` (the round driver's RNG) is supplied so personalities
+        with a stochastic component remain reproducible under a fixed seed.
+        """
         return False
 
 
@@ -122,8 +126,8 @@ class LeFlambeur(PartnerPersonality):
         )
         return max(length, key=lambda s: (length[s], honor_count[s]))
 
-    def should_coinche(self, state: GameState) -> bool:
-        return random.random() < 0.2
+    def should_coinche(self, state: GameState, rng: Random) -> bool:
+        return rng.random() < 0.2
 
 
 class LeSacrifie(PartnerPersonality):

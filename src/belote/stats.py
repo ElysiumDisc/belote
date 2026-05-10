@@ -135,6 +135,10 @@ class StatisticsManager:
         from .achievements import evaluate_round
         evaluate_round(stats, points_scored=points_scored, was_capot=is_capot)
 
+        # Persist after every round so a mid-game crash doesn't lose
+        # round-level stats or freshly-unlocked achievements.
+        self.flush_stats()
+
     def update_stats_game(self, won: bool, num_rounds: int, difficulty: str) -> None:
         stats = self.load_stats()
         stats.games_played += 1

@@ -134,10 +134,14 @@ def drive_round(
         "medium": Difficulty.MEDIUM,
         "hard": Difficulty.HARD,
     }.get(_north_diff_str, Difficulty.MEDIUM)
+    # Thread the round's seeded RNG into every AI seat so easy-AI plays and
+    # personality jitter stay reproducible under a fixed seed. Ghost-run and
+    # replay tooling rely on this — without it, AIPlayer's old unseeded
+    # default RNG randomised behavior per process even at a fixed seed.
     ai_players = {
-        Seat.EAST: AIPlayer(Seat.EAST, Difficulty.MEDIUM),
-        Seat.NORTH: AIPlayer(Seat.NORTH, _north_diff),
-        Seat.WEST: AIPlayer(Seat.WEST, Difficulty.MEDIUM),
+        Seat.EAST: AIPlayer(Seat.EAST, Difficulty.MEDIUM, rng=rng),
+        Seat.NORTH: AIPlayer(Seat.NORTH, _north_diff, rng=rng),
+        Seat.WEST: AIPlayer(Seat.WEST, Difficulty.MEDIUM, rng=rng),
     }
 
     if acc is not None:
@@ -219,7 +223,19 @@ def drive_round(
             surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
             if surcoinche_unlocked and rng.random() < 0.3:
                 coinche_level = 2
-            # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
+        else:
+            # Player declined — give the AI partner (North, same defending team)
+            # a chance to coinche on its own initiative. Personality-driven and
+            # gated by trust: a degraded partner won't act independently.
+            if (
+                not partner.trust.ai_degraded
+                and partner.personality.should_coinche(state, rng)
+            ):
+                coinche_level = 1
+                surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
+                if surcoinche_unlocked and rng.random() < 0.3:
+                    coinche_level = 2
+        # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
         if state.boss_modifiers.auto_coinche:
             coinche_level = max(coinche_level, 1)
         # Re-emit the final BidMadeEvent so jokers/HUD see the coinche level.

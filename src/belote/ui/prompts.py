@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import Literal
 
 from ..ansi import (
@@ -346,8 +347,28 @@ def _ljust_visible(s: str, width: int) -> str:
     return s + " " * pad
 
 
+# 3.3.0: dispatch hook for the [H] overlay. BelAtro registers its own
+# renderer (reading BelAtroRun.history) because state.score_history is
+# never populated under the BelAtro round driver. None ⇒ classic path.
+_history_override: Callable[[KeyReader], None] | None = None
+
+
+def set_history_override(renderer: Callable[[KeyReader], None] | None) -> None:
+    """Install (or clear with ``None``) the [H]-key history renderer.
+
+    Used by BelAtro to swap in its per-blind history view; the classic
+    Belote path leaves this as ``None`` and falls through to
+    ``state.score_history`` rendering.
+    """
+    global _history_override
+    _history_override = renderer
+
+
 def show_history(state: GameState, reader: KeyReader) -> None:
     """Display a scrollable overlay of round-by-round scores."""
+    if _history_override is not None:
+        _history_override(reader)
+        return
     scroll = 0
 
     while True:

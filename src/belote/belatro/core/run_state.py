@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from ..items.base import Joker, Voucher
     from ..progression.save import Profile
     from ..run.ante import Ante
+    from ..ui.history import BelAtroHistoryEntry
 
 from ..partner.partner_state import PartnerState
 from .economy import Economy
@@ -75,6 +76,12 @@ class BelAtroRun:
     # rolling a joker when joker_slots are full). The UI may read and display
     # this; tests assert it. Cleared whenever a new tarot is used.
     last_tarot_message: str | None = None
+
+    # ── Per-blind history (powers the [H] overlay) ─────────
+    # Appended by `BelAtroGame._play_blind` after each Belote round. The
+    # classic `state.score_history` is never written under BelAtro (see
+    # `belatro/ui/history.py` header for the full rationale).
+    history: list[BelAtroHistoryEntry] = field(default_factory=list)
 
     # ── Determinism ────────────────────────────────────────
     seed: int | None = None
@@ -167,7 +174,23 @@ class BelAtroRun:
 
     @property
     def target_score(self) -> int:
-        return self.current_blind.target
+        base = self.current_blind.target
+        theme = self.get_ante_theme()
+        if theme is None:
+            return base
+        # Soft target adjustments (e.g. Café reduces boss target by 5%).
+        # Round to int after the float multiply so downstream scoring
+        # comparisons stay integral.
+        return max(1, int(round(base * theme.target_multiplier(self.blind_index))))
+
+    def get_ante_theme(self) -> Any:
+        """Resolve `ante_theme` (id) back to an AnteTheme instance, or None."""
+        if not self.ante_theme:
+            return None
+        from ..run.ante_themes import THEME_BY_ID
+
+        cls = THEME_BY_ID.get(self.ante_theme)
+        return cls() if cls is not None else None
 
     def advance_blind(self) -> None:
         if self.blind_index < 2:

@@ -61,11 +61,24 @@ class BelAtroGame:
                         seed=self.run.seed if self.run.seed is not None else 0,
                         deck_id=self.run.deck_id,
                     )
+                # 3.3.0: route the in-game [H] key to the BelAtro history
+                # overlay (reading `self.run.history`) for the duration of
+                # the run. Cleared in the finally block so the classic
+                # Belote menu returns to the default `state.score_history`
+                # path on exit.
+                from ..ui.prompts import set_history_override
+                from .ui.history import show_belatro_history
+                run = self.run  # capture for the closure (mypy: narrowed)
+                set_history_override(
+                    lambda reader: show_belatro_history(reader, run.history)
+                )
                 self._run_loop()
         except KeyboardInterrupt:
             # Catch exit signals to return to the Belote main menu
             return
         finally:
+            from ..ui.prompts import set_history_override
+            set_history_override(None)
             # 3.0.0: append a one-line summary of the just-ended run for the
             # player's own analysis. Best-effort; swallowed on failure.
             if self.run is not None:
@@ -74,6 +87,19 @@ class BelAtroGame:
                 if self._ghost_recorder is not None:
                     label = "won" if self.run.run_won else f"ante{self.run.ante_number}"
                     self._ghost_recorder.save(label=label)
+
+    def _drain_unlock_announcements(self) -> None:
+        """Render any queued unlock notices through the TUI banner.
+
+        Replaces the old raw-stdout `print()` notices in UnlockTracker, which
+        scrolled and corrupted the alt-screen buffer.
+        """
+        if self.reader is None:
+            self.unlock_tracker.drain_announcements()
+            return
+        from .ui.announce import BelAtroAnnounce
+        for msg in self.unlock_tracker.drain_announcements():
+            BelAtroAnnounce.banner(msg, self.reader, hold=1.5)
 
     def _run_loop(self) -> None:
         """Main game loop: Blind -> Shop -> Next."""
@@ -84,6 +110,7 @@ class BelAtroGame:
             while not self.run.run_over:
                 # 1. Round (Blind)
                 self._play_blind()
+                self._drain_unlock_announcements()
 
                 if self.run.run_over:
                     break
@@ -97,8 +124,10 @@ class BelAtroGame:
                 # 3. Advance
                 self.run.advance_blind()
                 self.unlock_tracker.check_ante_unlocks(self.run.ante_number)
+                self._drain_unlock_announcements()
                 if self.run.run_won:
                     self.unlock_tracker.notify_run_won()
+                    self._drain_unlock_announcements()
                     if self.reader is not None:
                         BelAtroAnnounce.banner("YOU WON!", self.reader, hold=2.5)
                         # 3.0.0: offer Endless mode after the canonical 8 antes.
@@ -121,6 +150,20 @@ class BelAtroGame:
         """Execute one Belote round for the current blind."""
         if self.run is None or self.reader is None:
             return
+        # Phase 3.1: roll an Ante theme at the start of each ante (blind 0).
+        # Uses the run's seeded RNG so themes are deterministic per seed.
+        # The roll runs once per ante; subsequent blinds re-use the same theme.
+        if self.run.blind_index == 0:
+            from .run.ante_themes import roll_theme
+            theme = roll_theme(self.run._get_rng().random())
+            self.run.ante_theme = theme.id if theme is not None else None
+            if theme is not None:
+                theme.on_ante_start(self.run)
+        # 3.3.0: snapshots used at end of round to build the [H] history entry.
+        history_ante = self.run.ante_number
+        history_blind_index = self.run.blind_index
+        history_target = self.run.target_score
+        money_before = self.run.economy.money
         bus = EventBus()
         self.unlock_tracker.subscribe_to(bus)
         acc = ScoreAccumulator()
@@ -306,12 +349,12 @@ class BelAtroGame:
         self.run.partner_mood = trust.mood()
 
         effective_target = acc.target_score  # doubled for L'Avocat, normal otherwise
+        survived_via_insurance = False
         if total < effective_target:
             # Phase 2.1: Capot Insurance halves the chute loss (one-shot).
-            failure_softened = False
             if bd.is_failed and self.run.capot_insurance:
                 self.run.capot_insurance = False
-                failure_softened = True
+                survived_via_insurance = True
                 # Defer run-over by one blind: the player paid for a safety net.
                 # We treat the round as a survived chute (no run-over flag).
                 BelAtroAnnounce.banner(
@@ -319,7 +362,7 @@ class BelAtroGame:
                     self.reader,
                     hold=2.0,
                 )
-            if not failure_softened:
+            if not survived_via_insurance:
                 self.run.run_over = True
                 BelAtroAnnounce.banner(
                     f"RUN OVER — Failed to meet target {effective_target} (scored {total}).",
@@ -360,12 +403,113 @@ class BelAtroGame:
                 else:
                     trust.blind_beaten()
 
+            # Phase 3.1: fire the ante theme's per-blind-won hook (e.g. Tournoi
+            # awards bonus money, Café gives +1 trust on big-blind wins).
+            theme = self.run.get_ante_theme()
+            if theme is not None:
+                theme.on_blind_won(self.run, self.run.blind_index)
+
         # Partner-specific trust events (skipped under Le Divorce)
         if not lock_trust:
             if bd.taker_team == 0 and bd.is_failed:
                 trust.chute()
             elif bd.is_capot and bd.taker_team == 0:
                 trust.capot_together()
+
+        # 3.3.0: append a BelAtro-side history entry (the [H] overlay reads
+        # `self.run.history` via the override hook installed in `start()`).
+        self._record_history_entry(
+            ante=history_ante,
+            blind_index=history_blind_index,
+            target=history_target,
+            boss=boss,
+            final_state=final_state,
+            bd=bd,
+            total=total,
+            money_delta=self.run.economy.money - money_before,
+            survived_via_insurance=survived_via_insurance,
+        )
+
+    def _record_history_entry(
+        self,
+        *,
+        ante: int,
+        blind_index: int,
+        target: int,
+        boss: object,
+        final_state: object,
+        bd: object,
+        total: int,
+        money_delta: int,
+        survived_via_insurance: bool,
+    ) -> None:
+        """Build and append one BelAtroHistoryEntry to `self.run.history`.
+
+        Pulled out of `_play_blind` so the long round body stays readable.
+        Kept private — callers should never construct entries directly.
+        """
+        if self.run is None:
+            return
+        from .ui.history import BelAtroHistoryEntry
+
+        blind_label = ("Small", "Big", "Boss")[blind_index] if 0 <= blind_index <= 2 else "?"
+        boss_name = getattr(boss, "name", None) if boss is not None else None
+
+        taker = getattr(final_state, "taker", None)
+        if taker is None:
+            taker_label = "—"
+        else:
+            team = "NS" if taker.value % 2 == 0 else "EW"
+            taker_label = f"{taker.name[0]} ({team})"
+
+        contract_field = getattr(final_state, "contract", None)
+        trump = getattr(final_state, "trump", None)
+        if contract_field == "sans_atout":
+            contract_str = "SA"
+        elif contract_field == "tout_atout":
+            contract_str = "TA"
+        elif trump is not None and hasattr(trump, "symbol"):
+            contract_str = trump.symbol
+        else:
+            contract_str = "—"
+
+        is_capot = bool(getattr(bd, "is_capot", False))
+        taker_team = getattr(bd, "taker_team", None)
+        if total >= target and is_capot and taker_team == 0:
+            status = "CAPOT"
+        elif total >= target:
+            status = "WON"
+        elif survived_via_insurance:
+            status = "SURVIVED"
+        else:
+            status = "FAILED"
+
+        tricks_ns = int(getattr(bd, "tricks_ns", 0))
+        tricks_ew = int(getattr(bd, "tricks_ew", 0))
+
+        # Pull declaration summaries off the breakdown when present. score_round
+        # doesn't currently expose them, so this is best-effort and falls back
+        # to empty tuples — the renderer treats those as "─".
+        decl_ns: tuple[str, ...] = tuple(getattr(bd, "decl_summary_ns", ()) or ())
+        decl_ew: tuple[str, ...] = tuple(getattr(bd, "decl_summary_ew", ()) or ())
+
+        self.run.history.append(
+            BelAtroHistoryEntry(
+                ante=ante,
+                blind_label=blind_label,
+                target=target,
+                boss_name=boss_name,
+                taker_label=taker_label,
+                contract=contract_str,
+                tricks_ns=tricks_ns,
+                tricks_ew=tricks_ew,
+                score=total,
+                status=status,
+                money_delta=money_delta,
+                decl_summary_ns=decl_ns,
+                decl_summary_ew=decl_ew,
+            )
+        )
 
 
 def main() -> None:
