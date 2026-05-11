@@ -90,8 +90,17 @@ class SaveManager:
             _default_stats = dict.fromkeys(
                 ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
             )
+            # When a saved profile is missing `unlocked_ids` (older saves,
+            # manual edits, partial writes), fall back to the Profile
+            # dataclass default rather than an empty list — otherwise the
+            # player loses their starter unlocks on reload.
+            unlocked_ids = (
+                list(data["unlocked_ids"])
+                if "unlocked_ids" in data
+                else Profile().unlocked_ids
+            )
             return Profile(
-                unlocked_ids=data.get("unlocked_ids", []),
+                unlocked_ids=unlocked_ids,
                 discovered_items=data.get("discovered_items", []),
                 stats={**_default_stats, **data.get("stats", {})},
             )

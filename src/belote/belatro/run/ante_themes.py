@@ -27,8 +27,13 @@ class AnteTheme:
         """Per-blind multiplier on the target score. Default 1.0 (no change)."""
         return 1.0
 
-    def on_blind_won(self, run: BelAtroRun, blind_index: int) -> None:
-        """Hook fired after a blind is won under this theme."""
+    def on_blind_won(self, run: BelAtroRun, blind_index: int, blind_payout: int) -> None:
+        """Hook fired after a blind is won under this theme.
+
+        `blind_payout` is the net money awarded for the round (all sources:
+        base payout, L'Avocat doubling, bonus money, Le Puriste, L'Aristocrate).
+        Themes that want "X% of round payout" must derive it from this value.
+        """
 
 
 class CafeAnte(AnteTheme):
@@ -53,7 +58,7 @@ class CafeAnte(AnteTheme):
     def target_multiplier(self, blind_index: int) -> float:
         return 0.95 if blind_index == 2 else 1.0
 
-    def on_blind_won(self, run: BelAtroRun, blind_index: int) -> None:
+    def on_blind_won(self, run: BelAtroRun, blind_index: int, blind_payout: int) -> None:
         if blind_index == 1:
             run.partner.trust.blind_beaten()
 
@@ -70,10 +75,10 @@ class TournoiAnte(AnteTheme):
     def on_ante_start(self, run: BelAtroRun) -> None:
         run.card_enhancements["always_offer_coinche"] = True
 
-    def on_blind_won(self, run: BelAtroRun, blind_index: int) -> None:
-        # +50% bonus on top of whatever payout the round produced.
-        # We use bonus_per_round as a proxy — gets nudged once per blind.
-        run.economy.add_money(max(1, run.economy.bonus_per_round // 2 + 2))
+    def on_blind_won(self, run: BelAtroRun, blind_index: int, blind_payout: int) -> None:
+        # True 50% of the round's actual payout (all sources summed).
+        # `blind_payout` is computed by the caller from the economy delta.
+        run.economy.add_money(max(1, blind_payout // 2))
 
 
 ALL_ANTE_THEMES: list[type[AnteTheme]] = [CafeAnte, TournoiAnte]

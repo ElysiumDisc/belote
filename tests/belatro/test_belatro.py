@@ -578,11 +578,22 @@ class TestLePremierSang:
         )
         assert result is None
 
-    def test_north_wins_trick_one_returns_none(self) -> None:
+    def test_north_wins_trick_one_returns_add_mult(self) -> None:
+        # 3.4.2 (H1): LePremierSang gates on team_of(winner)==0 — partner
+        # (North) winning trick 1 arms the joker and fires +2 mult.
         result = self.joker.on_trick_won(
             make_trick_event(winner=Seat.NORTH, trick_number=1), self.state
         )
+        assert result is not None
+        assert result.add_mult == 2.0
+
+    def test_east_wins_trick_one_returns_none(self) -> None:
+        # Opposing team winning trick 1 must NOT arm or fire the joker.
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.EAST, trick_number=1), self.state
+        )
         assert result is None
+        assert self.state.get(f"{self.joker.id}_active") is not True
 
     def test_on_round_start_resets_active_flag(self) -> None:
         # Fire it, then reset
@@ -611,13 +622,23 @@ class TestLeSergent:
         assert r2.add_mult == 0.5
         assert self.state.get(f"{self.joker.id}_streak") == 2
 
-    def test_north_win_resets_streak(self) -> None:
+    def test_east_win_resets_streak(self) -> None:
+        # 3.4.2 (H1): an opposing-team trick (East/West) now resets the
+        # streak; partner (North) wins continue the streak instead.
         self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
-        self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.EAST, trick_number=2), self.state)
         assert self.state.get(f"{self.joker.id}_streak") == 0
 
-    def test_north_win_returns_none(self) -> None:
-        result = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH), self.state)
+    def test_north_win_continues_streak(self) -> None:
+        # H1: partner (North) is on team NS — joker fires and extends streak.
+        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
+        assert r1 is not None and r1.add_mult == 0.5
+        assert r2 is not None and r2.add_mult == 0.5
+        assert self.state.get(f"{self.joker.id}_streak") == 2
+
+    def test_east_win_returns_none(self) -> None:
+        result = self.joker.on_trick_won(make_trick_event(winner=Seat.EAST), self.state)
         assert result is None
 
     def test_on_round_start_resets_streak(self) -> None:
@@ -687,9 +708,19 @@ class TestLExecuteur:
         )
         assert result is None
 
-    def test_north_last_trick_returns_none(self) -> None:
+    def test_north_last_trick_returns_result(self) -> None:
+        # 3.4.2 (H1): partner (North) taking the last trick now fires
+        # L'Exécuteur — it gates on team_of(winner)==0, not seat==SOUTH.
         result = self.joker.on_trick_won(
             make_trick_event(winner=Seat.NORTH, is_last=True), self.state
+        )
+        assert result is not None
+        assert result.add_chips == 40
+        assert result.times_mult == 1.5
+
+    def test_east_last_trick_returns_none(self) -> None:
+        result = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.EAST, is_last=True), self.state
         )
         assert result is None
 
@@ -1051,9 +1082,18 @@ class TestLIdeologue:
         result = self.joker.on_trick_won(evt, self.state)
         assert result is None
 
-    def test_north_wins_returns_none(self) -> None:
+    def test_north_wins_sans_atout_returns_result(self) -> None:
+        # 3.4.2 (H1): partner (North) winning a Sans Atout trick containing
+        # a Jack now fires LIdeologue.
         jack_spades = Card(Suit.SPADES, Rank.JACK)
         evt = make_trick_event(winner=Seat.NORTH, trump=None, cards=(jack_spades,))
+        result = self.joker.on_trick_won(evt, self.state)
+        assert result is not None
+        assert result.add_chips == 18
+
+    def test_east_wins_returns_none(self) -> None:
+        jack_spades = Card(Suit.SPADES, Rank.JACK)
+        evt = make_trick_event(winner=Seat.EAST, trump=None, cards=(jack_spades,))
         result = self.joker.on_trick_won(evt, self.state)
         assert result is None
 

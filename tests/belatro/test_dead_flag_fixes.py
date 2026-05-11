@@ -246,6 +246,34 @@ def test_le_fantome_partenaire_flags_hide_partner_hand() -> None:
     assert flags.hide_partner_hand is True
 
 
+def test_ai_memory_respects_hide_partner_hand() -> None:
+    """C1: when `hide_partner_hand` is set, `AIMemory.update_memory` must
+    refuse to populate `partner_hand` even though partner's cards are
+    present in `state.hands`. Without this gate the AI cheats the boss
+    flag — the human is blinded but the AI plays with perfect info."""
+    from belote.ai import AIPlayer, Difficulty
+
+    north_hand = (
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.HEARTS, Rank.KING),
+    )
+    state = GameState(
+        hands=((), (), north_hand, ()),
+        phase=Phase.PLAYING,
+        trump=Suit.HEARTS,
+        boss_modifiers=BossModifiers(hide_partner_hand=True),
+    )
+    ai = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    ai.update_memory(state)
+    assert ai.memory.partner_hand == set()
+
+    # Sanity: without the flag the same call DOES populate partner_hand.
+    state_no_flag = replace(state, boss_modifiers=BossModifiers())
+    ai2 = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    ai2.update_memory(state_no_flag)
+    assert ai2.memory.partner_hand == set(north_hand)
+
+
 # ── L'Aristocrate gold_seal_aces flag plumbing ──────────────────────────────
 
 

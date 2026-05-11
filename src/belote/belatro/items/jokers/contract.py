@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from belote.deck import Rank, Suit, card_points
-from belote.game import Seat
+from belote.game import Seat, team_of
 
 from ...engine.event_bus import BeloteAnnouncedEvent, RoundEndEvent, TrickWonEvent
 from ..base import Joker, JokerResult
@@ -18,7 +18,7 @@ class LIdeologue(Joker):
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         # Sans Atout has event.trump as None
-        if event.winner == Seat.SOUTH and event.trump is None:
+        if team_of(event.winner) == 0 and event.trump is None:
             jacks = sum(1 for c in event.cards if c.rank == Rank.JACK)
             if jacks > 0:
                 # In Sans Atout, Jack is worth 2. We want it to be 20.
@@ -42,7 +42,7 @@ class LeFanatique(Joker):
         if state.get("contract") != "tout_atout":
             return None
 
-        if event.winner == Seat.SOUTH:
+        if team_of(event.winner) == 0:
             wins = state.get(f"{self.id}_wins", 0) + 1
             state[f"{self.id}_wins"] = wins
             if wins > 4:
@@ -59,7 +59,7 @@ class LeDiplomate(Joker):
     cost = 7
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH:
+        if team_of(event.winner) == 0:
             suits: dict[Suit, set[Rank]] = {}
             for c in event.cards:
                 if c.rank in (Rank.KING, Rank.QUEEN):
@@ -78,7 +78,7 @@ class LePatriote(Joker):
     cost = 6
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH and event.trump:
+        if team_of(event.winner) == 0 and event.trump:
             trump_pts = sum(
                 card_points(c, event.trump) for c in event.cards if c.suit == event.trump
             )
@@ -125,7 +125,7 @@ class LIllusionniste(Joker):
     cost = 9
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH and event.trump:
+        if team_of(event.winner) == 0 and event.trump:
             extra_pts = sum(
                 18 for c in event.cards if c.rank == Rank.JACK and c.suit != event.trump
             )

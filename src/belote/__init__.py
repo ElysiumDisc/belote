@@ -1,3 +1,3 @@
-__version__ = "3.4.0"
+__version__ = "3.4.2"
 
 __all__ = ["__version__"]

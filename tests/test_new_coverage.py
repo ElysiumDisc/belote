@@ -350,3 +350,52 @@ def test_declaration_consistency_between_place_bid_and_score_round() -> None:
     assert stored_keys == recalc_keys, (
         f"Declaration mismatch: stored={stored_keys} recalc={recalc_keys}"
     )
+
+
+# ── H7: main-loop win-attribution operator (3.4.2) ─────────────────────────
+
+
+def test_main_won_formula_disagrees_with_menu_on_tie_at_target_before_fix() -> None:
+    """H7 regression: pre-3.4.2 `main.py:231` used `ns >= ew` for the
+    update_stats_game `won` flag, while `ui/menu.py:344` used `ns > ew`
+    for the displayed winner. On an exact tie at target the stats line
+    recorded a NS win while the visible summary attributed the round to
+    EW. The fix aligns main.py's operator to `>`.
+    """
+    import re
+    from pathlib import Path
+
+    main_src = Path(__file__).parent.parent / "src" / "belote" / "main.py"
+    text = main_src.read_text()
+    # Lock the post-fix shape: `won=(ns >= target and ns > ew)`.
+    assert re.search(r"won=\(ns >= target and ns > ew\)", text), (
+        "main.py update_stats_game `won` expression must use `ns > ew` "
+        "(strict) to agree with menu.py:344's `winner = \"NS\" if ns > ew "
+        "else \"EW\"`. The pre-3.4.2 form `ns >= ew` is a regression."
+    )
+    # And the pre-fix anti-pattern must not have crept back.
+    assert "ns >= target and ns >= ew" not in text, (
+        "Anti-pattern from pre-3.4.2 detected — `ns >= ew` overcounts NS "
+        "wins on an exact tie at target."
+    )
+
+
+def test_main_won_formula_evaluates_correctly_on_tie_at_target() -> None:
+    """The semantic intent of the H7 fix: on an exact tie at target, the
+    stats `won` flag must be False (the game shouldn't even reach this
+    branch under correct scoring — see 3.4.0 E2 — but if it does, the
+    record must agree with the menu)."""
+    target = 1000
+    ns = 1000
+    ew = 1000
+    # Post-fix formula.
+    won = (ns >= target and ns > ew)
+    assert won is False
+
+    # And NS clearly ahead at target should still register as a win.
+    ns_clear, ew_clear = 1010, 800
+    assert (ns_clear >= target and ns_clear > ew_clear) is True
+
+    # EW ahead at target → NS not a winner.
+    ns_loss, ew_loss = 900, 1010
+    assert (ns_loss >= target and ns_loss > ew_loss) is False

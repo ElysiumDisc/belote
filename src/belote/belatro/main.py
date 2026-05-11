@@ -375,6 +375,7 @@ class BelAtroGame:
             if not lock_trust:
                 trust.blind_failed()
         else:
+            money_before = self.run.economy.money
             payout = self.run.economy.process_round_end(total - self.run.target_score)
             if auto_coinche_active:
                 self.run.economy.add_money(payout * 2)  # L'Avocat: triple total payout
@@ -409,7 +410,8 @@ class BelAtroGame:
             # awards bonus money, Café gives +1 trust on big-blind wins).
             theme = self.run.get_ante_theme()
             if theme is not None:
-                theme.on_blind_won(self.run, self.run.blind_index)
+                blind_payout = self.run.economy.money - money_before
+                theme.on_blind_won(self.run, self.run.blind_index, blind_payout)
 
         # Partner-specific trust events (skipped under Le Divorce)
         if not lock_trust:

@@ -1004,11 +1004,6 @@ def play_card(state: GameState, card: Card) -> GameState:
     )
 
 
-def advance_turn(state: GameState) -> GameState:
-    """Advance to the next player's turn (used after AI plays)."""
-    return replace(state, turn=state.turn.next_seat())
-
-
 def set_announced(state: GameState, msg: str) -> GameState:
     return replace(state, announced=msg)
 

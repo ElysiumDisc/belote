@@ -84,14 +84,16 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (551 tests expected)
+# Full test suite (568 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.4.0):
+Current baseline (3.4.2):
 - **mypy**: 0 errors (strict mode, 76 files)
 - **ruff**: 0 violations
-- **pytest**: 551 tests, 0 failures
+- **pytest**: 568 tests, 0 failures
+- 3.4.2 closes the 3.4.1 catalogue. All 7 confirmed bugs (C1 AI cheat under `hide_partner_hand`, C3 Dix de Der under La Rupture, C4 `opp_trumps` formula + TA total, H1 8 jokers seat→team, H4 TournoiAnte true 50%, H5 `load_profile` default unlocks, H7 classic-mode tie operator) plus H10 (`equip_joker` wires `on_purchase`) and M4 (delete dead `advance_turn`) ship in 3.4.2. +17 regression tests (551 → 568). H2 (`LEgoiste` partner-trick nullification) remains deferred — needs a spec call between code-comment intent and the audit's reading.
+- 3.4.1 was **documentation-only** — an external LLM audit was verified against the source. 7 confirmed bugs were catalogued in `CHANGELOG.md` as deferred to 3.4.2+; 8 audit claims were rejected as false positives and are listed in the "Verified clean" section to block re-investigation. No source code changed in 3.4.1.
 - 3.4.0 covered: A1 `BidMadeEvent` double-fire on coinche paths (HIGH), E1 endless mode replaying Ante 8 Boss instead of advancing to the first scaled cycle (HIGH), E2 classic-mode tie-breaker overridden by main loop (HIGH), A2 termios raw-mode leak on SSH drop (MED), A3 shop selection index off-by-one after reroll (MED), A5 prompts.py dead return (LOW). Plus HUD additions: joker pip strip with edition glow (B.3), synergy tooltip (B.4), four-tier trust bar with tier glyph (B.5). Score gutter (B.2) and trick-lane compass (B.1) intentionally deferred — they touch `ui/render.py`'s vertical-centering logic and want a dedicated session.
 
 Run all gates before committing:

@@ -185,6 +185,66 @@ def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
     assert is_capot(no_rupture, tricks=list(tricks)) == 0
 
 
+# ── La Rupture: gameflow Dix de Der announcement must use Rupture-aware winner ──
+
+
+def test_dix_de_der_announcement_honors_rupture() -> None:
+    """C3 regression: pre-3.4.2, the 8th-trick "Dix de Der (Team X)"
+    announcement in `gameflow.py` called raw `trick_winner_seat()` on
+    `display_state.current_trick`. Under La Rupture that could name a
+    team that does NOT actually receive the +10 in `score_round`, because
+    `compute_trick_winners` flips consecutive-same-team wins.
+
+    Lock the fix: when the natural last-trick winner is on the same team
+    as trick 7's resolved winner, the Rupture-aware projection flips it.
+    `gameflow.py` now uses `compute_trick_winners(state, trump, is_sa,
+    tricks=projected)[-1]` for the announcement.
+    """
+    from belote.game import compute_trick_winners
+
+    def south_wins(lead_rank: Rank) -> tuple[TrickCard, ...]:
+        return (
+            TrickCard(Seat.SOUTH, Card(Suit.SPADES, lead_rank)),
+            TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.SEVEN)),
+            TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
+            TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
+        )
+
+    completed = tuple(
+        south_wins(r)
+        for r in [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
+                  Rank.JACK, Rank.ACE, Rank.TEN]
+    )
+    eighth = south_wins(Rank.KING)
+
+    state = GameState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        completed_tricks=completed,
+    )
+
+    projected = list(state.completed_tricks) + [eighth]
+    winners = compute_trick_winners(state, state.trump, False, tricks=projected)
+
+    # Without Rupture every trick (including the 8th) is South's.
+    no_rupture = replace(state, boss_modifiers=BossModifiers())
+    raw_winners = compute_trick_winners(no_rupture, no_rupture.trump, False, tricks=projected)
+    assert raw_winners[-1] == Seat.SOUTH
+
+    # With Rupture the resolved 8th-trick winner must NOT be on team NS
+    # (because trick 7 already resolved to team NS). The announcement
+    # should name team EW.
+    from belote.game import team_of
+    assert winners[-1] is not None
+    assert team_of(winners[-1]) == 1, (
+        f"Expected Rupture to flip the 8th-trick winner to team EW, "
+        f"got {winners[-1]!r}"
+    )
+
+
 # ── Anti-pattern lock (3.1.0 modifier_patch shim removal) ──────────────────
 
 

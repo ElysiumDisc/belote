@@ -2,6 +2,20 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.4.2
+
+- **The 3.4.1 catalogue is closed.** All 7 confirmed bugs plus the H10 architectural cleanup and the M4 dead-code deletion ship here. **C1 — AI cheating under Le Fantôme Partenaire:** AI memory now respects `hide_partner_hand`; the boss flag's visibility cost is paid by both sides. **C3 — Dix de Der announcement under La Rupture:** the 8th-trick "Team X" line now uses the Rupture-aware `compute_trick_winners` helper, so the named team matches what scoring credits. **C4 — `opp_trumps` formula:** subtracts South's own trumps, played trumps, and partner-visible trumps; under Tout Atout the total switches to 32 (every card is a trump). **H1 — 8 BelAtro jokers:** `LIdeologue`, `LeFanatique`, `LeDiplomate`, `LePatriote`, `LIllusionniste`, `LePremierSang`, `LeSergent`, `LExecuteur` now gate on `team_of(event.winner) == 0` instead of `event.winner == Seat.SOUTH`, matching the 3.2.0 fix that landed `LaSentinelle` and `LeDernierMot`. **H4 — TournoiAnte:** `on_blind_won` now receives `blind_payout` and pays a true 50% (was a flat function of `bonus_per_round`). **H5 — `load_profile`:** saves missing the `unlocked_ids` key fall back to the Profile dataclass default starter unlocks. **H7 — classic win attribution on ties:** `update_stats_game` operator aligned to `ns > ew` so the stats line agrees with `menu.py`'s visible winner on an exact tie at target.
+- **Architectural / cleanup.** `equip_joker` accepts an optional `run` and fires `on_purchase` when provided (forward-looking — no current partner joker has a purchase hook). Dead `advance_turn()` deleted from `game.py`.
+- **Still deferred** (need spec calls, not implementation work): H2 `LEgoiste` partner-trick nullification (comment vs. audit reading); `LeRebelle` `on_belote` seat/team gating (separate code path from H1).
+- **Tests + gates** — 568 tests (up from 551, +17 regressions). Five existing `test_north_*_returns_none` tests in `test_belatro.py` were flipped to assert the new team-aware behaviour (they had encoded the H1 bug as a contract). Strict gates still clean: pytest 568/568, mypy 0 errors (76 files), ruff 0 violations.
+
+## What's new in 3.4.1
+
+- **Audit verification pass — no code changes.** An external LLM audit ("Comprehensive Audit Report — Belote CLI v3.4.0") flagged 4 Critical, 10 High, and 12 Medium issues. Direct verification against the source confirmed **7 real bugs** (3 Critical, 4 High), **1 architectural latent issue**, and **1 disputed claim** needing a spec decision; **8 claims were false positives**. The roadmap and the false-positive catalogue are recorded in `CHANGELOG.md` so the next session has a vetted target list and the rejected claims aren't re-investigated. *Note (3.4.2): the catalogue is now closed — all 7 confirmed bugs plus H10 and M4 are fixed in 3.4.2. The 3.4.1 entry is preserved as a historical record of the verification-only release.*
+- **Confirmed bugs deferred to 3.4.2+**: AI ignoring `hide_partner_hand` (C1), Dix de Der announcement not La Rupture-aware (C3), AI `opp_trumps` over-count (C4), 8 BelAtro jokers still gated on South instead of NS team (H1), TournoiAnte bonus not actually 50% (H4), `load_profile` losing default unlocks (H5), classic-mode tie-break operator mismatch with the menu summary (H7). Plus latent: `equip_joker` skipping `on_purchase` (H10), and a dead `advance_turn()` (M4).
+- **Audit calibration findings** — recurring failure modes documented for the next pass: defense-in-depth confused with bugs (C2/H8/H9), intent inversion against adjacent comments (H2/M2/M12), self-cancelling dead-code claims (H3), and joker-name hallucination (H1's `LeRebelle`). Useful as feedback to the auditing model.
+- **No behavioural changes.** Test count, mypy strict, ruff all unchanged from 3.4.0: pytest 551/551, mypy 0 errors (76 files), ruff 0 violations.
+
 ## What's new in 3.4.0
 
 - **BelAtro joker correctness** — `BidMadeEvent` no longer double-fires `on_bid` joker handlers on coinche paths. Pre-3.4.0 the player-coinche, AI-partner-coinche, `auto_coinche` boss, and `start_coinched` deck-mod paths all re-emitted the same bid event a second time with the resolved `coinche_level`, so on_bid jokers (Le Passeur today, anything new tomorrow) were silently invoked twice for the same bid. Fixed via a `re_emit: bool` field on the event; refreshes update `joker_state["contract"]` but skip joker firing.
@@ -294,7 +308,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (528 tests)
+├── tests/             # Comprehensive test suite (568 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -310,14 +324,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **528 tests** passing with 100% coverage on game-logic modules.
+Currently **568 tests** passing with 100% coverage on game-logic modules.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 528/528 passed
+- **pytest**: 568/568 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

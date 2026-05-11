@@ -25,11 +25,11 @@ from .game import (
     bidding_turn,
     clear_announced,
     clear_legal_cards_cache,
+    compute_trick_winners,
     play_card,
     process_bid,
     start_round,
     team_of,
-    trick_winner_seat,
 )
 from .input import KeyReader, interruptible_sleep
 from .scoring import (
@@ -191,11 +191,16 @@ def run_play(
             # animations or is on the "instant" speed preset.
             interruptible_sleep(MIN_TRICK_DWELL, None)
             if len(current.completed_tricks) == 7:  # This was the 8th trick
-                se_trump = current.boss_modifiers.seven_eight_trump
                 is_sa = current.contract == "sans_atout"
-                winner = trick_winner_seat(
-                    display_state.current_trick, current.trump, se_trump, is_sa
-                )
+                # Use the Rupture-aware helper so the announcement names the
+                # team that actually gets credited in scoring (see
+                # `compute_trick_winners` in game.py). Pass the projected
+                # 8-trick list because the 8th trick hasn't been pushed to
+                # `completed_tricks` yet.
+                projected = list(current.completed_tricks) + [display_state.current_trick]
+                winner = compute_trick_winners(
+                    current, current.trump, is_sa, tricks=projected
+                )[-1]
                 if winner:
                     team = "NS" if team_of(winner) == 0 else "EW"
                     announce(

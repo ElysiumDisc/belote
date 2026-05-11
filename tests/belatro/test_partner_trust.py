@@ -101,3 +101,72 @@ class TestPartnerTrust:
 
         trust.value = 0
         assert partner_state.difficulty_for(Seat.NORTH) == "easy"
+
+
+# ── H10: equip_joker wires on_purchase (3.4.2) ──────────────────────────────
+
+
+class TestEquipJokerOnPurchase:
+    def test_equip_joker_fires_on_purchase_when_run_provided(self) -> None:
+        """H10 regression: pre-3.4.2 `equip_joker(joker)` only appended to
+        `self.jokers` and never invoked the joker's `on_purchase` hook.
+        Forward-looking fix: when a run is passed, the hook fires."""
+        from belote.belatro.core.run_state import BelAtroRun
+
+        calls: list[str] = []
+
+        class _StubJoker(Joker):
+            id = "stub_partner_joker"
+            name = "Stub"
+            description = "Records on_purchase invocations."
+            cost = 1
+
+            def on_purchase(self, run: BelAtroRun) -> None:
+                calls.append("fired")
+
+        state = PartnerState()
+        run = BelAtroRun()
+        assert state.equip_joker(_StubJoker(), run) is True
+        assert calls == ["fired"]
+
+    def test_equip_joker_skips_on_purchase_when_run_is_none(self) -> None:
+        """Backwards-compatible: omitting `run` keeps the legacy no-hook
+        behaviour. Test fixtures that don't have a run handy aren't
+        broken by the H10 change."""
+        from belote.belatro.core.run_state import BelAtroRun
+
+        calls: list[str] = []
+
+        class _StubJoker(Joker):
+            id = "stub_partner_joker_2"
+            name = "Stub2"
+            description = "Records on_purchase invocations."
+            cost = 1
+
+            def on_purchase(self, run: BelAtroRun) -> None:
+                calls.append("fired")
+
+        state = PartnerState()
+        assert state.equip_joker(_StubJoker()) is True
+        assert calls == []
+
+    def test_equip_joker_rejects_when_slots_full(self) -> None:
+        """Existing contract preserved: equip returns False when joker_slots
+        is exhausted, and `on_purchase` does NOT fire in that case."""
+        from belote.belatro.core.run_state import BelAtroRun
+
+        calls: list[str] = []
+
+        class _StubJoker(Joker):
+            id = "stub_partner_joker_3"
+            name = "Stub3"
+            description = ""
+            cost = 1
+
+            def on_purchase(self, run: BelAtroRun) -> None:
+                calls.append("fired")
+
+        state = PartnerState(joker_slots=0)
+        run = BelAtroRun()
+        assert state.equip_joker(_StubJoker(), run) is False
+        assert calls == []

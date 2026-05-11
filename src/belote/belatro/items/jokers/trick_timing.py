@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from belote.game import Seat, team_of
+from belote.game import team_of
 
 from ...engine.event_bus import TrickWonEvent
 from ..base import Joker, JokerResult
@@ -23,11 +23,11 @@ class LePremierSang(Joker):
         # subsequent NS-won trick for the rest of the round.
         active = state.get(f"{self.id}_active", False)
         if event.trick_number == 1:
-            if event.winner == Seat.SOUTH:
+            if team_of(event.winner) == 0:
                 state[f"{self.id}_active"] = True
                 return JokerResult(add_mult=2.0)
             return None
-        if active and event.winner == Seat.SOUTH:
+        if active and team_of(event.winner) == 0:
             return JokerResult(add_mult=2.0)
         return None
 
@@ -43,7 +43,7 @@ class LeSergent(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH:
+        if team_of(event.winner) == 0:
             streak = state.get(f"{self.id}_streak", 0) + 1
             state[f"{self.id}_streak"] = streak
             return JokerResult(add_mult=0.5)
@@ -79,7 +79,7 @@ class LExecuteur(Joker):
     is_unlockable = True
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.is_last and event.winner == Seat.SOUTH:
+        if event.is_last and team_of(event.winner) == 0:
             return JokerResult(add_chips=40, times_mult=1.5)
         return None
 

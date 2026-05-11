@@ -214,3 +214,86 @@ def test_ai_pass_on_weak_hand() -> None:
     with unittest.mock.patch.object(player._rng, "uniform", return_value=-0.5):
         bid = player.decide_bid(state)
     assert bid is None
+
+
+# ── C4: opp_trumps formula ───────────────────────────────────────────────────
+
+
+def _capture_opp_trumps(player: AIPlayer, state: GameState) -> tuple[int, int]:
+    """Run `_hard_play` and capture (my_trumps, opp_trumps) by patching
+    `_score_card_play`. Returns the first call's args."""
+    captured: dict[str, int] = {}
+
+    def _capture(self, card, st, trump, trick, partner_winning, hsc, my_t, opp_t):  # type: ignore[no-untyped-def]
+        captured.setdefault("my", my_t)
+        captured.setdefault("opp", opp_t)
+        return 0.0
+
+    with unittest.mock.patch.object(AIPlayer, "_score_card_play", _capture):
+        player._hard_play(state, state.hand_of(player.seat))
+    return captured["my"], captured["opp"]
+
+
+def test_opp_trumps_excludes_own_and_partner_hand() -> None:
+    """C4 regression: pre-3.4.2, `opp_trumps = 8 - played_trumps` over-counted
+    by treating South's own trumps and partner's visible trumps as still
+    in opponents' hands. The fix subtracts both."""
+    from belote.game import BossModifiers
+
+    # South holds 1 trump (HEARTS), 1 non-trump (SPADES). North (partner)
+    # is visible with 1 trump. 2 trumps already played. Lead Spades so the
+    # leading-strategy branch is NOT triggered.
+    south_hand = (
+        Card(Suit.HEARTS, Rank.NINE),
+        Card(Suit.SPADES, Rank.SEVEN),
+    )
+    north_hand = (Card(Suit.HEARTS, Rank.SEVEN),)
+    trick = (TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.KING)),)
+    state = GameState(
+        hands=(south_hand, (), north_hand, ()),
+        current_trick=trick,
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=Suit.HEARTS,
+        boss_modifiers=BossModifiers(),
+    )
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player.update_memory(state)
+    # Plant 2 played trumps into memory.
+    player.memory.played.add(Card(Suit.HEARTS, Rank.JACK))
+    player.memory.played.add(Card(Suit.HEARTS, Rank.ACE))
+
+    my, opp = _capture_opp_trumps(player, state)
+    assert my == 1, f"expected my_trumps=1, got {my}"
+    # 8 total - 1 mine - 2 played - 1 partner = 4 in opponents' hands.
+    assert opp == 4, f"expected opp_trumps=4, got {opp}"
+
+
+def test_opp_trumps_under_tout_atout_uses_32_total() -> None:
+    """C4 regression: under Tout Atout every card is a trump, so the total
+    is 32 not 8. Pre-3.4.2 the formula degraded to `8 - 0` always (because
+    no card.suit equals `Suit.TOUT_ATOUT`)."""
+    south_hand = (
+        Card(Suit.SPADES, Rank.SEVEN),
+        Card(Suit.HEARTS, Rank.EIGHT),
+    )
+    north_hand = (Card(Suit.DIAMONDS, Rank.NINE),)
+    trick = (TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.KING)),)
+    state = GameState(
+        hands=(south_hand, (), north_hand, ()),
+        current_trick=trick,
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=Suit.TOUT_ATOUT,
+    )
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player.update_memory(state)
+    # 3 cards already played.
+    player.memory.played.add(Card(Suit.HEARTS, Rank.ACE))
+    player.memory.played.add(Card(Suit.DIAMONDS, Rank.TEN))
+    player.memory.played.add(Card(Suit.SPADES, Rank.JACK))
+
+    my, opp = _capture_opp_trumps(player, state)
+    assert my == 2, f"expected my_trumps=2 (all hand cards under TA), got {my}"
+    # 32 total - 2 mine - 4 played (1 from current_trick + 3 planted) - 1 partner = 25.
+    assert opp == 25, f"expected opp_trumps=25, got {opp}"

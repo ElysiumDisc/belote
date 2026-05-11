@@ -48,7 +48,7 @@ def test_cafe_ante_grants_starting_chips_and_softens_boss() -> None:
 def test_cafe_ante_blind_won_lifts_trust() -> None:
     run = BelAtroRun()
     starting_trust = run.partner.trust.value
-    CafeAnte().on_blind_won(run, blind_index=1)
+    CafeAnte().on_blind_won(run, blind_index=1, blind_payout=10)
     assert run.partner.trust.value == starting_trust + 1
 
 
@@ -58,8 +58,18 @@ def test_tournoi_ante_sets_coinche_flag_and_pays_money() -> None:
     theme = TournoiAnte()
     theme.on_ante_start(run)
     assert run.card_enhancements.get("always_offer_coinche") is True
-    theme.on_blind_won(run, blind_index=0)
-    assert run.economy.money > starting_money
+    # H4 (3.4.2): TournoiAnte now pays 50% of the round payout, not a
+    # bonus_per_round proxy. With blind_payout=20 expect +10.
+    theme.on_blind_won(run, blind_index=0, blind_payout=20)
+    assert run.economy.money == starting_money + 10
+
+
+def test_tournoi_ante_payout_floor_at_one() -> None:
+    # If the round payout is zero or tiny, Tournoi still pays at least $1.
+    run = BelAtroRun()
+    starting_money = run.economy.money
+    TournoiAnte().on_blind_won(run, blind_index=0, blind_payout=0)
+    assert run.economy.money == starting_money + 1
 
 
 # ── Endless mode ────────────────────────────────────────────────────────────

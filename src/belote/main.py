@@ -228,7 +228,7 @@ def main() -> None:
                         )
 
                         update_stats_game(
-                            won=(ns >= target and ns >= ew),
+                            won=(ns >= target and ns > ew),
                             num_rounds=len(state.score_history),
                             difficulty=difficulty_str,
                         )

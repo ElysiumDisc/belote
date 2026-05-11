@@ -96,6 +96,106 @@ def test_le_diplomate_skips_when_only_king() -> None:
     assert j.on_trick_won(evt, {}) is None
 
 
+# ── H1: NS-team jokers must fire when NORTH (partner) wins ─────────────────
+
+
+def test_h1_team_aware_jokers_fire_on_north_partner_win() -> None:
+    """H1 regression: 8 jokers used `event.winner == Seat.SOUTH`, silently
+    no-opping when partner (North) took the relevant trick. They now gate on
+    `team_of(event.winner) == 0`. Verify each fires for a NORTH win.
+    """
+    from belote.belatro.items.jokers.contract import (
+        LeDiplomate,
+        LeFanatique,
+        LePatriote,
+        LIdeologue,
+        LIllusionniste,
+    )
+    from belote.belatro.items.jokers.trick_timing import (
+        LePremierSang,
+        LeSergent,
+        LExecuteur,
+    )
+
+    # Generic trick with NORTH as the winner, two Jacks (one off-trump),
+    # K+Q same suit, one trump card with value.
+    cards = (
+        Card(Suit.HEARTS, Rank.KING),
+        Card(Suit.HEARTS, Rank.QUEEN),
+        Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.HEARTS, Rank.JACK),
+    )
+    evt = TrickWonEvent(
+        winner=Seat.NORTH,
+        cards=cards,
+        trick_number=1,
+        is_last=False,
+        card_points=20,
+        trump=Suit.HEARTS,
+    )
+
+    # LIdeologue requires Sans Atout (trump=None) AND a Jack present.
+    sa_evt = TrickWonEvent(
+        winner=Seat.NORTH,
+        cards=(Card(Suit.SPADES, Rank.JACK),),
+        trick_number=1,
+        is_last=False,
+        card_points=2,
+        trump=None,
+    )
+    assert LIdeologue().on_trick_won(sa_evt, {}) is not None
+
+    # LeFanatique requires Tout Atout contract and a 5th win.
+    fan = LeFanatique()
+    state: dict = {"contract": "tout_atout"}
+    fan.on_round_start(state)
+    fan_evt = TrickWonEvent(
+        winner=Seat.NORTH,
+        cards=(),
+        trick_number=5,
+        is_last=False,
+        card_points=0,
+        trump=Suit.HEARTS,
+    )
+    for _ in range(4):
+        fan.on_trick_won(fan_evt, state)
+    assert fan.on_trick_won(fan_evt, state) is not None
+
+    # LeDiplomate fires on K+Q same suit.
+    assert LeDiplomate().on_trick_won(evt, {}) is not None
+
+    # LePatriote fires on trump points in the trick.
+    assert LePatriote().on_trick_won(evt, {}) is not None
+
+    # LIllusionniste fires on off-trump Jacks.
+    assert LIllusionniste().on_trick_won(evt, {}) is not None
+
+    # LePremierSang arms on trick-1 NS win then keeps paying.
+    ps = LePremierSang()
+    ps_state: dict = {}
+    ps.on_round_start(ps_state)
+    assert ps.on_trick_won(evt, ps_state) is not None
+    # And keeps firing on subsequent NS-won tricks.
+    evt2 = TrickWonEvent(
+        winner=Seat.NORTH, cards=cards, trick_number=2, is_last=False,
+        card_points=0, trump=Suit.HEARTS,
+    )
+    assert ps.on_trick_won(evt2, ps_state) is not None
+
+    # LeSergent: streak builder.
+    sg = LeSergent()
+    sg_state: dict = {}
+    sg.on_round_start(sg_state)
+    assert sg.on_trick_won(evt, sg_state) is not None
+
+    # LExecuteur: last trick.
+    last_evt = TrickWonEvent(
+        winner=Seat.NORTH, cards=cards, trick_number=8, is_last=True,
+        card_points=0, trump=Suit.HEARTS,
+    )
+    assert LExecuteur().on_trick_won(last_evt, {}) is not None
+
+
 # ── Partner personalities ──────────────────────────────────────────────────
 
 

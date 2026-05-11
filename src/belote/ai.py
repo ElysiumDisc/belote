@@ -102,8 +102,10 @@ class AIPlayer:
         # In this implementation, AI tracks what it can see
         p = partner(self.seat)
         self.memory.partner_hand.clear()
-        if state.phase in (Phase.PLAYING, Phase.SCORING):
-            # Partner's remaining cards
+        if (
+            state.phase in (Phase.PLAYING, Phase.SCORING)
+            and not state.boss_modifiers.hide_partner_hand
+        ):
             for card in state.hand_of(p):
                 self.memory.partner_hand.add(card)
 
@@ -529,8 +531,22 @@ class AIPlayer:
 
         my_hand = state.hand_of(self.seat)
         hand_suit_counts: dict[Suit, int] = Counter(c.suit for c in my_hand)
-        my_trumps = hand_suit_counts.get(trump, 0)
-        opp_trumps = 8 - sum(1 for c in self.memory.played if c.suit == trump)
+        # Under Tout Atout every card is a trump; under a normal contract
+        # trump cards are those matching the trump suit. `opp_trumps` must
+        # subtract everything that is no longer in opponents' hands: my own
+        # trumps, trumps already played, and any of partner's visible
+        # trumps (empty under `hide_partner_hand`).
+        if trump is Suit.TOUT_ATOUT:
+            total_trumps = 32
+            my_trumps = len(my_hand)
+            played_trumps = len(self.memory.played)
+            partner_trumps = len(self.memory.partner_hand)
+        else:
+            total_trumps = 8
+            my_trumps = hand_suit_counts.get(trump, 0)
+            played_trumps = sum(1 for c in self.memory.played if c.suit == trump)
+            partner_trumps = sum(1 for c in self.memory.partner_hand if c.suit == trump)
+        opp_trumps = max(0, total_trumps - my_trumps - played_trumps - partner_trumps)
 
         # Score each legal card by expected outcome
         best_card = legal[0]
