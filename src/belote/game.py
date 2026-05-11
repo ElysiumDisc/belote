@@ -757,6 +757,7 @@ def compute_trick_winners(
     state: GameState,
     trump: Suit | None,
     is_sans_atout: bool,
+    tricks: tuple[tuple[TrickCard, ...], ...] | list[tuple[TrickCard, ...]] | None = None,
 ) -> list[Seat | None]:
     """Resolve the winner of each completed trick, honoring La Rupture.
 
@@ -766,12 +767,18 @@ def compute_trick_winners(
     to live HUD but the final scoring path re-derived winners from raw
     `trick_winner_seat` — silently restoring the original winner and double-
     crediting the round.
+
+    When `tricks` is None (the default), resolves `state.completed_tricks`.
+    Callers building an in-flight trick list (live HUD CAPOT detection on the
+    8th trick) may pass an explicit sequence so the same Rupture rule applies
+    to the projected final state.
     """
     se_trump = state.boss_modifiers.seven_eight_trump
     rupture = state.boss_modifiers.no_consecutive_team_wins
+    source = state.completed_tricks if tricks is None else tricks
     winners: list[Seat | None] = []
     prev_winner: Seat | None = None
-    for trick in state.completed_tricks:
+    for trick in source:
         w = trick_winner_seat(trick, trump, se_trump, is_sans_atout)
         if (
             rupture

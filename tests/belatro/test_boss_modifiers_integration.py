@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from belote.deck import Card, Rank, Suit
 from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
-from belote.scoring import score_round
+from belote.scoring import is_capot, score_round
 
 
 def test_boss_no_belote():
@@ -133,6 +135,54 @@ def test_boss_invert_scoring():
     # NS won 5 tricks > EW's 3 → invert_scoring zeroes NS total.
     assert breakdown.taker_total == 0
     assert any("Malédiction" in m for m in breakdown.messages)
+
+
+# ── La Rupture: is_capot must honor Rupture in explicit-tricks branch ─────
+
+
+def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
+    """Live HUD CAPOT announcement (`gameflow.py` 8th-trick path) calls
+    `is_capot(state, tricks=completed + [current])`. Pre-3.3.2 that branch
+    re-derived winners with raw `trick_winner_seat`, ignoring La Rupture —
+    so a raw NS sweep falsely shouted CAPOT mid-round while the final score
+    correctly resolved as non-capot via `compute_trick_winners`. Lock the
+    fix: both branches of `is_capot` must agree under La Rupture.
+    """
+    # Eight tricks where the raw winner is SOUTH every time. South leads
+    # Spades (non-trump under trump=HEARTS); others follow with lower
+    # Spades. Cross-trick rank uniqueness doesn't matter for winner
+    # detection.
+    def south_wins(lead_rank: Rank) -> tuple[TrickCard, ...]:
+        return (
+            TrickCard(Seat.SOUTH, Card(Suit.SPADES, lead_rank)),
+            TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.SEVEN)),
+            TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
+            TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
+        )
+
+    high = [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
+            Rank.JACK, Rank.ACE, Rank.TEN, Rank.KING]
+    tricks = tuple(south_wins(r) for r in high)
+
+    rupture_state = GameState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        completed_tricks=tricks,
+    )
+
+    # Default branch (tricks=None): already honored Rupture pre-3.3.2.
+    assert is_capot(rupture_state) is None
+
+    # Explicit-tricks branch: must also honor Rupture (the 3.3.2 fix).
+    assert is_capot(rupture_state, tricks=list(tricks)) is None
+
+    # Sanity: without Rupture, both branches see the raw NS sweep.
+    no_rupture = replace(rupture_state, boss_modifiers=BossModifiers())
+    assert is_capot(no_rupture) == 0
+    assert is_capot(no_rupture, tricks=list(tricks)) == 0
 
 
 # ── Anti-pattern lock (3.1.0 modifier_patch shim removal) ──────────────────

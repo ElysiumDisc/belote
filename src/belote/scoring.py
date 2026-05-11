@@ -18,7 +18,6 @@ from .game import (
     compute_trick_winners,
     reset_round_fields,
     team_of,
-    trick_winner_seat,
 )
 
 # Rank numeric values for sequence detection (ascending order)
@@ -318,9 +317,12 @@ def resolve_declarations(
 def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> int | None:
     """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None.
 
-    Honors La Rupture (`no_consecutive_team_wins`) when reading the state's
-    own tricks — capot under La Rupture is effectively impossible, but the
-    resolved winners are what the round was actually scored against.
+    Honors La Rupture (`no_consecutive_team_wins`) for both the default
+    (`state.completed_tricks`) and explicit-tricks branches. Capot under La
+    Rupture is effectively impossible; the live HUD CAPOT announcement on the
+    8th trick (`gameflow.py` passes `tricks=completed + [current]`) must use
+    the same Rupture-aware resolution as the final scoring path or it will
+    falsely announce CAPOT mid-round.
     """
     is_sa = state.contract == "sans_atout"
     if tricks is None:
@@ -328,8 +330,7 @@ def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None
     else:
         if not tricks or len(tricks) < 8:
             return None
-        se_trump = state.boss_modifiers.seven_eight_trump
-        winners = [trick_winner_seat(t, state.trump, se_trump, is_sa) for t in tricks]
+        winners = compute_trick_winners(state, state.trump, is_sa, tuple(tricks))
 
     if not winners or len(winners) < 8:
         return None

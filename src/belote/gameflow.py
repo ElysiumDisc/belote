@@ -397,7 +397,7 @@ def run_round(
             sys.stdout.write(f"  Team EW: {ew_pts} points\r\n")
             if replay_decisions:
                 from .replay import analyze_round, summarize
-                reports = analyze_round(replay_decisions)
+                reports = analyze_round(replay_decisions, rng=current._rng)
                 sys.stdout.write(f"  Replay: {summarize(reports)}\r\n")
             sys.stdout.write(f"{'=' * 50}\r\n\r\n")
             sys.stdout.flush()

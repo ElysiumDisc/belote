@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.2] - 2026-05-10
+
+Residual-audit release — a fresh full-codebase pass after 3.3.1 turned up three real findings (a HIGH live-HUD divergence under La Rupture, a MEDIUM determinism leak in `replay.analyze_round`, and a LOW cosmetic chips display). The same pass flagged ~5 plausible-sounding "performance wins" and other claims that fell apart on verification — catalogued in the plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-cheeky-globe.md` so they aren't re-investigated. 537 tests passing (up from 535), ruff and mypy strict still clean.
+
+### Fixed
+
+- **`src/belote/scoring.py::is_capot` + `src/belote/game.py::compute_trick_winners` (F1)** — `is_capot(state, tricks=[…])` now honors La Rupture (`no_consecutive_team_wins`) in the explicit-tricks branch, matching the default-branch behaviour the 3.3.1 La Rupture fix established. The 8th-trick live-HUD CAPOT announcement (`gameflow.py:211-217`) passes an explicit list (`completed_tricks + [current_trick]`) and previously re-derived winners with raw `trick_winner_seat`, falsely shouting "CAPOT!" under La Rupture even though the final score correctly resolved as non-capot. Fix: `compute_trick_winners` now accepts an optional `tricks` override and `is_capot` delegates both branches through it — single source of truth for Rupture-aware winner resolution. Regression test in `tests/belatro/test_boss_modifiers_integration.py::test_is_capot_honors_rupture_in_explicit_tricks_branch`.
+- **`src/belote/replay.py::analyze_round` + `src/belote/gameflow.py` (F2)** — The 3.3.1 fix made `AIPlayer.__init__` accept a seeded `rng` parameter; the round driver threaded it through, but `replay.analyze_round` kept the legacy unseeded fallback. Post-round replay analysis on the 'R' key thus ran the Hard AI with an unseeded `random.Random()`, so "Optimal plays: 6/8 (75%)" could become "5/8 (62%)" between consecutive runs on the same data — most visibly under Sans Atout, where `_hard_play` falls through to `_easy_play` and `rng.choice(legal)` is the sole arbiter. Fix: `analyze_round` takes an optional `rng`, and the gameflow caller passes `current._rng` from the final round state. Regression test in `tests/test_replay.py::test_analyze_round_deterministic_under_seeded_rng`.
+- **`src/belote/belatro/core/scoring.py::get_popup_lines` (F3)** — Score popup now displays clamped chips (`max(0, state._chips)`) to match `get_total()`'s clamp boundary. Pre-3.3.2 L'Égoïste partner-win-heavy rounds rendered "Chips -12 × Mult 2.0 = 0" — internally consistent but visually a bug. Cosmetic only; no logic change.
+
+### Internal
+
+- **Tests**: 535 → 537 (+2 regressions for F1 and F2).
+- **Strict gates**: pytest 537/537, mypy 0 errors (76 files), ruff 0 violations.
+- **`compute_trick_winners` signature widened**: optional `tricks` parameter (default `None` preserves the existing behaviour). Single source of truth for La Rupture-aware winner resolution across both live-HUD and final-scoring paths.
+
+### Rejected — performance "wins" catalogued (so they aren't re-investigated)
+
+- **"`_hard_play` recomputes `Counter` per candidate card"** — falsified. `hand_suit_counts` is hoisted at `ai.py:531` *before* the `for card in legal:` loop and threaded into `_score_card_play` as a parameter.
+- **"`score_round` walks tricks 4×"** — falsified post-3.2.0. `winners` is computed once at `scoring.py:600` and threaded into `_calculate_base_points` and `_apply_scoring_modifiers`. Remaining trick-count passes are two cheap `sum(1 for …)` walks of an 8-element list.
+- **"`play_card` does a wholesale `replace()`"** — true but irreducible. Frozen+slotted GameState is a deliberate design choice; the "fix" would re-introduce the mutation class of bugs the 2.x rewrites eliminated.
+- **"`stats.py` per-round full-rewrite is a regression"** — falsified. It's the B2 (3.3.1) fix for crash-safety, intentional.
+- **"Event-bus `list(self._handlers)` per emit is wasteful"** — defensive copy enabling sub/unsub during emit. Handler counts are static and tiny.
+
 ## [3.3.1] - 2026-05-10
 
 Audit-of-audit release — an inbound LLM audit produced a 18-bug list with mixed accuracy (B1/B2/B7/B8/B9/B10/B14/B16/B17 real; B3/B5/B12/B18 and the ruff-violation claim either self-refuted or hallucinated). The verified subset was fixed, then a fresh independent pass turned up seven additional high-confidence bugs the original audit missed — chiefly La Rupture and L'Anarchie scoring divergences, an unseeded AI RNG that broke ghost-run determinism, and a stale-void inference leak across mid-round undo. All 17 fixes ship in this release. 535 tests passing, ruff and mypy strict still clean.

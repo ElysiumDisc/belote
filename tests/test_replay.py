@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 from belote.deck import Card, Rank, Suit
 from belote.game import GameState, Phase, Seat, TrickCard
 from belote.replay import DecisionReport, analyze_round, summarize
@@ -46,3 +48,41 @@ def test_analyze_round_returns_one_report_per_south_decision() -> None:
     assert len(out) == 1
     assert out[0].chosen == only
     assert out[0].matched is True
+
+
+def test_analyze_round_deterministic_under_seeded_rng() -> None:
+    """3.3.2: `analyze_round` must thread the caller's seeded RNG into the
+    Hard AI so the same decisions reproduce. Pre-3.3.2 the constructor
+    fell back to an unseeded `random.Random()`, so the SA fallback path
+    (`_hard_play` → `_easy_play` → `rng.choice(legal)`) returned a
+    different suggested card between runs on the same data.
+    """
+    # Sans Atout state with multiple legal cards. `_hard_play` falls through
+    # to `_easy_play` under SA (trump is None) → `self._rng.choice(legal)`
+    # is the only thing picking the suggested card; an unseeded RNG makes
+    # the report non-reproducible.
+    hand = (
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.DIAMONDS, Rank.KING),
+        Card(Suit.CLUBS, Rank.JACK),
+    )
+    state = GameState(
+        hands=(hand, (), (), ()),
+        trump=None,
+        contract="sans_atout",
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+    )
+    chosen = hand[0]
+
+    reports_a = analyze_round([(state, chosen)], rng=random.Random(42))
+    reports_b = analyze_round([(state, chosen)], rng=random.Random(42))
+    reports_c = analyze_round([(state, chosen)], rng=random.Random(42))
+    assert reports_a == reports_b == reports_c
+
+    # Different seed may or may not pick the same card — but each seed
+    # must be self-consistent.
+    reports_d = analyze_round([(state, chosen)], rng=random.Random(7))
+    reports_e = analyze_round([(state, chosen)], rng=random.Random(7))
+    assert reports_d == reports_e

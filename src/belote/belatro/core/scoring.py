@@ -253,5 +253,9 @@ class ScoreAccumulator:
         return int(chips * mult)
 
     def get_popup_lines(self, state: GameState) -> list[str]:
-        return [*self._log, f"Chips {state._chips} × Mult {state._mult:.1f} = {self.get_total(state)}"]
+        # Match the clamp in get_total(): L'Égoïste can push _chips negative
+        # mid-round; the popup line would otherwise read "Chips -12 × Mult …
+        # = 0" which looks like a UI bug rather than the intended clamp.
+        chips_display = max(0, state._chips)
+        return [*self._log, f"Chips {chips_display} × Mult {state._mult:.1f} = {self.get_total(state)}"]
 

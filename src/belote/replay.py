@@ -10,6 +10,7 @@ on the round summary screen.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 
 from .ai import AIPlayer, Difficulty
@@ -26,15 +27,23 @@ class DecisionReport:
 
 
 def analyze_round(
-    decisions: list[tuple[GameState, Card]], seat: Seat = Seat.SOUTH
+    decisions: list[tuple[GameState, Card]],
+    seat: Seat = Seat.SOUTH,
+    rng: random.Random | None = None,
 ) -> list[DecisionReport]:
     """Replay the given decisions through the Hard AI for `seat` and return
     a per-decision report.
 
     Each tuple is the (state-just-before-the-decision, card-actually-played).
     The function is pure; it doesn't mutate any inputs.
+
+    Pass `rng` to make the report deterministic — the 3.3.1 fix threaded
+    seeded RNG into `AIPlayer.__init__` so personality jitter and easy-AI
+    fallbacks reproduce under a fixed run seed; without an explicit `rng`
+    here, "Optimal: 6/8" can flip to "5/8" between calls on the same data.
+    Default falls through to the legacy unseeded path.
     """
-    ai = AIPlayer(seat, Difficulty.HARD)
+    ai = AIPlayer(seat, Difficulty.HARD, rng=rng)
     reports: list[DecisionReport] = []
     for state, chosen in decisions:
         # Decide_card requires the state's turn to be the seat. Skip otherwise.

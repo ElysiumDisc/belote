@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "belote-cli"
-version = "3.3.1"
+version = "3.3.2"
 description = "A 4-player terminal card game"
 readme = "README.md"
 requires-python = ">=3.10"
