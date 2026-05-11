@@ -238,7 +238,9 @@ def drive_round(
         # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
         if state.boss_modifiers.auto_coinche:
             coinche_level = max(coinche_level, 1)
-        # Re-emit the final BidMadeEvent so jokers/HUD see the coinche level.
+        # Refresh joker_state with the resolved coinche level via a re-emit.
+        # `re_emit=True` updates derived state (HUD, joker_state["contract"])
+        # without re-firing on_bid jokers — those already fired in the loop.
         if coinche_level > 0:
             state = _emit(
                 BidMadeEvent(
@@ -246,15 +248,14 @@ def drive_round(
                     trump=state.trump,
                     contract=state.contract or "normal",
                     coinche_level=coinche_level,
+                    re_emit=True,
                 ),
                 state,
             )
     elif state.boss_modifiers.auto_coinche and state.phase == Phase.PLAYING:
         # Boss forces coinche even if taker is on NS team.
         coinche_level = 1
-        # Re-emit BidMadeEvent so jokers/HUD subscribed to on_bid see the
-        # coinche level. The EW-taker branch above does this; this NS branch
-        # used to skip it, silently dropping the event for on_bid subscribers.
+        # Re-emit refresh — see comment above; on_bid is suppressed via re_emit.
         if state.taker is not None:
             state = _emit(
                 BidMadeEvent(
@@ -262,6 +263,7 @@ def drive_round(
                     trump=state.trump,
                     contract=state.contract or "normal",
                     coinche_level=coinche_level,
+                    re_emit=True,
                 ),
                 state,
             )
@@ -280,6 +282,7 @@ def drive_round(
                 trump=state.trump,
                 contract=state.contract or "normal",
                 coinche_level=coinche_level,
+                re_emit=True,
             ),
             state,
         )

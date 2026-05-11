@@ -215,7 +215,18 @@ class BelAtroRun:
         self.run_over = True
 
     def enter_endless(self) -> None:
-        """Toggle endless mode after beating ante 8."""
+        """Toggle endless mode after beating ante 8.
+
+        Pre-3.4.0 the loop continued at (ante=8, blind=2, offset=0), which made
+        the *first* endless round replay the Ante 8 Boss Blind at the same
+        target before the ×2.2 scaling kicked in on the next cycle. We now
+        advance into a fresh endless cycle here so the prompt's "Ante 9+ scales
+        ×2.2" is honoured immediately.
+        """
         self.endless = True
         self.run_won = False  # endless overrides run-won state
         self.run_over = False  # ...and re-opens the run so the main loop continues
+        # Skip the redundant Ante 8 Boss replay: bump offset and restart the
+        # blind cycle. max(...) preserves any externally-set offset (tests).
+        self.endless_ante_offset = max(self.endless_ante_offset, 1)
+        self.blind_index = 0

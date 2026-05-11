@@ -230,7 +230,10 @@ class ScoreAccumulator:
         elif isinstance(event, BidMadeEvent):
             # Inject contract type into joker state so jokers can read it
             joker_state["contract"] = event.contract
-            _fire_jokers("on_bid", event)
+            # Re-emits (post-coinche refresh) update derived state but must not
+            # re-fire on_bid jokers — those already fired for the original bid.
+            if not event.re_emit:
+                _fire_jokers("on_bid", event)
 
         # Update GameState with new values
         return replace(

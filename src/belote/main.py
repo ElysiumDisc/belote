@@ -12,7 +12,6 @@ import random
 import shutil
 import signal
 import sys
-from dataclasses import replace
 
 from . import __version__
 from .ansi import (
@@ -216,11 +215,13 @@ def main() -> None:
                         break
                     state = res_round
 
-                    # Check for game over (after round end and score application)
-                    ns, ew = state.team_scores
-                    if ns >= target or ew >= target:
-                        state = replace(state, phase=Phase.GAME_OVER)
-
+                    # `apply_round_score` (scoring.py) already set the correct
+                    # phase: GAME_OVER when a team is ahead at/over target,
+                    # DEAL on a tie at target so a tie-breaker round plays.
+                    # Pre-3.4.0 this branch re-checked targets and forced
+                    # GAME_OVER unconditionally, breaking the tie-breaker.
+                    if state.phase == Phase.GAME_OVER:
+                        ns, ew = state.team_scores
                         unique_diffs = set(diffs_map.values())
                         difficulty_str = (
                             next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"

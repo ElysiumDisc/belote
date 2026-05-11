@@ -61,6 +61,19 @@ class Joker(ABC):
     # NONE for backward compatibility with existing tests that instantiate
     # jokers directly.
     edition: Edition = Edition.NONE
+    # 3.4.0: short 2-char label used by the joker pip strip in the HUD. Sub-
+    # classes may override; the default takes the first two ASCII letters of
+    # `name` for instances that don't set their own. Resolved lazily so the
+    # default doesn't snapshot during class definition before name is set.
+    _shortcode_override: str = ""
+
+    @property
+    def shortcode(self) -> str:
+        if self._shortcode_override:
+            return self._shortcode_override[:2]
+        # Strip non-letters (avoid leading "L'" or "Le " producing empty codes)
+        letters = "".join(c for c in (self.name or self.id or "??") if c.isalpha())
+        return (letters[:2] or "??").upper()
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         return None

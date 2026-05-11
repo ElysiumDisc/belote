@@ -227,3 +227,65 @@ def test_traitre_joker_sabotage_preserved_when_no_boss() -> None:
     tricks = state._joker_state.get("agent_double_tricks")
     assert isinstance(tricks, frozenset)
     assert len(tricks) == 1  # traitre's "single random trick" pattern
+
+
+# ── A1 regression (3.4.0): BidMadeEvent must not double-fire on_bid jokers ──
+
+
+def test_bid_made_event_does_not_double_fire_on_bid_under_auto_coinche() -> None:
+    """Regression for the coinche-path double-fire bug.
+
+    Before the fix, the auto_coinche boss path emitted BidMadeEvent twice for
+    the winning bid: once during the bidding loop (coinche_level=0), then
+    again post-coinche-resolution (coinche_level=1). Both emits fired
+    `on_bid` jokers, so any joker that read coinche-related state on the bid
+    event would be silently invoked twice (or with stale info on the first
+    fire). The fix flags re-emits with `re_emit=True` so the accumulator
+    skips on_bid firing while still updating joker_state["contract"].
+    """
+    from belote.belatro.run.boss import LAvocat
+
+    # A joker that records every on_bid fire — we'll assert no fire happens
+    # with coinche_level > 0, since re-emits should not invoke on_bid.
+    class _BidSniffer(Joker):
+        id = "bid_sniffer"
+        name = "BidSniffer"
+        description = "test"
+
+        def __init__(self) -> None:
+            self.fires: list[int] = []  # captured coinche_level per fire
+
+        def on_bid(self, event, state):  # type: ignore[no-untyped-def]
+            self.fires.append(event.coinche_level)
+
+    sniffer = _BidSniffer()
+    acc = ScoreAccumulator()
+    acc.attach_jokers([sniffer])
+    bus = EventBus()
+    partner = PartnerState()
+
+    # UI that passes on bids and plays the first legal card on every turn.
+    class _LegalPlayUI(MockUICallbacks):
+        def prompt_card(self, state: GameState):  # type: ignore[no-untyped-def]
+            from belote.game import legal_cards
+
+            legal = legal_cards(state, Seat.SOUTH)
+            return legal[0], state
+
+    drive_round(
+        bus=bus,
+        partner=partner,
+        boss=LAvocat(),
+        ui_callbacks=_LegalPlayUI(),
+        acc=acc,
+        seed=7,
+    )
+
+    # The fix must ensure no on_bid invocation carries coinche_level > 0 —
+    # those only come from re-emits, which are now suppressed. Failures here
+    # mean a re-emit slipped through without re_emit=True (regression).
+    coinched_fires = [lvl for lvl in sniffer.fires if lvl > 0]
+    assert coinched_fires == [], (
+        f"on_bid fired with coinche_level>0 ({coinched_fires}) — re-emits "
+        "should not invoke on_bid jokers."
+    )

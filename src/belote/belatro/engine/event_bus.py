@@ -51,6 +51,12 @@ class BidMadeEvent:
     trump: Suit | None  # None = pass
     contract: str  # "normal" | "tout_atout" | "sans_atout" | "coinche" | "surcoinche"
     coinche_level: int = 0  # 0=none, 1=coinche, 2=surcoinche
+    # When True, this event is a post-coinche refresh of an already-emitted bid.
+    # Consumers should update derived state (HUD, joker_state["contract"]) but
+    # MUST NOT re-fire `on_bid` jokers — those already fired for the original
+    # bid during the bidding loop. Without this flag, jokers like Le Passeur
+    # would double-count or future on_bid-based scoring would silently overpay.
+    re_emit: bool = False
 
 
 # ── Bus ────────────────────────────────────────────────────────────────────

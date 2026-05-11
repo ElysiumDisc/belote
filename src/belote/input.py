@@ -56,7 +56,14 @@ class _UnixKeyReader:
 
     def restore(self) -> None:
         if self._old_termios and not self._restored:
-            termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._old_termios)
+            # A dropped SSH session / broken pipe can make tcsetattr raise.
+            # We swallow the error and mark restored anyway so a re-entrant
+            # restore() (e.g. from __exit__ after a prior failed restore) is
+            # a no-op rather than another raise.
+            import contextlib
+
+            with contextlib.suppress(termios.error, OSError):
+                termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._old_termios)
             self._restored = True
 
     def read(self) -> KeyEvent:

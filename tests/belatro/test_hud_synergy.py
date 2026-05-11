@@ -42,8 +42,9 @@ def test_detect_synergies_finds_sentinelle_fanatique_pair() -> None:
 
 def test_detect_synergies_generic_stack_badge_for_three_unrelated() -> None:
     """Three jokers with no known pair still raise a generic 'stack' tag."""
-    # Pick three IDs that aren't part of any pair.
-    pair_ids = {a for pair in _SYNERGY_PAIRS for a in pair}
+    # Pick three IDs that aren't part of any pair. Each pair entry is
+    # (id_a, id_b, description) since 3.4.0 — pull the first two.
+    pair_ids = {x for pair in _SYNERGY_PAIRS for x in pair[:2]}
     unrelated = [j for j_id, j in registry.jokers.items() if j_id not in pair_ids][:3]
     if len(unrelated) < 3:
         return  # not enough non-paired jokers — registry too small
@@ -53,7 +54,7 @@ def test_detect_synergies_generic_stack_badge_for_three_unrelated() -> None:
 
 def test_detect_synergies_empty_for_unrelated_pair() -> None:
     """One unpaired + one unpaired = no badge, not even a generic one."""
-    pair_ids = {a for pair in _SYNERGY_PAIRS for a in pair}
+    pair_ids = {x for pair in _SYNERGY_PAIRS for x in pair[:2]}
     unrelated = [j for j_id, j in registry.jokers.items() if j_id not in pair_ids][:2]
     if len(unrelated) < 2:
         return
@@ -66,7 +67,8 @@ def test_detect_synergies_does_not_fire_for_solo_half() -> None:
     is owned. Trip-wire for any future change to detect_synergies that
     accidentally matches single jokers against pair entries.
     """
-    for left_id, right_id in _SYNERGY_PAIRS:
+    for entry in _SYNERGY_PAIRS:
+        left_id, right_id = entry[0], entry[1]
         # Confirm the right half is registered (the validate test above
         # already pins this, but be defensive).
         if right_id not in registry.jokers or left_id not in registry.jokers:

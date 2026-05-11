@@ -84,15 +84,15 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (549 tests expected)
+# Full test suite (551 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.3.4):
-- **mypy**: 0 errors (strict mode, 75 files)
+Current baseline (3.4.0):
+- **mypy**: 0 errors (strict mode, 76 files)
 - **ruff**: 0 violations
-- **pytest**: 549 tests, 0 failures
-- 3.3.4 covered: removed all terminal-bell / sound code (`play_sound`, `AudioManager`, `[M]` mute key) to fix a SIGSYS crash on Alpine 23 / musl after the first classic-mode trick. BelAtro and glibc distros were unaffected; classic Belote and BelAtro now share the same "no bells" baseline.
+- **pytest**: 551 tests, 0 failures
+- 3.4.0 covered: A1 `BidMadeEvent` double-fire on coinche paths (HIGH), E1 endless mode replaying Ante 8 Boss instead of advancing to the first scaled cycle (HIGH), E2 classic-mode tie-breaker overridden by main loop (HIGH), A2 termios raw-mode leak on SSH drop (MED), A3 shop selection index off-by-one after reroll (MED), A5 prompts.py dead return (LOW). Plus HUD additions: joker pip strip with edition glow (B.3), synergy tooltip (B.4), four-tier trust bar with tier glyph (B.5). Score gutter (B.2) and trick-lane compass (B.1) intentionally deferred — they touch `ui/render.py`'s vertical-centering logic and want a dedicated session.
 
 Run all gates before committing:
 

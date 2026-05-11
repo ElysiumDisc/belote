@@ -2,6 +2,17 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.4.0
+
+- **BelAtro joker correctness** — `BidMadeEvent` no longer double-fires `on_bid` joker handlers on coinche paths. Pre-3.4.0 the player-coinche, AI-partner-coinche, `auto_coinche` boss, and `start_coinched` deck-mod paths all re-emitted the same bid event a second time with the resolved `coinche_level`, so on_bid jokers (Le Passeur today, anything new tomorrow) were silently invoked twice for the same bid. Fixed via a `re_emit: bool` field on the event; refreshes update `joker_state["contract"]` but skip joker firing.
+- **Endless mode honours its prompt** — Accepting "Continue into Endless Mode? (Ante 9+ scales ×2.2)" used to leave the player at Ante 8 Boss Blind for one more *un-scaled* round before the ×2.2 kicked in. `enter_endless()` now advances into the first scaled cycle (offset=1, blind_index=0) immediately, so the very next round is the scaled Small Blind as advertised.
+- **Classic mode tie-breaker actually plays** — When both teams ended a round tied at exactly the target score, the classic loop unconditionally forced GAME_OVER, overriding `apply_round_score`'s deliberate `phase=DEAL` for tie-breaker rounds. The redundant re-check is gone; the scoring layer is the single source of truth for game-over phase.
+- **Terminal raw-mode no longer leaks on SSH drop** — `_UnixKeyReader.restore()` now wraps `termios.tcsetattr` in `contextlib.suppress(termios.error, OSError)` and marks the reader restored regardless. A dropped SSH session previously left the parent shell in no-echo mode.
+- **Shop reroll OOB fix** — Shop selection index after reroll is now correctly clamped to `len(inventory) - 1` instead of `len(inventory)`, preventing an out-of-range access on the next render.
+- **HUD: joker pip strip + synergy tooltip + polished trust bar** — Top-row 5-slot strip shows your jokers as compact pips with edition tint (Foil cyan / Holo magenta / Polychrome pink-violet / Negative reverse-video); slots in an active synergy pair gain a `*` marker, and a one-line tooltip below the score line describes the synergy. The trust bar gains a four-tier colour ramp (cramoisi/orange/gold/emeraude) and a leading tier glyph (`✗ ♡ ♥ ♦ ★`) — Loyal/Mécène glyphs are bolded so the top tiers pop.
+- **Audit reconciliation** — A fresh three-agent audit pass surfaced ~80 candidate findings; verification rejected ~95% as false positives or by-design patterns. The seven survivors are the fixes above; the rejected claims are catalogued in `CHANGELOG.md` so they aren't re-investigated.
+- **Test coverage** — 551 tests (up from 549). Strict gates still clean: pytest 551/551, mypy 0 errors (76 files), ruff 0 violations.
+
 ## What's new in 3.3.4
 
 - **Portability fix** — Removed all terminal-bell / sound code, which was triggering SIGSYS ("Bad system call") on Alpine 23 (musl libc) the moment the first trick completed in classic Belote mode. BelAtro mode and every glibc-based distro (Kubuntu / Lubuntu 24.10 / 25.10) were unaffected, but rather than guard the BEL writes behind a libc check, the entire sound subsystem is gone — `play_sound`, `AudioManager` / `AUDIO`, `is_muted` / `toggle_mute`, the `[M]` mute key, and the help-screen mute line. Classic Belote and BelAtro now share the same "no bells" baseline.

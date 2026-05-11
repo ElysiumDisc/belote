@@ -68,7 +68,10 @@ class ShopScreen:
                         self.selected = max(0, len(self.shop.inventory) - 1)
                 elif self.selected == num_items:
                     self.shop.reroll()
-                    self.selected = min(self.selected, len(self.shop.inventory))
+                    # Clamp to a *valid* index: len(inventory)-1, not len.
+                    # The previous form let `selected == len(inventory)` slip
+                    # through, OOB on the next render's inventory[self.selected].
+                    self.selected = min(self.selected, max(0, len(self.shop.inventory) - 1))
                 elif self.selected == forge_idx:
                     self._handle_forge()
             elif key in (Key.ESC, Key.QUIT):

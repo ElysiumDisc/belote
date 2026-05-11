@@ -109,7 +109,8 @@ def prompt_card(
                         idx = int(char) - 1
                         if 0 <= idx < len(hand) and hand[idx] in legal:
                             return hand[idx], state
-    return None, state
+    # Unreachable: the while(True) above only exits via return.
+    raise AssertionError("prompt_card loop fell through without returning")
 
 
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:

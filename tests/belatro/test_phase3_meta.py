@@ -107,6 +107,24 @@ def test_enter_endless_clears_run_won_and_flips_flag() -> None:
     assert run.run_won is False
 
 
+def test_enter_endless_advances_into_first_scaled_cycle() -> None:
+    """3.4.0 fix: pre-fix, entering endless from (ante=8, blind=2, offset=0)
+    left state at (ante=8, blind=2, offset=0, endless=True), so the next round
+    REPLAYED Ante 8 Boss Blind at base target before ×2.2 kicked in. The fix
+    bumps offset to 1 and resets blind_index so the very first endless round is
+    Ante 8 Small Blind × 2.2 — honouring the prompt's "Ante 9+ scales" promise.
+    """
+    run = BelAtroRun(ante_number=8, blind_index=2, run_won=True)
+    run.enter_endless()
+    assert run.endless is True
+    assert run.run_over is False
+    assert run.blind_index == 0  # restart of blind cycle
+    assert run.endless_ante_offset == 1  # first scaled cycle
+    # The very next blind is the scaled Small Blind, not a Boss replay.
+    assert run.current_blind.target == endless_ante(8, 0, 1).target
+    assert run.current_blind.name == "Small Blind"
+
+
 # ── Joker fusion ────────────────────────────────────────────────────────────
 
 
