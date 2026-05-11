@@ -1059,21 +1059,27 @@ def _build_suit_idx(trump: Suit | None) -> dict[Suit, int]:
 
 
 # Pre-compute suit→position maps for every possible trump value (None + the
-# four card suits). sort_hand is called frequently during rendering and this
-# keeps the hot path branch-free.
+# four card suits + TOUT_ATOUT). sort_hand is called frequently during
+# rendering and this keeps the hot path branch-free.
 _SUIT_IDX_CACHE: Final[dict[Suit | None, dict[Suit, int]]] = {
-    trump: _build_suit_idx(trump) for trump in (None, *_SUITS_ORDER)
+    trump: _build_suit_idx(trump) for trump in (None, Suit.TOUT_ATOUT, *_SUITS_ORDER)
 }
 
 
 def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
     """Sort hand by suit and rank (trump first, then others, honors together)."""
     suit_idx = _SUIT_IDX_CACHE.get(trump) or _build_suit_idx(trump)
+    # Under Tout Atout every card is trump, so the trump-rank ladder applies
+    # to *every* suit. `c.suit == trump` would always be False here because
+    # Card.suit is one of SPADES/HEARTS/DIAMONDS/CLUBS — TOUT_ATOUT is a
+    # contract-level marker, never a card suit.
+    all_trump = trump is Suit.TOUT_ATOUT
 
     def sort_key(c: Card) -> tuple[int, int]:
+        is_trump = all_trump or c.suit == trump
         return (
             suit_idx[c.suit],
-            _TRUMP_RANK_IDX[c.rank] if c.suit == trump else _NORMAL_RANK_IDX[c.rank],
+            _TRUMP_RANK_IDX[c.rank] if is_trump else _NORMAL_RANK_IDX[c.rank],
         )
 
     return tuple(sorted(hand, key=sort_key))

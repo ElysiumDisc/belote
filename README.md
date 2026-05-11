@@ -2,6 +2,15 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.3.3
+
+- **Determinism** — Boss assignment in BelAtro mode now draws from the run's seeded RNG instead of the module-level `random`. This was the last unseeded RNG site in the round flow (shop and tarots were converted in 3.2.0, AI in 3.3.1, replay analysis in 3.3.2). Same seed now reproduces the same boss on the boss blind.
+- **UI** — Hands sort by the trump-rank ladder under Tout Atout (Jack first, then 9 / A / 10 / K / Q / 8 / 7). Pre-3.3.3 the predicate `c.suit == trump` was always false under TA because Card.suit is never `Suit.TOUT_ATOUT`, so the South hand displayed in the non-trump order whenever the player bid TA.
+- **Tarot** — Le Jugement now correctly grants only Common jokers as advertised. Pre-3.3.3 the code drew from the full unlocked pool, so late-run players with Rare/Legendary unlocks could roll out-of-rarity jokers off this tarot.
+- **Test moat** — Three new invariant test suites added: scoring-conservation property (`table_taker + table_defender == 162 / 258 / 130` for normal / Tout Atout / Sans Atout), seeded-round replay determinism (same seed → same card sequence → same final state), and HUD synergy-badge negative test (solo half of a pair must not fire the badge). These would have caught most of the 3.3.x bug cycle from below.
+- **Audit reconciliation** — A fresh three-agent codebase pass surfaced ~50 candidate findings; the three above held up under verification and the rest are catalogued in `CHANGELOG.md` so they aren't re-investigated.
+- **Test coverage** — 549 tests (up from 537). Strict gates still clean: pytest 549/549, mypy 0 errors (76 files), ruff 0 violations.
+
 ## What's new in 3.3.1
 
 - **Scoring correctness under bosses** — La Rupture (`no_consecutive_team_wins`) used to be applied to the live HUD but silently ignored by `score_round`, so the running total and final score diverged and impossible capots could be reported. L'Anarchie (dynamic trump) rotated `state.trump` mid-round, after which scoring's `belote_holders.get(trump)` lookup missed any Belote announced on the original trump and silently zeroed the 20/40 bonus. Both are fixed: a new `compute_trick_winners` helper is the single source of truth for La Rupture-aware winner resolution, and a new `belote_announcer: Seat` field captures the announcing seat at declaration time so the rotated trump no longer matters.

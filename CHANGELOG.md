@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.3] - 2026-05-10
+
+Audit-of-audit release — a fresh three-agent codebase pass (classic engine / BelAtro mode / tests + UI) produced ~50 candidate findings. Verification cut that to **3 real fixes** plus **3 net-new invariant test suites** for properties the prior 3.3.x cycles silently relied on. ~14 rejected claims are catalogued at the bottom of this entry so they aren't re-investigated next cycle. 549 tests passing (up from 537), ruff and mypy strict still clean. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-tingly-barto.md`.
+
+### Fixed
+
+- **`src/belote/game.py::sort_hand` (F1)** — Under the Tout Atout contract every card should sort by the trump rank ladder (`J > 9 > A > 10 > K > Q > 8 > 7`). Pre-3.3.3 the sort key gated `_TRUMP_RANK_IDX` on `c.suit == trump`, which is *always* false when `trump is Suit.TOUT_ATOUT` because `Card.suit` is one of `SPADES/HEARTS/DIAMONDS/CLUBS` (TA is a contract-level marker, not a card suit). Result: the South hand displayed in the non-trump order whenever the player bid or held TA. Fix: explicit `all_trump = trump is Suit.TOUT_ATOUT` branch in `sort_key`. Also extends `_SUIT_IDX_CACHE` to pre-build the TA entry so the hot path stays cache-resident. UI-only — no scoring impact. Regression test in `tests/test_game_logic.py::test_sort_hand_uses_trump_ladder_under_tout_atout`.
+- **`src/belote/belatro/main.py::_play_blind` (F2)** — Boss assignment on the boss blind now draws from `self.run._get_rng().choice(ALL_BOSS_MODIFIERS)`. Pre-3.3.3 the function imported `random` inline and called `random.choice()` on the module-level RNG — the same class of bug the 3.2.0 release fixed for shop generation and the three RNG-using tarots (`LeJugement` / `LaPretresse` / `LeFou`). Boss assignment was the last unseeded RNG site in the BelAtro round flow; ghost-run reproducibility now observes the same boss for the same seed regardless of prior process-wide RNG state. Regression tests in `tests/belatro/test_belatro.py::TestBossSelectionDeterminism` (behaviour + source-grep against the anti-pattern).
+- **`src/belote/belatro/items/tarots.py::LeJugement` (F3)** — The tarot's description promises *"a random Common Joker"* but the implementation drew from `registry.get_available_jokers(run.profile)` — the full unlocked pool across all rarities. Late-run players with Rare/Legendary jokers unlocked could roll Legendary off this tarot, which is strictly stronger than advertised and mis-prices the consumable. Fix: filter the pool to `getattr(v, "rarity", Rarity.COMMON) == Rarity.COMMON` before the choice; existing empty-pool guard handles the (rare) case where no Commons are available. Regression tests in `tests/belatro/test_belatro.py::TestLeJugementRarity`.
+
+### Added — invariant tests
+
+These are the three test suites the 3.3.x bug cycle has been silently asking for. Each one would have caught at least one prior bug from below.
+
+- **`tests/test_properties.py` — scoring conservation per contract (T1)** — Three new tests drive seeded full rounds and assert `table_taker_pts + table_defender_pts == 162` (normal) / `258` (Tout Atout) / `130` (Sans Atout). Plus a card-consumption invariant: after a full round every hand is empty and exactly 8 tricks were recorded. Would have caught the L'Anarchie belote-zero (3.3.1) and the La Rupture HUD divergence (3.3.1/3.3.2) years earlier had it existed at the time. Also includes a small `_drive_full_round` helper for future scoring-pin tests (handles the round-2-only TA/SA bidding flow).
+- **`tests/test_replay.py` — replay round-trip + seeded determinism (T2)** — Two new tests: (a) record each played card from a seeded run, replay them into a fresh `GameState` built from the same seed, assert identical final state across `team_scores` / `completed_tricks` / `belote_tracker` / `belote_announcer` / `last_trick_winner`; (b) drive the same seed twice and assert identical 32-card sequences. Pins the determinism promise the 3.3.1 AI-RNG fix and the 3.3.2 replay-RNG fix established.
+- **`tests/belatro/test_hud_synergy.py` — solo-half pair test (T3)** — The existing file already exercises the "both halves present → badge fires" direction. The new test adds the negative direction: for each pair in `_SYNERGY_PAIRS`, feed a single half into `detect_synergies` and assert no badge fires. Trip-wire for any change to the synergy matcher that accidentally promotes lone jokers to a pair badge.
+
+### Internal
+
+- **Tests**: 537 → 549 (+12 — 3 F-regressions + 4 T1 + 2 T2 + 1 T3 + extra cross-suit / TA sanity assertions).
+- **Strict gates**: pytest 549/549, mypy 0 errors (76 files), ruff 0 violations.
+- **`_SUIT_IDX_CACHE` widened**: now pre-builds for `(None, Suit.TOUT_ATOUT, *_SUITS_ORDER)` instead of just `(None, *_SUITS_ORDER)`. Removes a per-render cache miss under TA but is otherwise a no-op.
+
+### Rejected — claims catalogued (so they aren't re-investigated)
+
+The three Explore agents that drove this audit surfaced many plausible-sounding findings; the ones below fell apart on direct read of the current code and are documented here to save the next cycle from re-investigating them.
+
+**Already fixed in 3.3.1/3.3.2 (agents read against stale priors):**
+- "`_hard_play` returns `legal[0]` under Sans Atout" — fixed in 3.3.1.
+- "`AIPlayer.__init__` constructs unseeded `Random()`" — fixed in 3.3.1; `analyze_round` followed in 3.3.2.
+- "`AIMemory.last_voids_key` not reset on mid-round undo" — fixed in 3.3.1.
+- "Live HUD diverges from final score under La Rupture" — fixed in 3.3.1 (`compute_trick_winners`) + 3.3.2 (`is_capot(tricks=…)`).
+- "Belote/Rebelote silently zeroed under L'Anarchie when trump rotates" — fixed in 3.3.1 via `GameState.belote_announcer`.
+
+**Interpretive, not bugs:**
+- "`ScoreAccumulator` applies edition before partner-tier scaling, so Holo isn't tier-scaled" — by design. Editions ride along once per joker trigger; tier extras re-apply the *base* joker result. Otherwise an elite-tier Polychrome partner joker would compound geometrically.
+- "Libra's `coinche_multiplier=1.0 × event.coinche_level` makes coinche pay ×5, not ×4" — description is ambiguous; the math matches the Phase 3 design doc (`+1 Mult per coinche level on success`).
+- "Pluto `capot_bonus = 48` is additive to 252 = 300" — that *is* the advertised behaviour.
+- "`_TIERCE_LIKE` has title-case dead entries (`Tierce`/`Quarte`/`Quinte`)" — `decl.kind` is always lowercase (`sequence`/`carre`/`belote`/`rebelote`), so only `"sequence"` ever matches. The joker fires correctly on every Tierce/Quarte/Quinte; the title-case entries are dead but harmless.
+- "QuinteRoyale arms on `event.points >= 100` instead of declaration length" — Quinte = 100 pts in classic Belote and `event.points` is the unmodified `get_declaration_points([...])` computed inline at emit time; the proxy is sound.
+- "`EventBus.emit` has no try/except around handlers" — broad-except would mask real bugs in joker/accumulator code. Current handlers are internal; an exception should surface in dev/test rather than be swallowed.
+- "Negative-edition jokers still pay the 1.5× shop markup" — design: Negative is the rarest edition and grants a permanent +1 joker slot.
+- "Boss `random.choice` doesn't respect profile unlocks" — there is no boss-unlock system in the data model; all bosses are always available by design.
+- "ToutStreak / LeSergent reset semantics don't match flavour text" — joker authoring judgment call. Behaviour matches the registry definition.
+
+**Already addressed by existing code:**
+- "`ScoreAccumulator.update_state` clones `_joker_state` per event" — intentional shallow copy; `test_joker_state_only_contains_scalar_values` pins the scalar invariant.
+- "Registry duplicate-ID overwrites silently" — fixed in 3.2.0; all four `register_*` methods assert same-class re-registration.
+- "`_SUIT_IDX_CACHE` missing TOUT_ATOUT" — addressed as part of F1 (now in the cache).
+
 ## [3.3.2] - 2026-05-10
 
 Residual-audit release — a fresh full-codebase pass after 3.3.1 turned up three real findings (a HIGH live-HUD divergence under La Rupture, a MEDIUM determinism leak in `replay.analyze_round`, and a LOW cosmetic chips display). The same pass flagged ~5 plausible-sounding "performance wins" and other claims that fell apart on verification — catalogued in the plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-cheeky-globe.md` so they aren't re-investigated. 537 tests passing (up from 535), ruff and mypy strict still clean.

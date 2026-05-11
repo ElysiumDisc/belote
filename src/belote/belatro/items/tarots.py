@@ -32,9 +32,17 @@ class LeJugement(Tarot):
     description = "Instantly gain a random Common Joker."
 
     def use(self, run: BelAtroRun, context: object) -> None:
+        from .base import Rarity
         from .registry import registry
         run.last_tarot_message = None
-        avail = registry.get_available_jokers(run.profile)
+        # Description promises a Common joker — pre-3.3.3 the pool was the
+        # full unlocked set, so late-run players could roll Rare/Legendary
+        # off this tarot and mis-price it. Filter to Rarity.COMMON only.
+        avail = {
+            k: v
+            for k, v in registry.get_available_jokers(run.profile).items()
+            if getattr(v, "rarity", Rarity.COMMON) == Rarity.COMMON
+        }
         if not avail:
             run.last_tarot_message = "Le Jugement: no jokers available to grant."
             return

@@ -59,3 +59,23 @@ def test_detect_synergies_empty_for_unrelated_pair() -> None:
         return
     out = detect_synergies([cls() for cls in unrelated])
     assert out == []
+
+
+def test_detect_synergies_does_not_fire_for_solo_half() -> None:
+    """3.3.3 T3: a pair badge must NOT fire when only one half of the pair
+    is owned. Trip-wire for any future change to detect_synergies that
+    accidentally matches single jokers against pair entries.
+    """
+    for left_id, right_id in _SYNERGY_PAIRS:
+        # Confirm the right half is registered (the validate test above
+        # already pins this, but be defensive).
+        if right_id not in registry.jokers or left_id not in registry.jokers:
+            continue
+        left_cls = registry.jokers[left_id]
+        out = detect_synergies([left_cls()])
+        assert (left_id, right_id) not in out, (
+            f"Pair ({left_id}, {right_id}) fired for solo {left_id}"
+        )
+        assert (right_id, left_id) not in out, (
+            f"Pair ({right_id}, {left_id}) fired for solo {left_id}"
+        )

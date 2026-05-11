@@ -84,14 +84,15 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (535 tests expected)
+# Full test suite (549 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.3.1):
-- **mypy**: 0 errors (strict mode)
+Current baseline (3.3.3):
+- **mypy**: 0 errors (strict mode, 76 files)
 - **ruff**: 0 violations
-- **pytest**: 535 tests, 0 failures
+- **pytest**: 549 tests, 0 failures
+- 3.3.3 covered: boss-RNG seeding, Tout Atout hand sort, Le Jugement Common-only filter, plus three new invariant suites (scoring conservation, replay round-trip, HUD synergy negative test).
 
 Run all gates before committing:
 

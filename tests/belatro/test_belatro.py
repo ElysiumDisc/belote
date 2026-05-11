@@ -1796,3 +1796,101 @@ class TestShop:
         result = self.shop.buy_item(0)
         assert result is True
         assert self.shop.last_buy_failure is None
+
+
+# ===========================================================================
+# 3.3.3 F2 — Boss selection determinism
+# ===========================================================================
+
+
+class TestBossSelectionDeterminism:
+    """F2: BelAtroGame._play_blind now picks the boss via run._get_rng()
+    instead of the module-level random.choice. Same fix class as 3.2.0 for
+    shop and tarots; boss was the last unseeded RNG site."""
+
+    def test_seeded_runs_pick_same_boss_class(self) -> None:
+        from belote.belatro.core.run_state import BelAtroRun
+        from belote.belatro.run.boss import ALL_BOSS_MODIFIERS
+
+        run1 = BelAtroRun(seed=42)
+        run2 = BelAtroRun(seed=42)
+        # The exact call _play_blind now performs.
+        b1 = run1._get_rng().choice(ALL_BOSS_MODIFIERS)
+        b2 = run2._get_rng().choice(ALL_BOSS_MODIFIERS)
+        assert b1 is b2
+
+    def test_play_blind_does_not_use_module_random_for_boss(self) -> None:
+        """Source-level guard: the pre-3.3.3 anti-pattern
+        `random.choice(ALL_BOSS_MODIFIERS)` must not return. If someone
+        reverts to module-level random, this fails before the determinism
+        regression can ship.
+        """
+        import inspect
+
+        from belote.belatro.main import BelAtroGame
+
+        source = inspect.getsource(BelAtroGame)
+        assert "random.choice(ALL_BOSS_MODIFIERS)" not in source, (
+            "Boss selection must go through self.run._get_rng().choice() — "
+            "see 3.3.3 F2."
+        )
+
+
+# ===========================================================================
+# 3.3.3 F3 — LeJugement Common-only rarity
+# ===========================================================================
+
+
+class TestLeJugementRarity:
+    """F3: LeJugement description promises a Common joker; pre-3.3.3 the
+    pool was the full unlocked set so Rare/Legendary unlocks could roll
+    off this tarot. Now filtered to Rarity.COMMON.
+    """
+
+    def test_le_jugement_only_grants_common_jokers(self) -> None:
+        from belote.belatro.core.run_state import BelAtroRun
+        from belote.belatro.items.base import Rarity
+        from belote.belatro.items.tarots import LeJugement
+
+        # Drive enough trials to cover the available pool many times over.
+        # Each pass adds a joker → the slot guard fires after joker_slots
+        # grants and short-circuits. Reset jokers between trials so each
+        # call actually grants.
+        for seed in range(20):
+            run = BelAtroRun(seed=seed)
+            run.jokers = []  # ensure slots aren't full
+            LeJugement().use(run, None)
+            if not run.jokers:
+                # Pool was empty for this seed/profile — the tarot left
+                # a message and returned. Acceptable.
+                continue
+            granted = run.jokers[-1]
+            assert getattr(granted, "rarity", Rarity.COMMON) == Rarity.COMMON, (
+                f"Le Jugement granted {granted.__class__.__name__} of "
+                f"rarity {getattr(granted, 'rarity', None)} — expected Common"
+            )
+
+    def test_le_jugement_empty_pool_sets_message(self) -> None:
+        """If the Common pool is empty (e.g., all jokers are higher-rarity
+        unlockables), LeJugement should fall through to the empty-pool path
+        and set last_tarot_message rather than crash.
+        """
+        from belote.belatro.core.run_state import BelAtroRun
+        from belote.belatro.items.tarots import LeJugement
+
+        run = BelAtroRun(seed=1)
+        run.jokers = []
+        # Monkey-patch the registry lookup to return an empty pool.
+        import belote.belatro.items.tarots as tarot_mod
+        from belote.belatro.items import registry as reg_mod
+
+        orig = reg_mod.registry.get_available_jokers
+        reg_mod.registry.get_available_jokers = lambda profile: {}  # type: ignore[assignment]
+        try:
+            LeJugement().use(run, None)
+            assert run.last_tarot_message is not None
+            assert "no jokers" in run.last_tarot_message.lower()
+            assert run.jokers == []
+        finally:
+            reg_mod.registry.get_available_jokers = orig  # type: ignore[assignment]
+        _ = tarot_mod  # silence unused-import lint

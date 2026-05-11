@@ -270,11 +270,13 @@ class BelAtroGame:
             if self.run.card_enhancements.pop("disable_next_boss", False):
                 pass  # boss stays None; deliberately skip the reveal animation
             else:
-                import random
-
                 from .run.boss import ALL_BOSS_MODIFIERS
 
-                boss_cls = random.choice(ALL_BOSS_MODIFIERS)
+                # Use the run's seeded RNG, not the module-level random — same
+                # determinism fix the 3.2.0 release applied to shop generation
+                # and the three RNG-using tarots. Boss assignment was the last
+                # unseeded RNG site in the BelAtro round flow.
+                boss_cls = self.run._get_rng().choice(ALL_BOSS_MODIFIERS)
                 boss = boss_cls()
                 BelAtroAnnounce.boss_reveal(boss, self.reader)
 
