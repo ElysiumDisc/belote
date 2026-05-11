@@ -88,11 +88,11 @@ ruff check src/ tests/
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.3.3):
-- **mypy**: 0 errors (strict mode, 76 files)
+Current baseline (3.3.4):
+- **mypy**: 0 errors (strict mode, 75 files)
 - **ruff**: 0 violations
 - **pytest**: 549 tests, 0 failures
-- 3.3.3 covered: boss-RNG seeding, Tout Atout hand sort, Le Jugement Common-only filter, plus three new invariant suites (scoring conservation, replay round-trip, HUD synergy negative test).
+- 3.3.4 covered: removed all terminal-bell / sound code (`play_sound`, `AudioManager`, `[M]` mute key) to fix a SIGSYS crash on Alpine 23 / musl after the first classic-mode trick. BelAtro and glibc distros were unaffected; classic Belote and BelAtro now share the same "no bells" baseline.
 
 Run all gates before committing:
 

@@ -2,6 +2,11 @@
 
 Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
 
+## What's new in 3.3.4
+
+- **Portability fix** — Removed all terminal-bell / sound code, which was triggering SIGSYS ("Bad system call") on Alpine 23 (musl libc) the moment the first trick completed in classic Belote mode. BelAtro mode and every glibc-based distro (Kubuntu / Lubuntu 24.10 / 25.10) were unaffected, but rather than guard the BEL writes behind a libc check, the entire sound subsystem is gone — `play_sound`, `AudioManager` / `AUDIO`, `is_muted` / `toggle_mute`, the `[M]` mute key, and the help-screen mute line. Classic Belote and BelAtro now share the same "no bells" baseline.
+- **Test coverage** — Still 549 tests. Strict gates clean: pytest 549/549, mypy 0 errors, ruff 0 violations.
+
 ## What's new in 3.3.3
 
 - **Determinism** — Boss assignment in BelAtro mode now draws from the run's seeded RNG instead of the module-level `random`. This was the last unseeded RNG site in the round flow (shop and tarots were converted in 3.2.0, AI in 3.3.1, replay analysis in 3.3.2). Same seed now reproduces the same boss on the boss blind.
@@ -200,7 +205,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 **General:**
 - `?`: Show keyboard shortcut help
-- `M`: Toggle sound effects on/off
 - `I` or `V`: Toggle BelAtro score overlay (per-trick breakdown popup)
 - `Q`: Quit to main menu or exit
 - `H`: View Game History (round-by-round, with contract / taker / tricks / declarations)
@@ -241,7 +245,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Statistics:** unified global tracking of games played, win rates, best rounds, and BelAtro expansion milestones.
 - **Responsive Layout (3 tiers):** Three preset layouts — **compact** (80×32, fits 1366×768), **standard** (96×38), **spacious** (120×48+). The game picks the largest preset that fits your terminal on every render, so resizing mid-game adapts automatically; cards, side columns, and HUD verbosity all scale with the preset. Vertical centering pads tall terminals so the game never clings to the top.
 - **Alternate Screen Buffer:** Both classic Belote and BelAtro run in a dedicated terminal buffer for a clean, non-overlapping interface — your shell scrollback stays untouched after you quit.
-- **Sound Effects:** Enhanced auditory feedback for trick wins, Belote, and Capot, with a built-in mute toggle.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
 - **High Fidelity:** Implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", "Capot" (252 pts), and "Litige" (tie-break). All six contracts are bidable in round 2: the four card suits, **Tout Atout** (every suit acts as trump within its own led-suit group; press `a`), and **Sans Atout** (no trump, lead-suit highest wins; press `s`).
@@ -273,7 +276,7 @@ belote/
 │   ├── scoring.py     # Declarations, round scoring, capot
 │   ├── ai.py          # Three-tier AI (easy/medium/hard)
 │   ├── config.py      # Global configuration and timings
-│   ├── context.py     # Global managers (Audio, Terminal)
+│   ├── context.py     # Global managers (Terminal)
 │   ├── themes.py      # Color theme management
 │   ├── ui/            # Modular UI package
 │   ├── ansi.py        # ANSI escape helpers (colors, cursor)

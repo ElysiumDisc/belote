@@ -46,7 +46,6 @@ from .ui import (
     announce,
     display,
     patch_trick_card,
-    play_sound,
     prompt_bid,
     prompt_card,
 )
@@ -187,7 +186,6 @@ def run_play(
 
         # 3. If this completes a trick, pause longer and show announcements
         if len(display_state.current_trick) == 4:
-            play_sound("trick")
             # Non-skippable minimum dwell so all four cards are always visible
             # before the trick clears, even when the user has skipped earlier
             # animations or is on the "instant" speed preset.
@@ -215,7 +213,6 @@ def run_play(
                     )
                     is not None
                 ):
-                    play_sound("capot")
                     announce(
                         "CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader
                     )
@@ -228,7 +225,6 @@ def run_play(
         if len(display_state.current_trick) == 4 and len(current.completed_tricks) == 0:
             for decl in current.declarations:
                 if decl.kind in ("sequence", "carre"):
-                    play_sound("declaration")
                     msg = f"{decl.seat.name}: {decl.kind.upper()}"
                     if decl.kind == "sequence":
                         # Sequence length (3=tierce, 4=quarte, 5=quinte)
@@ -264,8 +260,6 @@ def run_play(
             a11y.announce_trick_won(current.last_trick_winner, pts)
 
         if current.announced:
-            if "Belote" in current.announced:
-                play_sound("belote")
             announce(
                 current.announced,
                 duration=max(0.5, trick_pause * 0.6) if not skip_anims else 0,
@@ -377,8 +371,6 @@ def run_round(
         # Scoring Phase
         if current.phase == Phase.SCORING:
             breakdown = score_round(current)
-            if breakdown.is_failed:
-                play_sound("chute")
             display(current, None)
             sys.stdout.write(f"\r\n{'=' * 50}\r\n")
             sys.stdout.write("  Round Results:\r\n")

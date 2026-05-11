@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.4] - 2026-05-10
+
+Portability release — removes all terminal-bell / sound code, which was triggering SIGSYS ("Bad system call") on Alpine 23 (musl libc) the moment the first trick completed in classic Belote mode. BelAtro mode was unaffected on the same Alpine box (it never imported `play_sound`), and Kubuntu / Lubuntu 24.10 / 25.10 (glibc) were unaffected in either mode. Rather than guard the BEL writes behind a libc-detection flag, the entire sound subsystem is removed: classic Belote and BelAtro now share the same "no bells" baseline. 549 tests still passing, ruff and mypy strict still clean.
+
+### Removed
+
+- **`src/belote/ui/announce.py::play_sound`** — terminal-bell helper (writes `\a` bytes for `trick` / `belote` / `declaration` / `chute` / `capot` events). Was called from five sites in `gameflow.py` (post-trick, capot, first-trick declarations, Belote announcement, chute on failed contract); all five call sites are deleted along with the function. BelAtro's `engine/round_driver.py` never imported it, so no BelAtro behaviour changes.
+- **`src/belote/ui/announce.py::is_muted` / `toggle_mute`** — wrappers around `AUDIO.is_muted()` / `AUDIO.toggle_mute()`. Re-exports dropped from `src/belote/ui/__init__.py::__all__`.
+- **`src/belote/context.py::AudioManager` + the `AUDIO` singleton** — process-wide mute state holder. `TerminalContext` and the `TERMINAL` singleton are kept (they back the terminal-size cache used elsewhere).
+- **`src/belote/input.py::Key.MUTE` + the `m` / `b"m"` key bindings** — `M` no longer triggers a special key event in either `_UnixKeyReader` or `_WindowsKeyReader`; it now falls through to `Key.CHAR` like any other letter (Belote has no other meaning for `M`).
+- **Three `case Key.MUTE: toggle_mute()` branches in `src/belote/ui/prompts.py`** (card prompt, bid prompt, rules viewer) — deleted along with the `from .announce import is_muted, toggle_mute` import.
+- **Two `case Key.MUTE: toggle_mute()` branches in `src/belote/ui/menu.py`** (AI config submenu, main menu) — deleted along with the `from .announce import toggle_mute` import.
+- **`[M] Toggle Sound Effects` line from the in-game help screen** (`src/belote/ui/prompts.py::show_help`) — plus the live `(Currently: ON/OFF)` status line that reflected `is_muted()`.
+- **`tests/test_gameflow.py`** — the obsolete `unittest.mock.patch("belote.gameflow.play_sound")` mock inside `test_run_play_8_tricks`'s `ExitStack` is gone; the test still passes (the underlying `display` / `patch_trick_card` / `announce` / `prompt_card` mocks remain).
+
+### Internal
+
+- **Tests**: still 549 passing.
+- **Strict gates**: pytest 549/549, mypy 0 errors (75 files — `context.py` lost one class but kept the module), ruff 0 violations.
+- **Unused-import sweep**: `green_fg` dropped from `src/belote/ui/prompts.py` imports (only the deleted `sound_status` line used it).
+
+### Why drop the bell instead of guarding it on musl
+
+`play_sound` only writes BEL (`\a`) bytes to stdout; writing those bytes is just `write(2)` and doesn't itself trigger SIGSYS on any sane libc. Whatever the precise mechanism on Alpine 23 (terminal-driver quirk, blocked downstream ioctl, or musl-specific signal-frame interaction with the existing `signal.signal(SIGINT/SIGTERM)` registration in `main.py:132-133`), the simplest and most robust answer is to stop writing the bell at all. Modern terminal emulators on every tested distro either ignored or visually-flashed the bell — no user-meaningful audio was being produced. The mute toggle exists only to suppress those flashes; with the bell gone, the toggle is dead weight.
+
 ## [3.3.3] - 2026-05-10
 
 Audit-of-audit release — a fresh three-agent codebase pass (classic engine / BelAtro mode / tests + UI) produced ~50 candidate findings. Verification cut that to **3 real fixes** plus **3 net-new invariant test suites** for properties the prior 3.3.x cycles silently relied on. ~14 rejected claims are catalogued at the bottom of this entry so they aren't re-investigated next cycle. 549 tests passing (up from 537), ruff and mypy strict still clean. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-tingly-barto.md`.

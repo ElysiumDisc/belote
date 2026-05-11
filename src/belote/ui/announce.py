@@ -19,19 +19,10 @@ from ..ansi import (
     move,
     white_fg,
 )
-from ..context import AUDIO
 from ..game import GameState
 from ..input import KeyReader, interruptible_sleep
 from ..stats import get_session_stats, load_stats
 from .render import display_hud, get_term_size
-
-
-def is_muted() -> bool:
-    return AUDIO.is_muted()
-
-
-def toggle_mute() -> bool:
-    return AUDIO.toggle_mute()
 
 
 def announce(message: str, duration: float = 2.0, reader: KeyReader | None = None) -> None:
@@ -53,29 +44,6 @@ def announce(message: str, duration: float = 2.0, reader: KeyReader | None = Non
         interruptible_sleep(duration, reader)
     else:
         time.sleep(duration)
-
-
-def play_sound(kind: str) -> None:
-    """Enhanced terminal sounds using frequency tones (where supported) or bells."""
-    if AUDIO.is_muted():
-        return
-
-    # Use XTerm OSC 777 or simple bells for now to keep it cross-terminal
-    if kind == "trick":
-        sys.stdout.write("\a")
-    elif kind == "belote":
-        sys.stdout.write("\a\a")
-    elif kind == "declaration":
-        sys.stdout.write("\a")
-    elif kind == "chute":
-        sys.stdout.write("\a\a\a")
-    elif kind == "capot":
-        # Arpeggio-like bell sequence
-        for _ in range(3):
-            sys.stdout.write("\a")
-            sys.stdout.flush()
-            time.sleep(0.1)
-    sys.stdout.flush()
 
 
 def show_stats(reader: KeyReader) -> None:

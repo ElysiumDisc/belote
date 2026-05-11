@@ -1,4 +1,4 @@
-from .announce import animate_score_update, announce, is_muted, play_sound, show_stats, toggle_mute
+from .announce import animate_score_update, announce, show_stats
 from .menu import show_ai_config, show_final_screen, show_main_menu
 from .prompts import prompt_bid, prompt_card, show_help, show_history, show_rules
 from .render import display, get_term_size, patch_trick_card, render
@@ -17,9 +17,6 @@ __all__ = [
     "show_ai_config",
     "show_final_screen",
     "announce",
-    "play_sound",
-    "toggle_mute",
     "show_stats",
     "animate_score_update",
-    "is_muted",
 ]

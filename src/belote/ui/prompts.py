@@ -11,7 +11,6 @@ from ..ansi import (
     ansi_center,
     clear_screen,
     gold_fg,
-    green_fg,
     hide_cursor,
     red_fg,
     visible_len,
@@ -28,7 +27,6 @@ from ..game import (
 from ..input import Key, KeyReader
 from ..rules import RULES_CONTENT, RulesPage
 from ..themes import THEMES, theme_manager
-from .announce import is_muted, toggle_mute  # Need to implement these or import correctly
 from .render import display, get_term_size
 
 
@@ -90,9 +88,6 @@ def prompt_card(
                 legal = legal_cards(state, Seat.SOUTH)
                 # Re-find selection index
                 sel = next((i for i, c in enumerate(hand) if c == selected_card), 0)
-                continue
-            case Key.MUTE:
-                toggle_mute()
                 continue
             case Key.THEME:
                 themes_list = list(THEMES.keys())
@@ -156,9 +151,6 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
             case Key.HELP:
                 show_help(reader)
                 continue
-            case Key.MUTE:
-                toggle_mute()
-                continue
             case Key.THEME:
                 themes_list = list(THEMES.keys())
                 curr_theme = theme_manager.current_name
@@ -195,7 +187,6 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
 def show_help(reader: KeyReader) -> None:
     """Display a quick keyboard shortcut reference."""
     term_w, term_h = get_term_size()
-    sound_status = f"{red_fg()}OFF{RESET}" if is_muted() else f"{green_fg()}ON{RESET}"
 
     lines = [
         f"{BOLD}{gold_fg()}KEYBOARD SHORTCUTS{RESET}",
@@ -204,8 +195,6 @@ def show_help(reader: KeyReader) -> None:
         f"{white_fg()}General:{RESET}",
         "  [?]         Show this help screen",
         "  [Q]         Quit to menu / Exit",
-        "  [M]         Toggle Sound Effects",
-        f"              (Currently: {sound_status})",
         "  [T]         Cycle Theme",
         "  [Esc]       Cancel / Back",
         "",
@@ -295,8 +284,6 @@ def show_rules(reader: KeyReader) -> None:
                 return
             case Key.HELP:
                 show_help(reader)
-            case Key.MUTE:
-                toggle_mute()
             case Key.UP:
                 scroll = max(0, scroll - 1)
             case Key.DOWN:

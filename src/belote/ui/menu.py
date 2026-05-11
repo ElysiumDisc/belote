@@ -19,7 +19,6 @@ from ..ansi import (
 from ..game import GameState, Seat
 from ..input import Key, KeyReader
 from ..themes import THEMES, theme_manager
-from .announce import toggle_mute
 from .prompts import show_help
 from .render import get_term_size
 
@@ -195,8 +194,6 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
                 return current_diffs
             case Key.HELP:
                 show_help(reader)
-            case Key.MUTE:
-                toggle_mute()
             case Key.UP:
                 sel = (sel - 1) % len(seats)
             case Key.DOWN:
@@ -279,8 +276,6 @@ def show_main_menu(
                 return "Quit", curr_diffs, curr_target, curr_speed
             case Key.HELP:
                 show_help(reader)
-            case Key.MUTE:
-                toggle_mute()
             case Key.THEME:
                 themes_list = list(THEMES.keys())
                 curr_theme = theme_manager.current_name

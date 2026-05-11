@@ -24,7 +24,6 @@ class Key(Enum):
     QUIT = "QUIT"
     HELP = "HELP"
     SORT = "SORT"
-    MUTE = "MUTE"
     THEME = "THEME"
     HIST = "HIST"
     OVERLAY = "OVERLAY"
@@ -151,8 +150,6 @@ class _UnixKeyReader:
                 return KeyEvent(Key.THEME)
             if ch.lower() == "o":
                 return KeyEvent(Key.SORT)
-            if ch.lower() == "m":
-                return KeyEvent(Key.MUTE)
             if ch.lower() == "i" or ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
 
@@ -272,8 +269,6 @@ if os.name == "nt":
                 return KeyEvent(Key.THEME)
             if ch.lower() == b"o":
                 return KeyEvent(Key.SORT)
-            if ch.lower() == b"m":
-                return KeyEvent(Key.MUTE)
             if ch.lower() in (b"i", b"v"):
                 return KeyEvent(Key.OVERLAY)
 

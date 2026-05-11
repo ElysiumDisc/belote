@@ -4,18 +4,6 @@ import shutil
 import sys
 
 
-class AudioManager:
-    def __init__(self) -> None:
-        self.muted = False
-
-    def toggle_mute(self) -> bool:
-        self.muted = not self.muted
-        return self.muted
-
-    def is_muted(self) -> bool:
-        return self.muted
-
-
 class TerminalContext:
     def __init__(self) -> None:
         self._size_cache: tuple[int, int] | None = None
@@ -30,6 +18,4 @@ class TerminalContext:
         self._size_cache = None
 
 
-# Global instances
-AUDIO = AudioManager()
 TERMINAL = TerminalContext()

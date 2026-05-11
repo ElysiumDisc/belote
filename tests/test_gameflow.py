@@ -51,7 +51,6 @@ def test_run_play_8_tricks() -> None:
     with (
         unittest.mock.patch("belote.gameflow.display"),
         unittest.mock.patch("belote.gameflow.patch_trick_card"),
-        unittest.mock.patch("belote.gameflow.play_sound"),
         unittest.mock.patch("belote.gameflow.announce"),
         unittest.mock.patch("belote.gameflow.prompt_card") as mock_prompt,
     ):
