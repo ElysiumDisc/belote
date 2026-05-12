@@ -154,7 +154,7 @@ def show_theme_selector(reader: KeyReader) -> None:
 
         event = reader.read()
         match event.key:
-            case Key.QUIT | Key.ESC | Key.ENTER:
+            case Key.QUIT | Key.ESC | Key.ENTER | Key.EOF:
                 return
             case Key.UP:
                 sel = (sel - 1) % len(themes_list)
@@ -190,7 +190,7 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
 
         event = reader.read()
         match event.key:
-            case Key.QUIT | Key.ESC:
+            case Key.QUIT | Key.ESC | Key.EOF:
                 return current_diffs
             case Key.HELP:
                 show_help(reader)

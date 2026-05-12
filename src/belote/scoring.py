@@ -228,12 +228,24 @@ def _sequence_points(seq: Sequence) -> int:
 def resolve_declarations(
     decls_per_seat: dict[Seat, SeatDeclarations],
     trump: Suit | None,
+    taker: Seat | None = None,
 ) -> ResolvedDeclarations:
-    """Resolve declarations per §3.7."""
+    """Resolve declarations per §3.7.
+
+    When two declarations have identical strength, standard Belote-Coinché
+    awards the tie to the first announcer (the team whose seat declared first
+    during the first trick — announcement order starts at the taker and goes
+    clockwise). Pass `taker` to enable that rule; without it, ties fall back
+    to the historical "cancel" behaviour.
+    """
     ns_seqs: list[Sequence] = []
     ew_seqs: list[Sequence] = []
     ns_carres: list[Carre] = []
     ew_carres: list[Carre] = []
+    ns_carre_seats: list[Seat] = []  # parallel to ns_carres
+    ew_carre_seats: list[Seat] = []
+    ns_seq_seats: list[Seat] = []  # parallel to ns_seqs
+    ew_seq_seats: list[Seat] = []
     ns_belote = False
     ew_belote = False
 
@@ -254,10 +266,14 @@ def resolve_declarations(
         if team_of(seat) == 0:
             ns_seqs.extend(updated_seqs)
             ns_carres.extend(carres)
+            ns_seq_seats.extend([seat] * len(updated_seqs))
+            ns_carre_seats.extend([seat] * len(carres))
             ns_belote = ns_belote or has_belote
         else:
             ew_seqs.extend(updated_seqs)
             ew_carres.extend(carres)
+            ew_seq_seats.extend([seat] * len(updated_seqs))
+            ew_carre_seats.extend([seat] * len(carres))
             ew_belote = ew_belote or has_belote
 
     # Determine which team scores sequences/carres
@@ -265,6 +281,38 @@ def resolve_declarations(
     ew_best_seq = _best_sequence(ew_seqs)
     ns_best_carre = _best_carre(ns_carres)
     ew_best_carre = _best_carre(ew_carres)
+
+    def _resolve_tie_carre() -> int | None:
+        if taker is None:
+            return None  # legacy cancel behaviour
+        # Walk seats in announce order starting at the taker; the first seat
+        # holding a matching-rank carré wins the tie.
+        assert ns_best_carre is not None and ew_best_carre is not None
+        tied_rank = ns_best_carre.rank
+        order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
+        for s in order:
+            for c, cs in zip(ns_carres, ns_carre_seats, strict=False):
+                if cs == s and c.rank == tied_rank:
+                    return 0
+            for c, cs in zip(ew_carres, ew_carre_seats, strict=False):
+                if cs == s and c.rank == tied_rank:
+                    return 1
+        return None
+
+    def _resolve_tie_seq() -> int | None:
+        if taker is None:
+            return None
+        assert ns_best_seq is not None and ew_best_seq is not None
+        tied_strength = _sequence_strength(ns_best_seq)
+        order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
+        for s in order:
+            for seq, ss in zip(ns_seqs, ns_seq_seats, strict=False):
+                if ss == s and _sequence_strength(seq) == tied_strength:
+                    return 0
+            for seq, ss in zip(ew_seqs, ew_seq_seats, strict=False):
+                if ss == s and _sequence_strength(seq) == tied_strength:
+                    return 1
+        return None
 
     scoring_team: int | None = None
 
@@ -284,7 +332,7 @@ def resolve_declarations(
             elif ew_best_carre.rank > ns_best_carre.rank:
                 scoring_team = 1
             else:
-                scoring_team = None  # cancel
+                scoring_team = _resolve_tie_carre()  # first-announcer or cancel
     elif ns_best_carre:
         scoring_team = 0
     elif ew_best_carre:
@@ -297,7 +345,7 @@ def resolve_declarations(
         elif ew_str > ns_str:
             scoring_team = 1
         else:
-            scoring_team = None  # cancel
+            scoring_team = _resolve_tie_seq()  # first-announcer or cancel
     elif ns_best_seq:
         scoring_team = 0
     elif ew_best_seq:
@@ -405,17 +453,26 @@ def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
     # diverge from the final round score when a non-lead card was a club.
     if bm.ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick):
         return 0
+    # Hoist boss-flag reads out of the per-card loop. Matches the pattern used
+    # by `_calculate_base_points` (lines 489-493) and avoids 4 dataclass-attr
+    # lookups per card.
+    kings_zero = bm.kings_zero
+    tens_zero = bm.tens_zero
+    aces_zero = bm.aces_zero
+    jacks_zero = bm.jacks_zero
+    se_trump = bm.seven_eight_trump
+    trump = state.trump
     total = 0
     for tc in trick:
         r = tc.card.rank
         if (
-            (bm.kings_zero and r == Rank.KING)
-            or (bm.tens_zero and r == Rank.TEN)
-            or (bm.aces_zero and r == Rank.ACE)
-            or (bm.jacks_zero and r == Rank.JACK)
+            (kings_zero and r == Rank.KING)
+            or (tens_zero and r == Rank.TEN)
+            or (aces_zero and r == Rank.ACE)
+            or (jacks_zero and r == Rank.JACK)
         ):
             continue
-        total += card_points_fn(tc.card, state.trump, bm.seven_eight_trump)  # type: ignore[arg-type]
+        total += card_points_fn(tc.card, trump, se_trump)  # type: ignore[arg-type]
     return total
 
 
@@ -622,7 +679,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
 
     # 4. Detect declarations from stored initial hands
     decls_per_seat = _detect_all_declarations(state, trump)
-    resolved = resolve_declarations(decls_per_seat, trump)
+    resolved = resolve_declarations(decls_per_seat, trump, state.taker)
 
     # 5. Compute belote points. Belote is disabled under Sans Atout / Tout
     # Atout (no unique K+Q-of-trump) — `belote_holders` is empty post-bid in
@@ -699,19 +756,23 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_total = 0
     defender_total = 0
 
+    # SA invariant: belote/rebelote requires a unique trump suit (K+Q of trump).
+    # Under Sans Atout there is no trump, so neither side can ever have earned
+    # belote points. Pin the invariant once at contract level so it covers BOTH
+    # capot and non-capot paths (pre-3.5.0 this lived only in the capot branch,
+    # which meant a non-capot SA round with stray belote points would silently
+    # mis-score instead of surfacing the bug).
+    if state.contract == "sans_atout":
+        assert taker_belote == 0 and defender_belote == 0, (
+            f"Sans Atout cannot have belote points "
+            f"(taker={taker_belote}, defender={defender_belote})"
+        )
+
     if capot_winner_team is not None:
         messages.append("Capot!")
         # Capot base scales by contract: SA → 220, TA → 348, normal → 252.
         if state.contract == "sans_atout":
             capot_base = GLOBAL_CONFIG.CAPOT_BASE_SANS_ATOUT
-            # Belote/Rebelote requires a unique trump suit (K+Q of trump).
-            # Under Sans Atout there is no trump, so neither side can ever
-            # have earned belote points — pin the invariant so a future
-            # bug that leaks belote points into SA scoring fails loud.
-            assert taker_belote == 0 and defender_belote == 0, (
-                f"Sans Atout cannot have belote points "
-                f"(taker={taker_belote}, defender={defender_belote})"
-            )
         elif state.contract == "tout_atout":
             capot_base = GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT
         else:
@@ -982,7 +1043,7 @@ def get_declarations(state: GameState) -> tuple[Declaration, ...]:
         return ()
 
     decls_per_seat = _detect_all_declarations(state, state.trump)
-    resolved = resolve_declarations(decls_per_seat, state.trump)
+    resolved = resolve_declarations(decls_per_seat, state.trump, state.taker)
     scoring_team = resolved.scoring_team
 
     all_decls: list[Declaration] = []

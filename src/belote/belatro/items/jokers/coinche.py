@@ -24,7 +24,7 @@ class CoincheStack(Joker):
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.coinche_level <= 0:
             return None
-        if getattr(event.breakdown, "is_failed", False):
+        if event.breakdown.is_failed:
             return None
         if event.taker_seat not in (Seat.SOUTH, Seat.NORTH):
             return None
@@ -53,7 +53,7 @@ class ToutStreak(Joker):
         is_tout = event.trump == Suit.TOUT_ATOUT
         is_taker_won = (
             event.taker_seat in (Seat.SOUTH, Seat.NORTH)
-            and not getattr(event.breakdown, "is_failed", False)
+            and not event.breakdown.is_failed
         )
 
         if is_tout and is_taker_won:

@@ -128,7 +128,7 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
 
         event = reader.read()
         match event.key:
-            case Key.QUIT | Key.ESC:
+            case Key.QUIT | Key.ESC | Key.EOF:
                 return
             case Key.LEFT:
                 cat_idx = (cat_idx - 1) % len(categories)

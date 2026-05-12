@@ -79,7 +79,7 @@ class BelAtroMainMenu:
                 elif choice == "Quit":
                     return None
 
-            elif key in (Key.ESC, Key.QUIT):
+            elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 return None
 
     def _render(self) -> None:
@@ -180,5 +180,5 @@ class BelAtroMainMenu:
             elif key == Key.ENTER:
                 self.selected_deck_id = STARTING_DECKS[sel].id
                 break
-            elif key in (Key.ESC, Key.QUIT):
+            elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 break

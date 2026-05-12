@@ -27,6 +27,12 @@ class Key(Enum):
     THEME = "THEME"
     HIST = "HIST"
     OVERLAY = "OVERLAY"
+    # End-of-file on stdin (closed pipe, headless harness, Ctrl-D on a real
+    # tty). Distinct from ESC so the outermost game loops can recognise a
+    # closed input stream and exit cleanly instead of spinning through
+    # menu-pop reads. Most prompt loops treat EOF like ESC ("back/cancel"),
+    # which is fine because the next read() will return EOF again and propagate.
+    EOF = "EOF"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +77,9 @@ class _UnixKeyReader:
         # Read the first byte
         buf = os.read(self._stdin_fd, 1)
         if not buf:
-            return KeyEvent(Key.ESC)
+            # EOF — stdin is closed (broken pipe, headless harness, Ctrl-D).
+            # Distinct from ESC so callers can react differently if needed.
+            return KeyEvent(Key.EOF)
 
         byte = buf[0]
 

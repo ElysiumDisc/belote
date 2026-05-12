@@ -64,7 +64,7 @@ class UnlockTracker:
         if (
             event.trump is None
             and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
-            and not getattr(event.breakdown, "is_failed", False)
+            and not event.breakdown.is_failed
         ):
             self.profile.stats["sans_atout_wins"] += 1
             dirty = True
@@ -79,7 +79,7 @@ class UnlockTracker:
         if (
             event.trump == Suit.TOUT_ATOUT
             and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
-            and not getattr(event.breakdown, "is_failed", False)
+            and not event.breakdown.is_failed
         ):
             self.profile.stats["tout_atout_wins"] += 1
             dirty = True

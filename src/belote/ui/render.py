@@ -985,10 +985,12 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     row = base_row + row_offsets[seat]
     col = side_col_w + col_offsets[seat] + 1
 
+    # Build the whole patch as a single string and emit one stdout.write so
+    # signal-interruptible terminals (Konsole especially) can't paint half the
+    # card before the HUD update lands. Pre-3.5.0 each card-face line + the HUD
+    # update were separate writes, which produced torn frames under load.
     face = _get_card_face(card, layout=layout)
-    for i, line in enumerate(face):
-        sys.stdout.write(move(row + i, col) + line)
-
-    # Also update HUD if points changed
-    sys.stdout.write(move(1, 1) + _build_hud(state, term_w, layout))
+    buf = [move(row + i, col) + line for i, line in enumerate(face)]
+    buf.append(move(1, 1) + _build_hud(state, term_w, layout))
+    sys.stdout.write("".join(buf))
     sys.stdout.flush()

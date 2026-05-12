@@ -67,7 +67,7 @@ class BelAtroAnnounce:
             event = reader.read_timeout(remaining)
             if event is None:
                 break
-            if event.key in (Key.SPACE, Key.ESC, Key.ENTER):
+            if event.key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
                 break
             remaining = end - time.time()
 
@@ -118,7 +118,7 @@ class BelAtroAnnounce:
             if event is None:
                 break
             key = event.key
-            if key in (Key.SPACE, Key.ESC, Key.ENTER):
+            if key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
                 break
             remaining = end - time.time()
         toggle_overlay()

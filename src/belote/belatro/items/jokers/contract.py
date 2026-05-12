@@ -109,7 +109,7 @@ class LePuriste(Joker):
         # Sans Atout means trump is None. Flag triggers double payout in _play_blind.
         if (
             event.trump is None
-            and not getattr(event.breakdown, "is_failed", False)
+            and not event.breakdown.is_failed
             and event.taker_seat in (Seat.SOUTH, Seat.NORTH)
         ):
             state["puriste_triggered"] = True

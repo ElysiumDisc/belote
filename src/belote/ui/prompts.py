@@ -55,7 +55,9 @@ def prompt_card(
         event = reader.read()
 
         match event.key:
-            case Key.QUIT:
+            case Key.QUIT | Key.EOF:
+                # EOF (closed stdin) is treated as a quit so the loop doesn't
+                # spin re-reading a dead pipe forever.
                 return None, state
             case Key.LEFT | Key.UP:
                 new = sel - 1
@@ -141,7 +143,9 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
 
         event = reader.read()
         match event.key:
-            case Key.QUIT:
+            case Key.QUIT | Key.EOF:
+                # EOF (closed stdin) is treated as a quit so the bid loop
+                # doesn't spin re-reading a dead pipe.
                 return "QUIT"
             case Key.LEFT | Key.UP:
                 sel = (sel - 1) % len(options)
@@ -281,7 +285,7 @@ def show_rules(reader: KeyReader) -> None:
 
         event = reader.read()
         match event.key:
-            case Key.QUIT | Key.ENTER | Key.ESC:
+            case Key.QUIT | Key.ENTER | Key.ESC | Key.EOF:
                 return
             case Key.HELP:
                 show_help(reader)

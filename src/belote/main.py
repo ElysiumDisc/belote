@@ -258,7 +258,7 @@ def main() -> None:
                                 f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [H] History{RESET} "
                             )
                             sys.stdout.flush()
-                        if ev.key in (Key.ENTER, Key.QUIT):
+                        if ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
                             rematch = False
                             break
 

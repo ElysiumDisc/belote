@@ -81,8 +81,6 @@ class QuinteRoyale(Joker):
     def on_round_end(
         self, event: RoundEndEvent, state: dict[str, Any]
     ) -> JokerResult | None:
-        if state.pop(f"{self.id}_armed", False) and not getattr(
-            event.breakdown, "is_failed", False
-        ):
+        if state.pop(f"{self.id}_armed", False) and not event.breakdown.is_failed:
             return JokerResult(times_mult=4.0)
         return None

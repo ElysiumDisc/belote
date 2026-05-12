@@ -498,6 +498,14 @@ def _calculate_legal_cards_impl(
 ) -> tuple[int, ...]:
     """Calculate legal cards using card IDs (memoized).
 
+    Cache-key analysis (3.5.0 P2 investigation): the key uses small-int IDs
+    rather than Card objects, which is already the minimal hashable surface.
+    Benchmarks (`scripts/benchmark.py::benchmark_legal_cards{_cached,}`) show
+    cold ~9μs / warm ~6μs — the 33% gap is dominated by KEY BUILD in
+    `legal_cards()` (above), not by lru_cache lookup. Slimming further would
+    require caching `hand_ids` on the hand tuple itself, which isn't
+    achievable without changing the hand representation.
+
     `is_sans_atout` discriminates the Sans Atout contract from "no trump set
     yet" (both have trump=None). Under SA, the player must follow the lead
     suit if able; if void, free discard (no trumping concept).

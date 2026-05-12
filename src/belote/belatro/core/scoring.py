@@ -68,7 +68,17 @@ class ScoreAccumulator:
         return replace(state, _joker_state=joker_state, _chips=new_chips, _mult=new_mult)
 
     def update_state(self, state: GameState, event: object) -> GameState:
-        """Process an event and return an updated GameState with new score/joker state."""
+        """Process an event and return an updated GameState with new score/joker state.
+
+        Perf note (3.5.0 P3 investigation): the dominant cost (~65% of the
+        function) is the final `dataclasses.replace(state, ...)` call. The
+        frozen-GameState invariant is load-bearing — many call sites assume
+        `state is final_state` once a round is sealed — so we accept the
+        replace cost rather than mutating in place. At ~19μs per event and
+        ~25 events per round (8 tricks + 2-4 bids + decls + round-end) the
+        accumulator contributes ~0.5ms to a full round, well below the
+        ~1ms-per-frame budget where it would matter.
+        """
         new_chips = state._chips
         new_mult = state._mult
         new_money = state._bonus_money
@@ -120,10 +130,23 @@ class ScoreAccumulator:
                         # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect),
                         #                               matches legacy partner_jokers_double at trust ≥ 7.
                         # tier 4 (elite) → +2 applies (≈ ×3 effect).
-                        # Legacy `partner_jokers_double` flag still forces +1 apply for
-                        # back-compat with tests that set it directly.
+                        #
+                        # `partner_jokers_double` is the legacy boolean flag (pre-3.5.0
+                        # back-compat for tests that set it directly). When both are
+                        # set, `max()` picks whichever is larger; a one-shot
+                        # DeprecationWarning fires so callers migrate to tier. The flag
+                        # is slated for removal in 4.0; new code should use `partner_tier`.
                         if getattr(joker, "is_partner_joker", False):
                             tier_extras = (0, 0, 1, 1, 2)[self.partner_tier]
+                            if self.partner_jokers_double and tier_extras > 0:
+                                import warnings
+                                warnings.warn(
+                                    "ScoreAccumulator.partner_jokers_double is deprecated "
+                                    "alongside partner_tier; set only one. The flag will "
+                                    "be removed in 4.0.",
+                                    DeprecationWarning,
+                                    stacklevel=2,
+                                )
                             extra_applies = max(
                                 tier_extras, 1 if self.partner_jokers_double else 0
                             )
@@ -202,11 +225,11 @@ class ScoreAccumulator:
                 contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
                 if contract_id:
                     reward = self.contract_levels.get(contract_id, {})
-                    if reward.get("add_money") and not getattr(event.breakdown, "is_failed", False):
+                    if reward.get("add_money") and not event.breakdown.is_failed:
                         new_money += reward["add_money"]
                         self._log.append(f"Planet ({contract_id}): +${reward['add_money']}")
                 # Pluto (Capot bonus)
-                if event.capot and not getattr(event.breakdown, "is_failed", False):
+                if event.capot and not event.breakdown.is_failed:
                     pluto_reward = self.contract_levels.get("capot", {})
                     if pluto_reward.get("capot_bonus"):
                         new_chips += pluto_reward["capot_bonus"]
@@ -215,7 +238,7 @@ class ScoreAccumulator:
                 if (
                     event.coinche_level > 0
                     and event.taker_seat in _NS_TEAM
-                    and not getattr(event.breakdown, "is_failed", False)
+                    and not event.breakdown.is_failed
                 ):
                     libra_reward = self.contract_levels.get("coinche", {})
                     libra_mult = libra_reward.get("coinche_multiplier", 0)

@@ -5,6 +5,11 @@ line to stderr — readable by terminal screen readers such as Orca, NVDA in WSL
 or VoiceOver via iTerm2. Disabled by default so it doesn't pollute output for
 sighted players.
 
+**Invariant**: ``BELOTE_A11Y`` is read **once at module import**. Toggling the
+env var mid-session has no effect on production code — restart the process
+to enable/disable. Tests that mutate the env may call ``_refresh_enabled_from_env()``
+to re-read the cached flag.
+
 Hooked from gameflow.py (card plays, trick winners, round results) and from
 belatro/main.py (boss reveal, ante advance, run won/lost). Each hook is a
 single line — no rich formatting — so the screen reader can speak it cleanly.

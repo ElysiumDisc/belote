@@ -74,7 +74,18 @@ class ShopScreen:
                     self.selected = min(self.selected, max(0, len(self.shop.inventory) - 1))
                 elif self.selected == forge_idx:
                     self._handle_forge()
-            elif key in (Key.ESC, Key.QUIT):
+            elif key == Key.CHAR and event.char and event.char.lower() == "c":
+                # Open the consumables tray. Local import to avoid a circular
+                # module load at startup (consumables imports from this UI tree).
+                from .consumables import ConsumablesOverlay
+
+                overlay = ConsumablesOverlay(self.shop.run, self.reader)
+                used = overlay.open()
+                if used:
+                    from .announce import BelAtroAnnounce
+
+                    BelAtroAnnounce.banner("Consumable activated.", self.reader, hold=0.8)
+            elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 break
             self._render()
 
@@ -121,7 +132,7 @@ class ShopScreen:
 
         while True:
             event = self.reader.read()
-            if event.key in (Key.ESC, Key.QUIT):
+            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
                 return None
             if event.key == Key.CHAR and event.char and event.char.isdigit():
                 idx = int(event.char) - 1
@@ -233,7 +244,8 @@ class ShopScreen:
                 )
             )
 
-        print(
-            move(20, 1)
-            + ansi_center(gold_fg() + "← → Navigate   Enter: Buy   Esc: Continue" + RESET, term_w)
+        consumable_count = len(self.shop.run.consumables)
+        hint = (
+            f"← → Navigate   Enter: Buy   C: Consumables ({consumable_count})   Esc: Continue"
         )
+        print(move(20, 1) + ansi_center(gold_fg() + hint + RESET, term_w))

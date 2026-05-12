@@ -66,6 +66,11 @@ def append_summary(run: BelAtroRun, *, won: bool) -> None:
         path = _summary_path()
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
+            # flush + fsync so a crash or power-loss mid-write doesn't leave a
+            # truncated final line that breaks downstream `jq` processing.
+            # Mirrors the atomic-save pattern in `progression/save.py`.
+            f.flush()
+            os.fsync(f.fileno())
     except OSError:
         # Logging failure is intentionally silent — telemetry is non-essential.
         pass

@@ -1,11 +1,27 @@
+"""Round-scoped pub/sub bus for BelAtro joker / unlock / score-accumulator wiring.
+
+**Scope invariant**: an `EventBus` is created once per round in
+`round_driver.drive_round`, subscribed to by the round's accumulator and the
+process-wide `UnlockTracker`, then dropped when the round ends. Subscribers
+do not need to unsubscribe explicitly — the bus instance and all its
+subscriber references are released together.
+
+If you ever extend the bus's scope (run-level, session-level), you MUST also
+add explicit unsubscribe calls so subscribers don't accumulate across rounds
+and double-fire. The `clear()` method exists for that future use.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
 from belote.deck import Card, Suit
 from belote.game import Seat
+
+if TYPE_CHECKING:
+    from belote.scoring import ScoringBreakdown
 
 # ── Event types ────────────────────────────────────────────────────────────
 
@@ -36,8 +52,9 @@ class DeclarationScoredEvent:
 
 @dataclass(frozen=True)
 class RoundEndEvent:
-    breakdown: Any  # ScoringBreakdown from belote.scoring
-    taker_seat: Seat
+    breakdown: "ScoringBreakdown"
+    # `taker_seat` is None when the round ended on an all-pass (no contract).
+    taker_seat: Seat | None
     trump: Suit | None
     capot: bool
     hand_remainder: tuple[Card, ...] = ()
@@ -68,6 +85,8 @@ Handler = Callable[[AnyEvent], None]
 
 
 class EventBus:
+    """Round-scoped event bus. See module docstring for the lifetime contract."""
+
     def __init__(self) -> None:
         self._handlers: list[Handler] = []
 
@@ -83,3 +102,13 @@ class EventBus:
     def emit(self, event: AnyEvent) -> None:
         for h in list(self._handlers):
             h(event)
+
+    def clear(self) -> None:
+        """Drop every subscriber.
+
+        Today the round-scoped bus is created fresh per round so this is
+        unused, but exists for the future where a longer-lived bus might
+        share lifetime across rounds (debug overlays, replay recorders, etc).
+        Call before re-using a bus across round boundaries.
+        """
+        self._handlers.clear()

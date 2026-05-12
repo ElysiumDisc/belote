@@ -222,7 +222,7 @@ def show_belatro_rules(reader: KeyReader) -> None:
 
         event = reader.read()
         key = event.key
-        if key in (Key.QUIT, Key.ENTER, Key.ESC):
+        if key in (Key.QUIT, Key.ENTER, Key.ESC, Key.EOF):
             break
         if key == Key.UP:
             scroll = max(0, scroll - 1)

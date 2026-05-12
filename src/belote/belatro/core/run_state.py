@@ -28,6 +28,11 @@ class BelAtroRun:
     profile: Profile | None = None
 
     # ── Collectibles ───────────────────────────────────────
+    # These lists are intentionally mutable: jokers append on purchase, vouchers
+    # apply their effects in-place, and `consume()` removes items via
+    # `consumables.remove(item)`. If a future feature needs to snapshot a run
+    # for replay / ghost-run reconstruction, deep-copy these lists at the
+    # snapshot boundary — they alias live state otherwise.
     jokers: list[Joker] = field(default_factory=list)
     vouchers: list[Voucher] = field(default_factory=list)
     consumables: list[Any] = field(default_factory=list)  # Tarot/Planet instances
@@ -90,9 +95,17 @@ class BelAtroRun:
     def consume(self, item: Any, context: object = None) -> None:
         """Centralised consumable activation.
 
-        Records the item id as the most recent consumable (so LeFou can copy
-        it) and removes it from `consumables` if present, then dispatches to
-        the right hook based on item type (Tarot vs Planet).
+        Removes the item from `consumables` if present, dispatches to the right
+        hook based on item type (Tarot vs Planet), then advances
+        `last_consumable_id` so Le Fou can copy the prior consumable later.
+
+        Apply order matters: `item.use()` must run BEFORE updating
+        `last_consumable_id`, because Le Fou's `use()` reads that field to
+        find what to copy — if we advanced it to `le_fou` first, Le Fou would
+        see itself and fall through to the fallback path. Le Fou itself is
+        treated as transparent: the bookmark stays pointed at the source it
+        copied, so a second Le Fou keeps copying the same source rather than
+        copying itself.
         """
         import contextlib
 
@@ -100,11 +113,14 @@ class BelAtroRun:
 
         with contextlib.suppress(ValueError):
             self.consumables.remove(item)
-        self.last_consumable_id = getattr(item, "id", None)
         if isinstance(item, Tarot):
             item.use(self, context)
         elif isinstance(item, Planet):
             item.use(self)
+        # Le Fou is transparent — leave the bookmark at the source it copied.
+        # Every other consumable advances the bookmark to its own id.
+        if getattr(item, "id", None) != "le_fou":
+            self.last_consumable_id = getattr(item, "id", None)
 
     def _get_rng(self) -> Any:
         """Per-run random.Random instance, seeded from `seed` when given."""
