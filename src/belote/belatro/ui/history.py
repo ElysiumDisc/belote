@@ -92,9 +92,12 @@ def _money_cell(delta: int) -> str:
 
 def show_belatro_history(reader: KeyReader, entries: list[BelAtroHistoryEntry]) -> None:
     """Scrollable BelAtro round-by-round overlay; called via the [H] hook."""
+    from belote.ui.fit_guard import require_minimum
+
     scroll = 0
 
     while True:
+        require_minimum(reader)
         term_w, term_h = get_term_size()
 
         lines: list[str] = []

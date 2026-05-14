@@ -28,6 +28,8 @@ belatro
 | **Le Vétéran** | Start with a random **Planet** card pre-applied to level up a contract |
 | **Le Flambeur** | Starts with **L'Aventurier** Partner Joker (×2 Mult if both win ≥3 tricks) |
 | L'Anarchiste | Start $19 — Corrupted pool visible |
+| **Le Marseillais** | Annonces (Tierce / Quarte / Quinte) score ×2. Belote / Rebelote disabled |
+| **Le Coincheur** | Every round starts pre-coinched. +50 starting Chips, $8 starting cash |
 
 ### Notable Vouchers
 | Voucher | Effect |
@@ -209,7 +211,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (635 tests)
+├── tests/             # Comprehensive test suite (650 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -225,14 +227,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **635 tests** passing with 100% coverage on game-logic modules.
+Currently **650 tests** passing with 100% coverage on game-logic modules.
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 635/635 passed
+- **pytest**: 650/650 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

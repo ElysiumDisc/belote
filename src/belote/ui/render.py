@@ -45,7 +45,7 @@ from ..game import (
     legal_cards,
 )
 from ..themes import theme_manager
-from .layout import STANDARD, LayoutPreset, choose_layout
+from .layout import STANDARD, LayoutPreset, choose_layout, vcenter_lines
 
 # ── Backward-compat: the legacy module-level constants are now derived from the
 # STANDARD preset for any code that still imports them directly. New rendering
@@ -896,11 +896,7 @@ def render(
     # on tall terminals (>40 rows).
     global _last_rendered_unpadded_h
     _last_rendered_unpadded_h = rendered_h
-    if rendered_h < term_h - 1:
-        slack = (term_h - 1) - rendered_h
-        top_pad = slack // 2
-        bottom_pad = slack - top_pad
-        lines = [""] * top_pad + lines + [""] * bottom_pad
+    lines = vcenter_lines(lines, term_h)
 
     # Always emit clear_to_eol on every row, including blank padding. Konsole
     # (and other strict emulators) don't auto-blank cells when an empty string
@@ -955,11 +951,21 @@ def _calculate_base_row(term_h: int, rendered_lines: int = 0) -> int:
     return base_row
 
 
-def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
+def patch_trick_card(
+    state: GameState, seat: Seat, card: Card, *, force_hud: bool = False
+) -> None:
     """Incrementally render a single card on the trick mat.
 
     Picks the active layout each call so a mid-game terminal resize re-routes
     coordinates correctly on the next patch.
+
+    The HUD bar at row 1 is only rebuilt when ``force_hud=True``. By default
+    the HUD is left as-is: ``_build_hud`` reads ``state.current_round_points``
+    and ``state.team_scores``, neither of which change between
+    ``patch_trick_card`` calls within a single trick (the running totals
+    only advance when ``play_card`` commits the completed trick, which the
+    caller then re-renders via ``display()``). Pre-3.8.0 the HUD was rebuilt
+    on every card play — ~300 µs of wasted work per round.
     """
     term_w, term_h = get_term_size()
     layout = choose_layout(term_w, term_h)
@@ -991,6 +997,7 @@ def patch_trick_card(state: GameState, seat: Seat, card: Card) -> None:
     # update were separate writes, which produced torn frames under load.
     face = _get_card_face(card, layout=layout)
     buf = [move(row + i, col) + line for i, line in enumerate(face)]
-    buf.append(move(1, 1) + _build_hud(state, term_w, layout))
+    if force_hud:
+        buf.append(move(1, 1) + _build_hud(state, term_w, layout))
     sys.stdout.write("".join(buf))
     sys.stdout.flush()

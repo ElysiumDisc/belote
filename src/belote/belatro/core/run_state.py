@@ -96,6 +96,15 @@ class BelAtroRun:
     seed: int | None = None
     _rng: Any = None
 
+    # ── Idempotency guard for voucher.apply() ──────────────
+    # Several vouchers (LaTelescope, LaDoubleDonne, LesCartesDorees, LeCouteau)
+    # use `+=` against run-level counters in their `apply()`. Today the only
+    # call site is `Shop.buy_item`, which fires apply() exactly once per
+    # purchase. This set lets the shop short-circuit re-application if a
+    # future save/load path ever re-invokes apply() on a voucher already in
+    # `vouchers` — preventing silent double-stacking.
+    _applied_voucher_ids: set[str] = field(default_factory=set)
+
     def consume(self, item: Any, context: object = None) -> None:
         """Centralised consumable activation.
 

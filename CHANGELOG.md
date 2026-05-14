@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-05-13
+
+UI-cutoff pass, audit polish, and minor perf wins. The session began with a user-reported bug — the main-menu croissant art clipped at the top on certain terminal heights — and broadened into a full UI-fit overhaul (live "terminal too small" overlay, BelAtro screens rebuilt around vertical centering, shop action buttons relocated below the cards). A second three-Explore-agent audit ran across the classic engine, BelAtro mode, and render/AI hot paths: **no critical findings**, but three minor hardening items (zip-strict, voucher idempotency, all-pass-bidding test gap) and three modest perf wins shipped. **+15 regression tests** (635 → 650). Plan file at `/home/mrrobot/.claude/plans/i-want-to-fix-swirling-pelican.md`.
+
+### Fixed
+
+- **`src/belote/ui/menu.py:116` — classic main-menu croissant no longer clips at the top.** Pre-3.8.0 the guard read `if term_h < 42: return final_cup`, but the full content needs 41 art + 2 footer = 43 rows. At `term_h == 42` the croissant was rendered and the top row scrolled off the alt-screen; at 43 it sat flush against the top with zero margin. New threshold is derived from `len(get_cards_art()) + 1 + len(CUP_TEMPLATE) + 2 + 1` (= 44), so the croissant only shows when there is genuine room for it plus one row of breathing space.
+- **`src/belote/ui/main.py:115-123` — startup "terminal too small" hard-fail replaced with a live overlay.** Pre-3.8.0 a sub-80×32 terminal got `print()` + `sys.exit(1)` before the alt-screen was entered, polluting scrollback and offering no recovery. New `src/belote/ui/fit_guard.py::require_minimum` paints a centered "Resize to 80×32 (currently NN×MM) — Press Q to quit" inside the alt-screen, refreshes on SIGWINCH (the existing handler at `render.py:99` invalidates the size cache), and returns the moment the terminal is large enough. `FitAbortedError` raised on Q/EOF.
+- **BelAtro screens converted to a list-build + vcenter pattern; absolute-row writes removed.** `belatro/ui/{shop,menu,announce,collection,consumables}.py` previously pinned content to hardcoded `move(N, …)` rows (e.g. shop description at row 18, BelAtro art at rows 3-9, boss reveal at rows 10/13/15). New `src/belote/ui/layout.py::vcenter_lines(lines, term_h)` — extracted from `render.py:899-903` — pads top + bottom so every BelAtro screen centers vertically and never clips. `history.py` and `rules.py` (already responsive) only gain a `require_minimum` call at loop entry.
+- **`belatro/ui/shop.py::_render` — reroll / forge buttons moved BELOW the card row.** Pre-3.8.0 the bracket-text labels (`[ Reroll $5 ]`, `[ Forge x3/3 ]`) rendered at `card_start_row + 3` — mid-frame across the card art — and `_card_col`'s 18-cell spacing × 5+ columns overflowed at 80 cols when the forge slot was visible. New layout places the action strip on its own row directly below the cards, centered. No card frame width change, no inventory cap. `_card_col` now centers the card strip and tightens inter-card gap (down to 0) before any card would extend past `term_w - 2`.
+- **`src/belote/belatro/run/shop.py::_apply_item` — voucher idempotency guard (B1 audit finding, MINOR hardening).** `LaTelescope`, `LaDoubleDonne`, `LesCartesDorees`, `LeCouteau` use `+=` against `BelAtroRun` state in their `apply()`. The only call site is `Shop.buy_item`, which fires apply() exactly once per purchase — so the existing code was safe in practice. But a future save/load round-trip that re-invokes apply() on a voucher already in `run.vouchers` would silently double the bonus. New `BelAtroRun._applied_voucher_ids: set[str]` field; the shop checks-and-marks before each apply(). LaVoute's `max()` floor pattern is its own idempotency mechanism and is unchanged. 6 regression tests in `tests/belatro/test_voucher_idempotency.py`.
+
+### Changed
+
+- **`src/belote/ui/render.py::patch_trick_card` — HUD rebuild is now opt-in via `force_hud: bool = False` (P1).** Pre-3.8.0 every of the 32 card-play patches per round rebuilt the entire HUD bar at row 1, even though `_build_hud` reads `state.current_round_points` / `state.team_scores`, neither of which advance until `play_card` commits the completed trick (which the caller then re-renders via `display()`). New default skips the rebuild; pass `force_hud=True` when a caller knows HUD-affecting state has changed externally. Saves ~300 µs per round plus a chunk of ANSI bytes; preserves correctness because the next `display()` call refreshes the HUD anyway.
+- **`src/belote/ai.py::AIMemory` — partner_hand rebuild memoised on the same trick-progress key as void inference (P2).** Pre-3.8.0 every `decide_card()` call (32 × per round) cleared and rebuilt `partner_hand` from `state.hand_of(partner(self.seat))`, even though the partner's hand only changes when they play a card. New `last_partner_hand_key: tuple[int, int]` mirrors the existing `last_voids_key` pattern (`(completed_count, current_trick_len)`); skip rebuild on a no-op repeat call. Saves ~200 µs per round; reset properly on new round and mid-round undo (mirrors the existing void-cache reset paths).
+- **`src/belote/ai.py::_hard_bid` — pre-compute suit-bucketed hand in one pass (P4).** Pre-3.8.0 each of the four suit iterations re-filtered `hand` (twice for trump/honour counts, plus inner cross-suit counts) — 12 hand walks per bid evaluation. New `suit_cards: dict[Suit, list[Card]]` is built with a single `for c in hand` pass and reused. Readability win is bigger than the µs perf win on 8-card hands; pattern matches what `_special_bid` already does.
+- **`src/belote/scoring.py:298,301,313,316` — declaration tie-break zips upgraded to `strict=True` (C1).** Walks `ns_carres` / `ns_carre_seats` (and `ns_seqs` / `ns_seq_seats`) in lockstep with the parallel lists built at `scoring.py:274`. Today the invariant holds; `strict=True` defends against a future edit that breaks it silently.
+
+### Added
+
+- **`src/belote/ui/fit_guard.py` (new) — `require_minimum(reader, min_cols, min_rows)` + `FitAbortedError`.** Live overlay used by `main.py` (once at startup) and every BelAtro screen loop. Refreshes on SIGWINCH, dismisses automatically once the user resizes past the floor, raises `FitAbortedError` on Q / EOF for clean caller cleanup.
+- **`src/belote/ui/layout.py::vcenter_lines(lines, term_h)`** — pure helper extracted from `render.py:899-903`. Pads top + bottom so a list of lines sits centered in `term_h`; truncates if oversized. Used by every BelAtro screen and by classic `render()`.
+- **`tests/test_bidding_all_pass.py` (new, 5 tests)** — pins all-pass redeal edge cases beyond the basic `test_new_coverage.py::test_all_pass_redeal` smoke. Covers full state reset (bids / bidder_index / bidding_round / trump / taker), multi-redeal dealer rotation, the "round 2 + all pass" path that must redeal (not advance to a phantom round 3), and successful post-redeal bidding.
+- **`tests/belatro/test_voucher_idempotency.py` (new, 6 tests)** — pins the B1 guard contract.
+- **`tests/belatro/test_shop_empty_pools.py` (new, 4 tests)** — B2 audit gap: regression test for empty registry pools (degenerate Profile / full-unlock state). `_empty_pools` helper monkeypatches and bumps the registry generation so cached `get_available_*` views miss.
+
+### Verified clean — audit findings rejected after source verification
+
+Documented so the next cycle doesn't re-investigate:
+
+- **`render.py:807-809` "unconditional `legal_cards` call" (P3 candidate)** — the call IS inside `if state.phase == Phase.PLAYING and state.turn == Seat.SOUTH`; the perf agent misread the guard. No change needed.
+- **Tout Atout void-in-lead-suit discard logic (`game.py:560-578`, initial agent CRITICAL claim)** — verified correct per official rules: off-suit cards may be played when void but never win tricks. Comments and code agree.
+- **Memory-documented 3.6.0 / 3.7.1 fixes** (L'Accumulateur team check, Libra reachability via NS-taker coinche, synergy validation under `python -O`, event-bus handler isolation, `PatchedGameState` underscore narrowing) — all still in place; grep for `boss.id ==` returns zero hits in production paths.
+
+### Internal
+
+- **Tests**: 635 → 650 (+15). Three new test files (`test_bidding_all_pass.py` ×5, `test_voucher_idempotency.py` ×6, `test_shop_empty_pools.py` ×4).
+- **Strict gates**: pytest 650/650 green, mypy `--strict` 0 errors (78 files), ruff 0 violations.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+
 ## [3.7.1] - 2026-05-13
 
 Bug-hunt, performance, and logic audit pass plus the three items 3.6.0 deferred to 3.7.0. Three Explore agents ran in parallel against the documented false-positive catalogue. The classic-engine sweep returned **no novel findings** — the 3.4.x → 3.6.0 audits have absorbed the available correctness surface. The BelAtro layer produced **2 confirmed bugs** (one HIGH, one MEDIUM) and **1 polish item**. The deferred 3.7.0 items — `score_round` / `play_card` refactor, partner-joker test coverage, player-facing NS-taker surcoinche — all land here. **+36 regression tests** (599 → 635). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-sequential-map.md`.

@@ -38,6 +38,10 @@ class AIMemory:
         # (completed_count, current_trick_len) of the last _update_voids call.
         # Lets us skip re-scanning a stable transient trick on each decision.
         self.last_voids_key: tuple[int, int] | None = None
+        # (completed_count, current_trick_len) of the last partner_hand
+        # rebuild. The partner's hand only changes when they play a card or
+        # a new round starts; same memo pattern as `last_voids_key`.
+        self.last_partner_hand_key: tuple[int, int] | None = None
 
 
 class AIPlayer:
@@ -76,6 +80,7 @@ class AIPlayer:
             self.memory.partner_hand.clear()
             self.memory.processed_tricks_count = 0
             self.memory.last_voids_key = None
+            self.memory.last_partner_hand_key = None
         elif (
             self.memory.last_voids_key is not None
             and (completed_count, current_count) < self.memory.last_voids_key
@@ -90,6 +95,7 @@ class AIPlayer:
                 self.memory.known_voids[s].clear()
             self.memory.processed_tricks_count = 0
             self.memory.last_voids_key = None
+            self.memory.last_partner_hand_key = None
 
         # Track all cards in completed tricks
         for trick in state.completed_tricks:
@@ -98,16 +104,21 @@ class AIPlayer:
         for tc in state.current_trick:
             self.memory.played.add(tc.card)
 
-        # Partner's hand is visible (for NS team, South sees North's plays)
-        # In this implementation, AI tracks what it can see
-        p = partner(self.seat)
-        self.memory.partner_hand.clear()
-        if (
-            state.phase in (Phase.PLAYING, Phase.SCORING)
-            and not state.boss_modifiers.hide_partner_hand
-        ):
-            for card in state.hand_of(p):
-                self.memory.partner_hand.add(card)
+        # Partner's hand is visible (for NS team, South sees North's plays).
+        # It only changes when partner plays a card (i.e. when
+        # (completed_count, current_count) advances). Memo on the same key
+        # the void cache uses; skip the rebuild on a no-op repeat call.
+        partner_key = (completed_count, current_count)
+        if self.memory.last_partner_hand_key != partner_key:
+            p = partner(self.seat)
+            self.memory.partner_hand.clear()
+            if (
+                state.phase in (Phase.PLAYING, Phase.SCORING)
+                and not state.boss_modifiers.hide_partner_hand
+            ):
+                for card in state.hand_of(p):
+                    self.memory.partner_hand.add(card)
+            self.memory.last_partner_hand_key = partner_key
 
     def decide_bid(self, state: GameState) -> BidValue:
         """Decide whether to bid and which contract.
@@ -467,8 +478,17 @@ class AIPlayer:
         suit_scores: dict[Suit, float] = dict.fromkeys(card_suits, 0.0)
         personality = self._rng.uniform(-0.8, 0.8)
 
+        # Bucket the hand by suit in a single pass. Pre-3.8.0 each suit-loop
+        # iteration re-filtered the hand twice (4 suits × 2 walks), and the
+        # inner cross-suit lookup re-counted other suits — 12 hand walks
+        # total. Single-pass bucketing collapses that to one walk.
+        suit_cards: dict[Suit, list[Card]] = {s: [] for s in card_suits}
+        for c in hand:
+            if c.suit in suit_cards:
+                suit_cards[c.suit].append(c)
+
         for suit in card_suits:
-            trump_cards = [c for c in hand if c.suit == suit]
+            trump_cards = suit_cards[suit]
             honor_count = sum(1 for c in trump_cards if c.rank in (Rank.JACK, Rank.NINE, Rank.ACE))
             point_total = sum(card_points_fn(c, suit, self._se) for c in trump_cards)
 
@@ -482,7 +502,7 @@ class AIPlayer:
 
             for other in card_suits:
                 if other != suit:
-                    other_count = sum(1 for c in hand if c.suit == other)
+                    other_count = len(suit_cards[other])
                     if other_count == 0:
                         suit_scores[suit] += 2
                     elif other_count == 1:

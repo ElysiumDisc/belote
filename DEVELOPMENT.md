@@ -84,14 +84,15 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (635 tests expected)
+# Full test suite (650 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.7.1):
-- **mypy**: 0 errors (strict mode, 77 files)
+Current baseline (3.8.0):
+- **mypy**: 0 errors (strict mode, 78 files)
 - **ruff**: 0 violations
-- **pytest**: 635 tests, 0 failures
+- **pytest**: 650 tests, 0 failures
+- 3.8.0 ships UI-fit fixes (croissant cutoff at term_h=42-43, BelAtro hardcoded-row clipping, live "terminal too small" overlay replacing the startup hard-fail, shop reroll/forge moved below cards) plus a fresh three-agent audit. Audit produced **no critical findings**; three minor hardening items (zip-strict in declaration tie-breaks, voucher idempotency guard, all-pass-bidding test gap) and three modest perf wins (skip HUD rebuild in `patch_trick_card`, memoise AI `partner_hand`, single-pass `_hard_bid` suit bucketing) shipped. **+15 regression tests** (635 → 650). Plan file at `/home/mrrobot/.claude/plans/i-want-to-fix-swirling-pelican.md`.
 - 3.7.1 lands the deferred 3.7.0 items plus a fresh audit pass. Three Explore agents ran in parallel against the documented false-positive catalogue. The classic-engine sweep returned no novel findings (3.4.x → 3.6.0 absorbed the surface); the BelAtro layer produced **BA-L2** (L'Accumulateur team→seat bug, HIGH) and **BA-L1** (`ContractReward` TypedDict float annotations, MEDIUM). Deferred items: **D1** — `score_round` and `play_card` extracted behind `_ScoringContext` / `_PlayContext` (zero test edits, behaviour-preserving); **D2** — `tests/belatro/test_partner_jokers.py` adds 26 tests, **100% coverage** for `passive` / `risky` / `shaper` partner-joker modules; **D3** — `prompt_surcoinche` callback on `RoundUICallbacks` plus NS-taker player-surcoinche path in `round_driver.py:268-283`. **+36 regression tests** (599 → 635). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-sequential-map.md`.
 - 3.6.0 lands a verified bug-hunt and refactor pass over the classic engine and the BelAtro roguelite layer. Three Explore agents produced ~50 candidate findings; verification against current code rejected several as false positives (notably "dix-de-der double counting" — separate counters; "underscore-boss-attr anti-pattern" — already pinned by tests) and confirmed the items shipped here. **+4 regression tests** (595 → 599). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-functional-naur.md`.
   - **H1** (`belatro/engine/round_driver.py:210-289`) — EW AI can now coinche an NS taker via a new `_ew_should_coinche` heuristic. Pre-3.6.0 there was no path that set `coinche_level > 0` when NS was taker (outside `auto_coinche` / `start_coinched`), making the Libra planet effectively unreachable in natural play.

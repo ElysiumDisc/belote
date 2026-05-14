@@ -83,76 +83,82 @@ class BelAtroMainMenu:
                 return None
 
     def _render(self) -> None:
+        from belote.ui.fit_guard import require_minimum
+        from belote.ui.layout import vcenter_lines
+
+        require_minimum(self.reader)
         term_w, term_h = get_term_size()
-        out = [clear_screen()]
 
-        # Center the art block
-        art_w = 46  # Approx width of BELATRO_ART
-        art_col = max(1, (term_w - art_w) // 2)
-
-        for i, line in enumerate(BELATRO_ART):
-            out.append(move(3 + i, art_col) + menu_art_fg() + BOLD + line + RESET)
-
-        out.append(move(9, 1) + ansi_center(menu_border_fg() + SUIT_ROW + RESET, term_w))
-        out.append(
-            move(10, 1) + ansi_center(white_fg() + "A Belote Roguelite Adventure" + RESET, term_w)
-        )
+        lines: list[str] = []
+        for line in BELATRO_ART:
+            lines.append(ansi_center(menu_art_fg() + BOLD + line + RESET, term_w))
+        lines.append("")
+        lines.append(ansi_center(menu_border_fg() + SUIT_ROW + RESET, term_w))
+        lines.append(ansi_center(white_fg() + "A Belote Roguelite Adventure" + RESET, term_w))
+        lines.append("")
 
         for i, opt in enumerate(self.options):
-            row = 12 + i
             if i == self.selected:
                 text = " > " + opt + " < "
-                out.append(
-                    move(row, 1) + ansi_center(REVERSE + gold_fg() + BOLD + text + RESET, term_w)
-                )
+                lines.append(ansi_center(REVERSE + gold_fg() + BOLD + text + RESET, term_w))
             else:
                 text = "  " + opt + "  "
-                out.append(move(row, 1) + ansi_center(white_fg() + text + RESET, term_w))
+                lines.append(ansi_center(white_fg() + text + RESET, term_w))
 
-        # Show selected deck name at bottom
         deck = next((d for d in STARTING_DECKS if d.id == self.selected_deck_id), None)
         if deck:
-            out.append(
-                move(18, 1) + ansi_center(light_gray_fg() + f"Deck: {deck.name}" + RESET, term_w)
+            lines.append("")
+            lines.append(
+                ansi_center(light_gray_fg() + f"Deck: {deck.name}" + RESET, term_w)
             )
 
-        sys.stdout.write("".join(out))
+        sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
 
     def _select_deck(self) -> None:
         """Deck selection submenu — two-panel layout."""
+        from belote.ui.fit_guard import require_minimum
+
         sel = next((i for i, d in enumerate(STARTING_DECKS) if d.id == self.selected_deck_id), 0)
         while True:
+            require_minimum(self.reader)
             term_w, term_h = get_term_size()
             deck = STARTING_DECKS[sel]
             out = [clear_screen()]
 
+            # Block spans 16 rows (title + divider + 14 of content); center it.
+            content_h = 16
+            top = max(1, (term_h - content_h) // 2)
+
             out.append(
-                move(3, 1) + ansi_center(gold_fg() + BOLD + "Select Starting Deck" + RESET, term_w)
+                move(top, 1) + ansi_center(gold_fg() + BOLD + "Select Starting Deck" + RESET, term_w)
             )
             line_char = "─" * min(term_w - 4, 76)
-            out.append(move(4, 1) + ansi_center(menu_border_fg() + line_char + RESET, term_w))
+            out.append(move(top + 1, 1) + ansi_center(menu_border_fg() + line_char + RESET, term_w))
 
             list_start_col = max(1, (term_w - 70) // 2)
             for i, d in enumerate(STARTING_DECKS):
-                row = 5 + i
+                row = top + 2 + i
                 color = gold_fg() + REVERSE if i == sel else white_fg()
                 text = f"  {d.name}"
                 out.append(move(row, list_start_col) + color + text + RESET)
 
-            # Right panel: selected deck info
-            info_col = list_start_col + 35
-            out.append(move(5, info_col) + gold_fg() + BOLD + deck.name + RESET)
-            out.append(move(6, info_col) + menu_border_fg() + "─" * 36 + RESET)
+            # Right panel: selected deck info. info_col is clamped so the
+            # 36-cell-wide panel never extends past the right edge.
+            info_col = min(list_start_col + 35, max(list_start_col + 18, term_w - 38))
+            panel_w = max(20, min(36, term_w - info_col - 2))
+            out.append(move(top + 2, info_col) + gold_fg() + BOLD + deck.name + RESET)
+            out.append(move(top + 3, info_col) + menu_border_fg() + "─" * panel_w + RESET)
             for i, art_line in enumerate(deck.ascii_art):
-                out.append(move(7 + i, info_col) + menu_art_fg() + art_line + RESET)
+                out.append(move(top + 4 + i, info_col) + menu_art_fg() + art_line + RESET)
 
-            desc_start = 7 + len(deck.ascii_art) + 1
+            desc_start = top + 4 + len(deck.ascii_art) + 1
             words = deck.description.split()
             line = ""
             r = desc_start
+            wrap_w = max(20, panel_w - 2)
             for w in words:
-                if len(line) + len(w) + 1 > 34:
+                if len(line) + len(w) + 1 > wrap_w:
                     out.append(move(r, info_col) + white_fg() + line + RESET)
                     line = w
                     r += 1
@@ -161,8 +167,9 @@ class BelAtroMainMenu:
             if line:
                 out.append(move(r, info_col) + white_fg() + line + RESET)
 
+            footer_row = max(top + content_h, term_h - 1)
             out.append(
-                move(19, 1)
+                move(footer_row, 1)
                 + ansi_center(
                     light_gray_fg() + "↑↓ Navigate   Enter: Select   Esc: Back" + RESET, term_w
                 )

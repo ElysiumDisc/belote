@@ -112,11 +112,14 @@ def _render_main_menu_art(sel: int, options: list[str], frame: int, term_h: int)
             )
         )
 
-    # If terminal is too short, skip the logo art to fit the cup
-    if term_h < 42:
+    # Need: croissant + blank + cup + 2 footer rows + 1 top margin row.
+    # Below that threshold, return the cup alone so it isn't pushed off-screen.
+    cards = get_cards_art()
+    croissant_min_h = len(cards) + 1 + len(CUP_TEMPLATE) + 2 + 1
+    if term_h < croissant_min_h:
         return final_cup
 
-    return get_cards_art() + [""] + final_cup
+    return cards + [""] + final_cup
 
 
 def show_theme_selector(reader: KeyReader) -> None:

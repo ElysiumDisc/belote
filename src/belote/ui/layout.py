@@ -103,3 +103,18 @@ def choose_layout(cols: int, rows: int) -> LayoutPreset:
 def fits_minimum(cols: int, rows: int) -> bool:
     """True iff the terminal is at least the compact-preset minimum."""
     return cols >= MIN_COLS and rows >= MIN_ROWS
+
+
+def vcenter_lines(lines: list[str], term_h: int) -> list[str]:
+    """Pad `lines` top + bottom with blanks so the block sits centered in
+    `term_h`; truncate to `term_h` if the content overflows.
+
+    Mirrors the centering math in `ui/render.py` (slack budget = `term_h - 1`).
+    """
+    rendered_h = len(lines)
+    if rendered_h < term_h - 1:
+        slack = (term_h - 1) - rendered_h
+        top_pad = slack // 2
+        bottom_pad = slack - top_pad
+        lines = [""] * top_pad + lines + [""] * bottom_pad
+    return lines[:term_h]

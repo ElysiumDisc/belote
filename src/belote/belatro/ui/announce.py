@@ -40,16 +40,21 @@ class BelAtroAnnounce:
         from belote.ui.render import get_term_size
 
         term_w, term_h = get_term_size()
+        mid = max(4, term_h // 2)
 
         print(clear_screen(), end="")
-        for i in range(1, 10):
-            print(move(i, 1) + " ")
-        print(move(10, 1) + ansi_center(red_fg() + BOLD + "! BOSS BLIND REVEALED !" + RESET, term_w))
+        print(
+            move(mid - 3, 1)
+            + ansi_center(red_fg() + BOLD + "! BOSS BLIND REVEALED !" + RESET, term_w)
+        )
         interruptible_sleep(1.0, reader)
-        print(move(13, 1) + ansi_center(gold_fg() + BOLD + boss.name.upper() + RESET, term_w))
+        print(move(mid, 1) + ansi_center(gold_fg() + BOLD + boss.name.upper() + RESET, term_w))
         interruptible_sleep(1.0, reader)
-        print(move(15, 1) + ansi_center(white_fg() + boss.description + RESET, term_w))
-        print(move(20, 1) + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, term_w))
+        print(move(mid + 2, 1) + ansi_center(white_fg() + boss.description + RESET, term_w))
+        print(
+            move(max(mid + 5, term_h - 2), 1)
+            + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, term_w)
+        )
         interruptible_sleep(2.0, reader)
 
     @staticmethod
@@ -108,7 +113,7 @@ class BelAtroAnnounce:
         if not lines:
             return
         toggle_overlay()
-        start_row = 24
+        start_row = max(1, term_h - len(lines) - 4)
         for i, line in enumerate(lines):
             print(move(start_row + i, 1) + ansi_center(gold_fg() + line + RESET, term_w))
         end = time.time() + 1.5

@@ -202,8 +202,11 @@ def show_belatro_rules(reader: KeyReader) -> None:
         )
         return lines
 
+    from belote.ui.fit_guard import require_minimum
+
     hide_cursor()
     while True:
+        require_minimum(reader)
         term_w, term_h = get_term_size()
         wrap_at = min(80, term_w - 8)
         view_h = term_h - 4

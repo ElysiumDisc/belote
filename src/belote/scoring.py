@@ -295,10 +295,10 @@ def resolve_declarations(
         tied_rank = ns_best_carre.rank
         order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
         for s in order:
-            for c, cs in zip(ns_carres, ns_carre_seats, strict=False):
+            for c, cs in zip(ns_carres, ns_carre_seats, strict=True):
                 if cs == s and c.rank == tied_rank:
                     return 0
-            for c, cs in zip(ew_carres, ew_carre_seats, strict=False):
+            for c, cs in zip(ew_carres, ew_carre_seats, strict=True):
                 if cs == s and c.rank == tied_rank:
                     return 1
         return None
@@ -310,10 +310,10 @@ def resolve_declarations(
         tied_strength = _sequence_strength(ns_best_seq)
         order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
         for s in order:
-            for seq, ss in zip(ns_seqs, ns_seq_seats, strict=False):
+            for seq, ss in zip(ns_seqs, ns_seq_seats, strict=True):
                 if ss == s and _sequence_strength(seq) == tied_strength:
                     return 0
-            for seq, ss in zip(ew_seqs, ew_seq_seats, strict=False):
+            for seq, ss in zip(ew_seqs, ew_seq_seats, strict=True):
                 if ss == s and _sequence_strength(seq) == tied_strength:
                     return 1
         return None
@@ -525,7 +525,7 @@ def _calculate_base_points(
     if winners is None:
         winners = compute_trick_winners(state, trump, is_sa)
 
-    for trick, winner in zip(state.completed_tricks, winners, strict=False):
+    for trick, winner in zip(state.completed_tricks, winners, strict=True):
         if winner is None:
             continue
         trick_pts = _trick_points_with_modifiers(trick, trump, bm)
@@ -562,7 +562,7 @@ def _apply_scoring_modifiers(
     if state.boss_modifiers.separate_scoring and state.contract is not None:
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
         bm = state.boss_modifiers
-        for trick, winner in zip(state.completed_tricks, winners, strict=False):
+        for trick, winner in zip(state.completed_tricks, winners, strict=True):
             if winner is None:
                 continue
             scores[winner] += _trick_points_with_modifiers(trick, trump, bm)
@@ -585,7 +585,7 @@ def _apply_scoring_modifiers(
     # Boss: La Reine Noire (Queen of Spades penalty)
     if state.boss_modifiers.queen_spades_penalty:
         qs = Card(Suit.SPADES, Rank.QUEEN)
-        for trick, winner in zip(state.completed_tricks, winners, strict=False):
+        for trick, winner in zip(state.completed_tricks, winners, strict=True):
             if winner is not None and any(tc.card == qs for tc in trick):
                 if team_of(winner) == taker_team:
                     taker_pts -= 25

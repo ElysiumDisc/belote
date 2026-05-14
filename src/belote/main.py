@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import atexit
 import random
-import shutil
 import signal
 import sys
 
@@ -109,18 +108,12 @@ def main() -> None:
 
     theme_manager.load_selection()
 
-    # Setup terminal — check against the layout system's compact-preset floor.
+    # Terminal-size enforcement now lives inside the alt-screen as a live
+    # overlay (see require_minimum). Below the floor we paint a centered
+    # "resize me" prompt that dismisses itself the instant the user resizes
+    # past the floor — including mid-game shrinks.
+    from .ui.fit_guard import FitAbortedError, require_minimum
     from .ui.layout import MIN_COLS, MIN_ROWS
-
-    cols, rows = shutil.get_terminal_size()
-    if cols < MIN_COLS or rows < MIN_ROWS:
-        print(f"Error: Terminal too small ({cols}x{rows}).")
-        print(f"Minimum required: {MIN_COLS}x{MIN_ROWS}")
-        print(
-            "Tip: at this resolution the game uses a compact layout. "
-            "For the best experience, resize to 96x38 or larger."
-        )
-        sys.exit(1)
 
     guard = TerminalGuard()
 
@@ -140,6 +133,11 @@ def main() -> None:
             # Without this, every menu frame pollutes the terminal scrollback.
             sys.stdout.write(alt_screen_on() + clear_screen() + hide_cursor())
             sys.stdout.flush()
+
+            try:
+                require_minimum(reader, MIN_COLS, MIN_ROWS)
+            except FitAbortedError:
+                return
 
             target = args.target
             speed = args.speed

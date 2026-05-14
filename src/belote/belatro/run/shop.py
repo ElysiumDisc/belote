@@ -172,6 +172,13 @@ class Shop:
                 item.on_purchase(self.run)
         elif isinstance(item, Voucher):
             self.run.vouchers.append(item)
-            item.apply(self.run)
+            # Idempotency guard: several vouchers use `+=` in apply(); if a
+            # save/load round-trip ever re-invokes apply() on a voucher
+            # already in `vouchers`, bonuses would silently double. Track
+            # applied ids so re-apply is a no-op. The normal purchase path
+            # hits this exactly once.
+            if item.id not in self.run._applied_voucher_ids:
+                self.run._applied_voucher_ids.add(item.id)
+                item.apply(self.run)
         elif len(self.run.consumables) < self.run.consumable_slots:
             self.run.consumables.append(item)

@@ -41,7 +41,10 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
     cat_idx = 0
     item_idx = 0
 
+    from belote.ui.fit_guard import require_minimum
+
     while True:
+        require_minimum(reader)
         term_w, term_h = get_term_size()
         cat_name, items = categories[cat_idx]
         item_idx = min(item_idx, len(items) - 1) if items else 0
@@ -82,10 +85,17 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
 
             # Show details for discovered item on the right
             if real_idx == item_idx:
-                info_col = 40
+                info_col = max(40, term_w // 2)
+                wrap_w = max(20, term_w - info_col - 2)
+                divider_w = min(30, wrap_w)
                 if is_discovered:
                     out.append(move(start_row, info_col) + gold_fg() + BOLD + item_cls.name + RESET)
-                    out.append(move(start_row + 1, info_col) + menu_border_fg() + "─" * 30 + RESET)
+                    out.append(
+                        move(start_row + 1, info_col)
+                        + menu_border_fg()
+                        + "─" * divider_w
+                        + RESET
+                    )
 
                     # Try to show ASCII art if available
                     art = getattr(item_cls, "ascii_art", [])
@@ -100,7 +110,7 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
                     line = ""
                     r = desc_start
                     for w in words:
-                        if len(line) + len(w) + 1 > 40:
+                        if len(line) + len(w) + 1 > wrap_w:
                             out.append(move(r, info_col) + white_fg() + line + RESET)
                             line = w
                             r += 1
