@@ -289,3 +289,244 @@ def test_bid_made_event_does_not_double_fire_on_bid_under_auto_coinche() -> None
         f"on_bid fired with coinche_level>0 ({coinched_fires}) — re-emits "
         "should not invoke on_bid jokers."
     )
+
+
+# ── H1 regression (3.6.0): EW AI can coinche an NS taker ────────────────────
+
+
+def test_ew_should_coinche_baseline_rate() -> None:
+    """The 3.6.0 EW defender heuristic must fire at the documented baseline
+    (~20%) on a balanced hand and bump to ~35% on a strong defender hand.
+    Verified by running it many times under a fixed seed and checking the
+    fire-rate against the boundary, not by asserting a single coin flip."""
+    import random
+
+    from belote.belatro.engine.round_driver import _ew_should_coinche
+    from belote.deck import Card, Rank, Suit
+    from belote.game import GameState
+
+    # Balanced (no defender holds 2+ J/A) → baseline 20% rate.
+    weak_state = GameState(
+        hands=(
+            (),
+            (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT)),  # East
+            (),
+            (Card(Suit.CLUBS, Rank.SEVEN), Card(Suit.DIAMONDS, Rank.EIGHT)),  # West
+        ),
+    )
+    rng = random.Random(1234)
+    fires = sum(1 for _ in range(10_000) if _ew_should_coinche(weak_state, rng))
+    # 20% ± a generous band; the heuristic is intentionally simple so this
+    # is a smoke check, not a precise statistical test.
+    assert 1700 <= fires <= 2300, f"baseline fire-rate out of band: {fires}/10000"
+
+    # Strong defender (East holds 2 honours) → bumps to 35%.
+    strong_state = GameState(
+        hands=(
+            (),
+            (Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.ACE)),  # East
+            (),
+            (Card(Suit.CLUBS, Rank.SEVEN),),  # West
+        ),
+    )
+    rng = random.Random(1234)
+    fires = sum(1 for _ in range(10_000) if _ew_should_coinche(strong_state, rng))
+    assert 3200 <= fires <= 3800, f"strong-hand fire-rate out of band: {fires}/10000"
+
+
+def test_ew_ai_can_coinche_ns_taker_under_seed() -> None:
+    """End-to-end: with the EW heuristic forced True and an NS-formed taker,
+    the RoundEndEvent must carry coinche_level >= 1.
+
+    Pre-3.6.0 there was no path that set coinche_level > 0 for NS-taker
+    rounds outside of auto_coinche / start_coinched. The Libra planet
+    (gated on `coinche_level > 0 AND taker on NS AND not failed`) was
+    therefore unreachable in natural play. This test would have failed
+    before the H1 fix."""
+    from unittest.mock import patch
+
+    from belote.game import Seat as _Seat
+
+    class _RoundEndSniffer(Joker):
+        id = "round_end_sniffer"
+        name = "Sniffer"
+        description = "test"
+
+        def __init__(self) -> None:
+            self.events: list[object] = []
+
+        def on_round_end(self, event, state):  # type: ignore[no-untyped-def]
+            self.events.append(event)
+
+    sniffer = _RoundEndSniffer()
+    acc = ScoreAccumulator()
+    acc.attach_jokers([sniffer])
+
+    class _SouthBidsAndPlays(MockUICallbacks):
+        def prompt_bid(self, state: GameState):  # type: ignore[no-untyped-def]
+            # Bid the up-card suit in round 1 (always legal); pass round 2.
+            if state.bidding_round == 1 and state.up_card is not None:
+                return state.up_card.suit
+            return None
+
+        def prompt_card(self, state: GameState):  # type: ignore[no-untyped-def]
+            from belote.game import legal_cards
+
+            return legal_cards(state, Seat.SOUTH)[0], state
+
+    bus = EventBus()
+    partner = PartnerState()
+
+    with patch(
+        "belote.belatro.engine.round_driver._ew_should_coinche",
+        return_value=True,
+    ), patch(
+        "belote.ai.AIPlayer.decide_bid",
+        return_value=None,
+    ):
+        drive_round(
+            bus=bus,
+            partner=partner,
+            boss=None,
+            ui_callbacks=_SouthBidsAndPlays(),
+            acc=acc,
+            seed=42,
+        )
+
+    contract_events = [e for e in sniffer.events if getattr(e, "taker_seat", None) is not None]
+    assert contract_events, "expected a RoundEndEvent with a taker"
+    evt = contract_events[-1]
+    assert evt.taker_seat in (_Seat.NORTH, _Seat.SOUTH), (
+        f"test setup: expected NS taker, got {evt.taker_seat}"
+    )
+    assert evt.coinche_level >= 1, (
+        f"EW AI should have coinched (heuristic forced True) but "
+        f"coinche_level={evt.coinche_level}"
+    )
+
+
+# ─── 3.7.1 D3: NS-taker player surcoinche prompt ────────────────────────────
+
+
+def _drive_ns_taker_round_with_surcoinche(
+    surcoinche_response: bool,
+    *,
+    seed: int,
+    ai_surcoinches: bool,
+) -> int:
+    """Helper: drive a round where NS takes, EW coinches, and the player is
+    asked whether to surcoinche back. Returns the final coinche_level.
+
+    `ai_surcoinches` patches `rng.random()` post-prompt to force/skip the
+    AI fallback (the 30% gated branch).
+    """
+    from unittest.mock import patch
+
+    class _RoundEndSniffer(Joker):
+        id = "round_end_sniffer"
+        name = "Sniffer"
+        description = "test"
+
+        def __init__(self) -> None:
+            self.events: list[object] = []
+
+        def on_round_end(self, event, state):  # type: ignore[no-untyped-def]
+            self.events.append(event)
+
+    sniffer = _RoundEndSniffer()
+    acc = ScoreAccumulator()
+    acc.attach_jokers([sniffer])
+
+    class _SouthBidsAndPlays(MockUICallbacks):
+        def __init__(self) -> None:
+            self.surcoinche_prompted = False
+
+        def prompt_bid(self, state: GameState):  # type: ignore[no-untyped-def]
+            if state.bidding_round == 1 and state.up_card is not None:
+                return state.up_card.suit
+            return None
+
+        def prompt_card(self, state: GameState):  # type: ignore[no-untyped-def]
+            from belote.game import legal_cards
+
+            return legal_cards(state, Seat.SOUTH)[0], state
+
+        def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
+            self.surcoinche_prompted = True
+            return surcoinche_response
+
+    ui = _SouthBidsAndPlays()
+    bus = EventBus()
+    partner = PartnerState()
+
+    # Force surcoinche to be unlocked (per-run voucher gate) so the new code
+    # path runs at all. The flag lives on `state._joker_state` and is set
+    # via `card_enhancements`.
+    enhancements = {"surcoinche_unlocked": True}
+
+    with patch(
+        "belote.belatro.engine.round_driver._ew_should_coinche",
+        return_value=True,
+    ), patch(
+        "belote.ai.AIPlayer.decide_bid",
+        return_value=None,
+    ):
+        # Patch rng.random so the AI-surcoinche-fallback (30%) is deterministic.
+        # `rng.random` is called only after the player prompt declines.
+        random_value = 0.1 if ai_surcoinches else 0.9  # <0.3 → AI surcoinches
+
+        import random as _random
+
+        def patched_random(self):  # type: ignore[no-untyped-def]
+            return random_value
+
+        with patch.object(_random.Random, "random", patched_random):
+            drive_round(
+                bus=bus,
+                partner=partner,
+                boss=None,
+                ui_callbacks=ui,
+                acc=acc,
+                seed=seed,
+                card_enhancements=enhancements,
+            )
+
+    assert ui.surcoinche_prompted, "prompt_surcoinche was never called"
+    contract_events = [
+        e for e in sniffer.events if getattr(e, "taker_seat", None) is not None
+    ]
+    assert contract_events, "expected a RoundEndEvent with a taker"
+    return contract_events[-1].coinche_level
+
+
+def test_d3_player_accepts_surcoinche_reaches_level_2() -> None:
+    """Player accepts surcoinche when EW coinches NS-taker bid → coinche_level=2."""
+    level = _drive_ns_taker_round_with_surcoinche(
+        surcoinche_response=True, seed=42, ai_surcoinches=False
+    )
+    assert level == 2, f"expected surcoinche (level 2), got {level}"
+
+
+def test_d3_player_declines_ai_does_not_surcoinche_stays_at_1() -> None:
+    """Player declines + AI rolls > 0.3 → coinche_level stays at 1."""
+    level = _drive_ns_taker_round_with_surcoinche(
+        surcoinche_response=False, seed=42, ai_surcoinches=False
+    )
+    assert level == 1, f"expected coinche-only (level 1), got {level}"
+
+
+def test_d3_player_declines_ai_surcoinches_reaches_level_2() -> None:
+    """Player declines but AI fallback fires → coinche_level=2."""
+    level = _drive_ns_taker_round_with_surcoinche(
+        surcoinche_response=False, seed=42, ai_surcoinches=True
+    )
+    assert level == 2, f"expected AI-surcoinche (level 2), got {level}"
+
+
+def test_d3_default_callback_returns_false() -> None:
+    """Default RoundUICallbacks.prompt_surcoinche must return False (no-op)."""
+    cb = MockUICallbacks()
+    # MockUICallbacks inherits the default from RoundUICallbacks.
+    state = GameState(hands=((), (), (), ()))
+    assert cb.prompt_surcoinche(state, Seat.EAST) is False
+

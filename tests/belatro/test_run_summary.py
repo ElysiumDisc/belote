@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 
-from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro import run_summary
+from belote.belatro.core.run_state import BelAtroRun
 
 
 @pytest.fixture

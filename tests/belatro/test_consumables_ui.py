@@ -13,7 +13,7 @@ no way to use them. These tests pin:
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 from belote.belatro.core.run_state import BelAtroRun

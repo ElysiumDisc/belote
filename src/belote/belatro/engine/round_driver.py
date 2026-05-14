@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from belote.ai import AIPlayer, Difficulty
-from belote.deck import Card, Suit
+from belote.deck import Card, Contract, Suit
 from belote.game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -38,6 +38,29 @@ if TYPE_CHECKING:
     from ..run.boss import BossModifier
 
 
+def _ew_should_coinche(state: GameState, rng: random.Random) -> bool:
+    """Defender-side AI for the EW seats when NS is taker.
+
+    Light, deterministic heuristic gated by the round's seeded RNG so
+    behaviour is reproducible under a fixed seed (matters for ghost runs
+    and replays). Baseline 20% rate; bumps to 35% if either defender holds
+    2+ honour cards (Jack/Ace) — a strong defending hand suggests the NS
+    contract is over-bid. Added in 3.6.0 to close audit H1 (Libra planet
+    was unreachable in natural play because no path ever set
+    coinche_level > 0 when NS was taker).
+    """
+    from belote.deck import Rank
+
+    honors = {Rank.JACK, Rank.ACE}
+    rate = 0.20
+    for seat in (Seat.EAST, Seat.WEST):
+        hand = state.hand_of(seat)
+        if sum(1 for c in hand if c.rank in honors) >= 2:
+            rate = 0.35
+            break
+    return rng.random() < rate
+
+
 class RoundUICallbacks(ABC):
     """Interface for UI interaction during a round."""
 
@@ -60,6 +83,17 @@ class RoundUICallbacks(ABC):
         """Ask the player whether to coinche the AI's bid.
 
         Default no-op returns False. Override in concrete UI (e.g. BelAtro main).
+        """
+        return False
+
+    def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
+        """Ask the player whether to surcoinche (NS-taker path, 3.7.1 D3).
+
+        Fired when the player is the taker (NS) and the EW AI lands a
+        coinche — the player may surcoinche back to push `coinche_level` to
+        2. Default no-op returns False; if the player declines, the existing
+        AI surcoinche heuristic (30% under `surcoinche_unlocked`) still runs.
+        Override in concrete UI (e.g. BelAtro main).
         """
         return False
 
@@ -207,56 +241,52 @@ def drive_round(
                 contract=state.contract or "normal",
             )
 
-    # ── Coinche / surcoinche player flow ─────────────────────────────────
-    # If a taker emerged on the opposing (EW) team, give the player a chance
-    # to coinche; if they coinche, give the AI taker a chance to surcoinche.
+    # ── Coinche / surcoinche flow ────────────────────────────────────────
+    # Either defending team may coinche the taker's bid. The branches below
+    # mirror each other: EW-taker → NS defenders may coinche (player or
+    # partner-AI fallback); NS-taker → EW AI defenders may coinche (3.6.0
+    # audit H1 — without this branch the Libra planet was unreachable in
+    # natural play because coinche_level stayed 0 whenever NS was taker).
     coinche_level = 0
-    if (
-        state.taker is not None
-        and state.taker in (Seat.EAST, Seat.WEST)
-        and state.phase == Phase.PLAYING
-    ):
-        if ui_callbacks.prompt_coinche(state, state.taker):
-            coinche_level = 1
-            # AI surcoinche: simple heuristic — 30% under the seeded RNG.
-            # Surcoinche is gated by La Surcoinche voucher (when piped in).
-            surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
-            if surcoinche_unlocked and rng.random() < 0.3:
-                coinche_level = 2
-        else:
-            # Player declined — give the AI partner (North, same defending team)
-            # a chance to coinche on its own initiative. Personality-driven and
-            # gated by trust: a degraded partner won't act independently.
-            if (
+    if state.taker is not None and state.phase == Phase.PLAYING:
+        surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
+
+        if state.taker in (Seat.EAST, Seat.WEST):
+            # EW taker → NS defends. Player gets first refusal; partner AI
+            # picks up if the player declined and trust isn't degraded.
+            if ui_callbacks.prompt_coinche(state, state.taker) or (
                 not partner.trust.ai_degraded
                 and partner.personality.should_coinche(state, rng)
             ):
                 coinche_level = 1
-                surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
                 if surcoinche_unlocked and rng.random() < 0.3:
                     coinche_level = 2
-        # L'Avocat boss forces at least coinche=1 (existing auto_coinche flag).
+        else:
+            # NS taker → EW AI defends. Light heuristic gated by the seeded
+            # RNG (so behaviour is reproducible under a fixed seed). When
+            # the coinche lands and surcoinche is unlocked, the player gets
+            # first refusal to surcoinche back (3.7.1 D3); the AI surcoinche
+            # heuristic (30 %) still fires if the player declines.
+            if _ew_should_coinche(state, rng):
+                coinche_level = 1
+                if surcoinche_unlocked:
+                    # Pick a concrete EW seat for the prompt label. Either
+                    # works — both EW seats defend together. Branches are
+                    # split (player-accept vs AI-fallback) because they are
+                    # conceptually distinct decisions even though both raise
+                    # the level — keep them separate for readability.
+                    coincheur_seat = Seat.EAST
+                    if ui_callbacks.prompt_surcoinche(state, coincheur_seat) or rng.random() < 0.3:
+                        coinche_level = 2
+
+        # L'Avocat boss forces at least coinche=1 regardless of taker team.
         if state.boss_modifiers.auto_coinche:
             coinche_level = max(coinche_level, 1)
+
         # Refresh joker_state with the resolved coinche level via a re-emit.
         # `re_emit=True` updates derived state (HUD, joker_state["contract"])
         # without re-firing on_bid jokers — those already fired in the loop.
         if coinche_level > 0:
-            state = _emit(
-                BidMadeEvent(
-                    seat=state.taker,
-                    trump=state.trump,
-                    contract=state.contract or "normal",
-                    coinche_level=coinche_level,
-                    re_emit=True,
-                ),
-                state,
-            )
-    elif state.boss_modifiers.auto_coinche and state.phase == Phase.PLAYING:
-        # Boss forces coinche even if taker is on NS team.
-        coinche_level = 1
-        # Re-emit refresh — see comment above; on_bid is suppressed via re_emit.
-        if state.taker is not None:
             state = _emit(
                 BidMadeEvent(
                     seat=state.taker,
@@ -351,7 +381,7 @@ def drive_round(
                 last_trick,
                 state.trump,
                 state.boss_modifiers.seven_eight_trump,
-                state.contract == "sans_atout",
+                state.contract == Contract.SANS_ATOUT,
             )
             # Use state diff to get points; perfectly handles all boss-aware points and Dix de Der
             points = sum(state.current_round_points) - old_pts_total

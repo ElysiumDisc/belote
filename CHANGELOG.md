@@ -5,6 +5,92 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-05-13
+
+Bug-hunt, performance, and logic audit pass plus the three items 3.6.0 deferred to 3.7.0. Three Explore agents ran in parallel against the documented false-positive catalogue. The classic-engine sweep returned **no novel findings** — the 3.4.x → 3.6.0 audits have absorbed the available correctness surface. The BelAtro layer produced **2 confirmed bugs** (one HIGH, one MEDIUM) and **1 polish item**. The deferred 3.7.0 items — `score_round` / `play_card` refactor, partner-joker test coverage, player-facing NS-taker surcoinche — all land here. **+36 regression tests** (599 → 635). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-sequential-map.md`.
+
+### Fixed
+
+- **`src/belote/belatro/items/jokers/hand_comp.py:88` (BA-L2, HIGH) — L'Accumulateur now credits team trick wins, not just South.** Pre-3.7.1 the joker gated on `event.winner == Seat.SOUTH`, silently dropping +5 chips per 7/8 whenever the partner (NORTH) won the trick. The description says *"For every 7 or 8 **you** win in a trick"* and in BelAtro "you" = team (NS) — same convention applied to Le Patriote / Le Premier Sang / Le Sergent in 3.5.0. L'Accumulateur was missed in that pass. Fixed: `if team_of(event.winner) == 0:`. 6 regression tests in `tests/belatro/test_belatro.py::TestLAccumulateurTeamCredit` covering NORTH credit, EAST/WEST non-credit, mixed-round accumulation, and rank-8 parity with rank-7.
+- **`src/belote/belatro/core/scoring.py:43,48,54` (BA-L1, MEDIUM) — `ContractReward` TypedDict now correctly annotates float fields as `float`.** `add_mult`, `bonus_mult_per_trick`, and `coinche_multiplier` were annotated `int` but populated with `0.3` / `1.0` / `1.0` by `planets.py`. Python's numeric coercion masked this at runtime, but the TypedDict was introduced explicitly to catch planet-reward key typos at type-check time — broken annotations defeated the purpose. Fixed; `mypy --strict` stays green (after pinning `libra_bonus: float` on the consumer side to keep the inference path explicit).
+
+### Changed
+
+- **`src/belote/scoring.py:599-878` (D1) — `score_round` extracted behind `_ScoringContext`.** ~280-LOC / ~30-branch monolith split into `_compute_belote_points`, `_compute_declaration_points`, `_score_capot_outcome`, `_score_normal_outcome`, with a `_ScoringContext` frozen+slotted dataclass threading pre-computed values (trump, taker, winners, tricks_ns/ew) into the helpers. Behaviour unchanged: zero test edits required. 3.6.0 deferred this because the natural extraction passed 15+ parameters between siblings; the context dataclass collapses that to one.
+- **`src/belote/game.py:857-1018` (D1) — `play_card` extracted behind `_PlayContext`.** ~163-LOC / ~18-branch function split into `_record_belote_announcement`, `_resolve_trick_winner`, `_compute_live_round_points`, `_rotate_dynamic_trump`. The mid-trick early-return is now visually adjacent to the trick-complete branch instead of the trick-complete branch swallowing the entire function body. Zero test edits.
+- **`src/belote/achievements.py` (P1-1) — achievement lookup via dict; `Achievement` gets `slots=True`.** Two `for a in ACHIEVEMENTS: if a.id == aid:` loops collapse to `_ACHIEVEMENT_BY_ID[aid]`. Catalog is 6 items so the perf win is microscopic; the readability win is real. `slots=True` brings the dataclass in line with every other frozen dataclass in the codebase.
+
+### Added
+
+- **`tests/belatro/test_partner_jokers.py` (D2) — focused matrix for 9 partner jokers.** Pre-3.7.1 the partner-joker modules (`passive` / `risky` / `shaper`) carried shallow smoke-tests in `test_belatro.py`. New file covers happy-path / non-trigger / round-boundary-reset for `LeMiroir`, `LaSymbiose`, `LeRelais`, `LAventurier`, `LeMartyr`, `LeParasite`, `LeGenereux`, `LaSentinelleP`, `LeCalculateur` — 26 tests, **100% line coverage** for the three modules (was effectively 0% direct coverage despite import-time references). Audit note pinned in the docstring: partner jokers correctly key on seat (NORTH), not team — they are the deliberate complement of L'Accumulateur, NOT subject to the BA-L2 fix.
+- **`src/belote/belatro/engine/round_driver.py:89-98` + `belatro/main.py` (D3) — `prompt_surcoinche` callback on `RoundUICallbacks`; NS-taker player surcoinche.** Pre-3.7.1 the NS-taker branch only consulted the EW-AI heuristic; when EW coinched the player had no way to surcoinche back. New optional callback (default returns False, preserves backward compatibility for any third-party `RoundUICallbacks` impl), wired into `round_driver.py:268-279` so the player gets first refusal before the existing 30% AI surcoinche fallback fires. `BelAtroMain`'s `UICallbacks` implements it via `BelAtroAnnounce.yes_no`. 4 regression tests in `test_round_driver.py` (accept / decline-AI-skips / decline-AI-takes / default-no-op).
+
+### Verified clean — audit findings rejected after source verification
+
+Documented so the next cycle doesn't re-investigate:
+
+- **Classic engine** (`game.py`, `scoring.py`, `deck.py`, `ai.py`, `gameflow.py`) — three-Explore-agent pass returned no novel findings. The 3.4.x → 3.6.0 audits absorbed the correctness surface.
+- **`visible_len()` "duplicated" in `_build_hud()`** (`ui/render.py:669-670, 705-706`) — calls are on different strings in different layout branches; not redundant.
+- **`detect_synergies()` recomputed per HUD render** (`belatro/ui/hud.py:67-82`) — O(joker_count × 6 pairs), microseconds per render; caching adds invalidation surface for no user-visible win.
+- **`_slot_anchors()` called 3× per trick-mat render** (`ui/render.py:379/409/446`) — pure arithmetic, sub-microsecond.
+- **`announce()` / `BelAtroAnnounce.banner()` duplication** — modal off-the-critical-path code with intentionally different positioning semantics.
+- **Two history-overlay code paths (wide vs narrow term)** — intentional split for narrow-terminal readability.
+- **Round-2 bid prompt ANSI redundancy** (`ui/render.py:751-753`) — visually correct (REVERSE wraps the segment); cosmetic only.
+
+### Deferred to 3.7.2
+
+- **Player surcoinche when EW is taker** — the symmetric mirror of D3. Today the EW-taker branch lets the player coinche but cannot surcoinche when partner-AI surcoinches the bid. Out of scope for the current pass; the `prompt_surcoinche` callback added in D3 can be reused.
+
+### Internal
+
+- **Tests**: 599 → 635 (+36). Two new test files: `tests/belatro/test_partner_jokers.py` (26), 4 new D3 tests in `tests/belatro/test_round_driver.py`, 6 new BA-L2 tests in `tests/belatro/test_belatro.py`.
+- **Strict gates**: pytest 635/635 green, mypy --strict 0 errors (77 files), ruff 0 violations.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+
+## [3.6.0] - 2026-05-12
+
+Verified bug-hunt and refactor pass over both the classic Belote engine and the BelAtro roguelite layer. A three-Explore-agent audit produced ~50 candidate findings; verification against current source rejected several as **false positives** (notably "dix-de-der double counting" — independent counters; "underscore-boss-attr anti-pattern" — already pinned; "M5 `last_voids_key` cross-round bleed" — already fixed). The items below are the ones confirmed against current code and shipped. **+4 regression tests** (595 → 599). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-functional-naur.md`.
+
+### Fixed
+
+- **`src/belote/belatro/engine/round_driver.py:210-289` (H1) — EW AI can now coinche an NS taker; Libra planet is reachable in natural play.** Pre-3.6.0 the coinche flow only branched on `state.taker in (Seat.EAST, Seat.WEST)`. When NS was taker there was no path that set `coinche_level > 0` outside of L'Avocat's `auto_coinche` or Le Coincheur's `start_coinched`. The `Libra` planet at `belatro/core/scoring.py:237-250` is gated on `event.coinche_level > 0 AND event.taker_seat in _NS_TEAM AND not failed`, so its content was effectively unreachable. New `_ew_should_coinche(state, rng)` heuristic (baseline 20 %, +15 % if either defender holds 2+ honour cards) gives the EW AI defenders a seeded chance; AI surcoinche from NS follows the existing 30 % pattern gated by `surcoinche_unlocked`. The branch also collapses the previous duplicated `auto_coinche` re-emit so the boss path lives in one site. 2 regression tests in `tests/belatro/test_round_driver.py` (one for the heuristic in isolation, one end-to-end via `ScoreAccumulator` joker capture).
+- **`src/belote/belatro/items/registry.py:184-194` (H2) — synergy-ID validation now survives `python -O`.** The 3.0.1 check used `assert not missing, ...`. Under `PYTHONOPTIMIZE=1` (the default for packaged installs and `python -O`) the assertion is stripped and a typo in `belatro/ui/hud.py::_SYNERGY_PAIRS` would silently break every HUD synergy badge for that pair. Replaced with `if missing: raise RuntimeError(...)`. Verified by importing the registry in a subprocess under `-O`.
+- **`src/belote/belatro/engine/event_bus.py:emit` (H3) — handler exceptions no longer halt remaining subscribers.** `emit()` now wraps each handler call in `try/except Exception`, logs via `logging.exception`, and continues iterating. `BaseException` (KeyboardInterrupt etc.) still propagates so a user Ctrl-C tears down the round cleanly. Pre-3.6.0 a single raising joker `on_event` would skip every subsequent subscriber for the rest of the round. 1 regression test in `tests/belatro/test_event_bus.py::test_raising_subscriber_does_not_skip_siblings`.
+- **`src/belote/belatro/engine/modifier_patch.py:patch` (M3) — `PatchedGameState` no longer rejects legitimate `_`-prefixed sets.** The 3.1.0 anti-shim raised on **any** leading-underscore patch key, but `GameState` has legitimate `_chips`, `_mult`, `_joker_state`, `_rng` fields. Narrowed the guard to reject only `_X` where `X` IS a `BossModifiers` field — the precise 3.0.x anti-pattern target. A future joker / boss effect that needs to adjust accumulator scalars no longer hits a confusing "3.0.x shim was removed" error. 1 regression test in `tests/belatro/test_boss_modifiers_integration.py::test_patched_state_rejects_only_underscore_boss_attrs`.
+
+### Changed
+
+- **`src/belote/scoring.py` (M1+M2) — zero-rank / `ban_clubs` flag logic extracted to module-level helpers.** Three sites previously inlined the same `kings_zero` / `tens_zero` / `aces_zero` / `jacks_zero` / `ban_clubs` table (`trick_card_points`, `_calculate_base_points`, `_apply_scoring_modifiers`). New `_card_points_with_zero_ranks(card, trump, bm)`, `_trick_zeroed_by_ban_clubs(trick, bm)`, and `_trick_points_with_modifiers(trick, trump, bm)` are the single source of truth. Adding a new zero-rank boss flag is now one edit instead of three (the audit's drift-risk concern). No behaviour change; full suite green.
+- **`src/belote/deck.py:Contract` (M4/R1) — added `class Contract(str, Enum)`** with values `NORMAL` / `SANS_ATOUT` / `TOUT_ATOUT` / `COINCHE` / `SURCOINCHE`. Inherits from `str` so values ARE plain strings — existing comparisons (`state.contract == "sans_atout"`) and JSON serialisation are unaffected. Migrated the dense comparison sites in `scoring.py`, `game.py`, `ai.py`, `gameflow.py`, and `belatro/engine/round_driver.py` to `state.contract == Contract.SANS_ATOUT`. UI label strings and joker / planet registry keys left as plain strings — `StrEnum`-style equality means they're interchangeable.
+- **`src/belote/game.py:sort_hand` (P4) — now `@lru_cache(maxsize=512)`.** Bench: ~34 % wall-clock win on the UI render-loop access pattern (same `(hand, trump)` requested across consecutive frames). P2 (`deck.card_points` caching) was tested with the same harness and **rejected** — the function is too small for `lru_cache` overhead to amortise (1.86× slower with cache).
+- **`src/belote/belatro/core/scoring.py:ContractReward` (R4) — TypedDict for `contract_levels` entries.** Documents the known keys (`add_chips`, `add_mult`, `jack_9_bonus`, `honor_bonus`, `bonus_mult_per_trick`, `add_money`, `capot_bonus`, `coinche_multiplier`) so mypy catches planet-reward key typos at type-check time. `BelAtroRun.contract_levels` stays as the wider `dict[str, dict[str, Any]]` to avoid an import cycle; the cast happens at the consumer boundary in `belatro/main.py`.
+- **`src/belote/game.py` belote detection (L1)** — single-pass per hand. Previously rebuilt a `(rank, suit)` set and looped 4 suits per seat; now tracks two `set[Suit]` (kings, queens) in one pass and intersects.
+- **`src/belote/deck.py` (L2)** — `card_points` and `trick_rank` type annotations widened to `trump: Suit | None` to match the SA call sites at `scoring.py` and elsewhere. Runtime behaviour was already correct.
+- **`src/belote/scoring.py:_carre_points` (L3)** — uses `.get(..., 0)` for symmetry with `get_declaration_points` and `_sequence_points`. The dict is currently complete so this is fail-soft only; protects against a future `Rank` extension crashing scoring mid-round.
+
+### Added
+
+- **`tests/test_properties.py` (T1) — three new invariants.**
+  - `test_chute_and_capot_are_mutually_exclusive`: under capot, credited points always live on exactly one side.
+  - `test_dynamic_trump_never_overrides_sans_atout`: La Anarchie's per-2-trick trump rotation never fires under SA (`state.trump` stays None for the whole round).
+  - `test_no_consecutive_team_wins_invariant_when_rupture_active`: under La Rupture, no team sweeps all 8 tricks (30 seeded rounds).
+- **`tests/belatro/test_round_driver.py` (H1 backfill)** — `test_ew_should_coinche_baseline_rate` and `test_ew_ai_can_coinche_ns_taker_under_seed`.
+- **`tests/belatro/test_event_bus.py` (H3 backfill)** — `test_raising_subscriber_does_not_skip_siblings`.
+- **`tests/belatro/test_boss_modifiers_integration.py` (M3 backfill)** — `test_patched_state_rejects_only_underscore_boss_attrs`.
+
+### Verified clean (audit false positives — do not re-investigate)
+
+- **Dix-de-der is NOT double-counted.** `game.py:play_card` writes the live HUD's `current_round_points` on the 8th trick; `score_round` derives from `state.completed_tricks` independently. The two counters are independent — verified by reading both code paths.
+- **The `getattr(state, "_X", False)` boss-flag anti-pattern is already pinned.** `tests/belatro/test_boss_modifiers_integration.py::test_invariant_no_underscore_boss_attrs` covers it. No leading-underscore boss attribute resolves on a vanilla GameState.
+- **`AIMemory.last_voids_key` cross-round reset is already in place.** `ai.py:78` clears the cache key in the new-round branch alongside `played` / `known_voids` / `processed_tricks_count`. Covered by `tests/test_ai.py::test_void_cache_invalidates_across_rounds`.
+- **Negative-edition joker slot growth is intentionally irreversible.** No sell mechanism exists today; the asymmetry is by design and documented at the increment site (`belatro/run/shop.py:166-168`).
+
+### Deferred to 3.7.0
+
+- Full `score_round()` and `play_card()` helper splits (L4/L5/R2/R3). Both functions are long (~280 LOC / ~30 branches; ~130 LOC / ~18 branches respectively) but the natural extraction passes 15+ parameters between siblings; a clean split needs an intermediate `ScoringContext` / `PlayContext` dataclass, which is its own refactor.
+- Partner-jokers test coverage (T5) — `belatro/items/partner_jokers/{passive,risky,shaper}.py` are at ~0 % coverage per the perf audit. Out of scope for a single audit pass.
+- Player-facing coinche / surcoinche prompts when NS is taker. Today only the AI surcoinches NS-taker rounds; the `RoundUICallbacks` layer doesn't expose a `prompt_surcoinche` callback yet.
+
 ## [3.5.0] - 2026-05-12
 
 Comprehensive bug-hunt, game-mechanic audit, and performance pass over both the classic Belote engine and the BelAtro roguelite layer. A three-Explore-agent audit produced ~30 candidate findings; verification against the source rejected several as false positives (documented below) and confirmed **15 actionable items** plus **1 latent bug surfaced during implementation**. **24 new regression tests** land here (592 total, up from 568). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-tidy-meerkat.md`.

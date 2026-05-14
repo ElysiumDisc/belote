@@ -164,3 +164,97 @@ def test_score_round_sums_to_card_total_sans_atout() -> None:
         assert table_total == 130, (
             f"seed={seed}: SA table_taker+defender = {table_total}, expected 130"
         )
+
+
+# ---------------------------------------------------------------------------
+# 3.6.0 audit T1 — additional invariants
+# ---------------------------------------------------------------------------
+
+
+def test_chute_and_capot_are_mutually_exclusive() -> None:
+    """Invariant: a single round outcome cannot be both `is_capot` AND
+    `is_failed`-as-defender-capot AND credit the taker. Specifically,
+    `is_capot=True AND is_failed=True` means the defenders capot'd the
+    taker — a valid combination — but credit_taker_pts must then be 0.
+    """
+    for seed in range(30):
+        rng = random.Random(seed)
+        state = _drive_full_round(rng, Suit.SPADES)
+        bd = score_round(state)
+        if bd.is_capot and bd.is_failed:
+            # Defender capot. Taker earns 0 card-pts credit.
+            assert bd.credit_taker_pts == 0, (
+                f"seed={seed}: defender capot but credit_taker_pts={bd.credit_taker_pts}"
+            )
+        if bd.is_capot and not bd.is_failed:
+            # Taker capot. Defenders earn 0 card-pts credit.
+            assert bd.credit_defender_pts == 0, (
+                f"seed={seed}: taker capot but credit_defender_pts={bd.credit_defender_pts}"
+            )
+
+
+def test_dynamic_trump_never_overrides_sans_atout() -> None:
+    """The `dynamic_trump` boss (L'Anarchie) rotates trump every 2 tricks,
+    but Sans Atout intentionally has `trump=None`. Silently flipping
+    trump to a real suit mid-round would break the SA contract. This
+    test exercises a full SA round under `dynamic_trump` and asserts
+    `state.trump is None` at every step.
+    """
+    from belote.game import BossModifiers, new_game, start_round
+
+    rng = random.Random(11)
+    state = start_round(new_game(), rng)
+    # Step to round 2 (SA legal there only) then bid SA.
+    for _ in range(4):
+        state = place_bid(state, None)
+    state = place_bid(state, "sans_atout")
+    # Inject dynamic_trump after bid (would normally be set by boss apply).
+    from dataclasses import replace as dc_replace
+    state = dc_replace(
+        state, boss_modifiers=BossModifiers(dynamic_trump=True)
+    )
+
+    while state.phase == Phase.PLAYING:
+        assert state.trump is None, (
+            "Sans Atout invariant: state.trump must remain None even under "
+            f"dynamic_trump (current trump={state.trump})"
+        )
+        legal = legal_cards(state, state.turn)
+        assert legal
+        state = play_card(state, rng.choice(legal))
+
+
+def test_no_consecutive_team_wins_invariant_when_rupture_active() -> None:
+    """When the `no_consecutive_team_wins` (La Rupture) boss flag is on,
+    the 8th-trick winner must flip teams if the first 7 tricks all went
+    to one side. We don't simulate the full path-dependent rupture
+    behaviour here — that's covered by the boss integration tests; the
+    invariant we lock is: under Rupture, no team can sweep all 8 tricks.
+    """
+    from belote.game import BossModifiers, new_game, start_round, team_of
+
+    sweeps = 0
+    for seed in range(30):
+        rng = random.Random(seed)
+        state = start_round(new_game(), rng)
+        from dataclasses import replace as dc_replace
+        state = dc_replace(
+            state, boss_modifiers=BossModifiers(no_consecutive_team_wins=True)
+        )
+        state = place_bid(state, state.up_card.suit)
+        while state.phase == Phase.PLAYING:
+            legal = legal_cards(state, state.turn)
+            state = play_card(state, rng.choice(legal))
+        # Compute trick winners ourselves so we don't rely on score internals.
+        from belote.game import compute_trick_winners
+
+        winners = compute_trick_winners(state, state.trump, False)
+        ns = sum(1 for w in winners if w is not None and team_of(w) == 0)
+        ew = sum(1 for w in winners if w is not None and team_of(w) == 1)
+        assert ns < 8 and ew < 8, (
+            f"seed={seed}: Rupture invariant violated — one team swept all 8 "
+            f"tricks (NS={ns}, EW={ew})"
+        )
+        if ns == 8 or ew == 8:
+            sweeps += 1
+    assert sweeps == 0

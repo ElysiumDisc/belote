@@ -17,13 +17,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from belote.deck import Suit
 from belote.game import Phase, Seat, new_game, start_round
 from belote.input import Key, KeyEvent
-from belote.deck import Suit
 from belote.ui import prompts as prompts_module
-
 
 # ── Direct enum + reader behaviour ──────────────────────────────────────────
 

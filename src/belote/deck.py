@@ -5,6 +5,24 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+class Contract(str, Enum):
+    """Contract identifiers used throughout scoring, bidding, and serialisation.
+
+    Inherits from `str` so values ARE plain strings — existing
+    string-equality comparisons (`state.contract == "sans_atout"`) and JSON
+    round-trips keep working without code change. Equivalent to Python
+    3.11's `StrEnum` but compatible with the project's 3.10 target.
+    Added in 3.6.0 to give IDE / type-checker support at the comparison
+    sites that proliferate across scoring.py, ai.py, gameflow.py, and game.py.
+    """
+
+    NORMAL = "normal"
+    SANS_ATOUT = "sans_atout"
+    TOUT_ATOUT = "tout_atout"
+    COINCHE = "coinche"
+    SURCOINCHE = "surcoinche"
+
+
 class Suit(Enum):
     SPADES = "♠"
     HEARTS = "♥"
@@ -121,8 +139,13 @@ _NONTRUMP_ORDER: dict[Rank, int] = {
 }
 
 
-def trick_rank(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
-    """Higher value = stronger card. Returns 0-15 (trump cards get 8-15)."""
+def trick_rank(card: Card, trump: Suit | None, seven_eight_trump: bool = False) -> int:
+    """Higher value = stronger card. Returns 0-15 (trump cards get 8-15).
+
+    `trump=None` is the Sans Atout case (no trump suit). 3.6.0 audit L2:
+    annotation widened to `Suit | None` to match runtime callers; the
+    body's `==` checks already handled None correctly.
+    """
     is_trump = (
         trump == Suit.TOUT_ATOUT
         or card.suit == trump
@@ -133,12 +156,16 @@ def trick_rank(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
     return _NONTRUMP_ORDER[card.rank]
 
 
-def card_points(card: Card, trump: Suit, seven_eight_trump: bool = False) -> int:
+def card_points(card: Card, trump: Suit | None, seven_eight_trump: bool = False) -> int:
     """Point value of a card.
 
     Sum over all 32 cards = 152 in the four standard contracts. In TOUT_ATOUT,
     every card uses the trump scale, which sums to a different total (the
     BelAtro layer accounts for this in its scoring).
+
+    `trump=None` is the Sans Atout case — every card scores on the non-trump
+    scale. 3.6.0 audit L2: annotation widened to `Suit | None` to match
+    the actual SA callers in scoring.py.
     """
     is_trump = (
         trump == Suit.TOUT_ATOUT

@@ -12,7 +12,7 @@ from .ansi import (
     RESET,
     gold_fg,
 )
-from .deck import Card, Suit
+from .deck import Card, Contract, Suit
 from .game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -191,7 +191,7 @@ def run_play(
             # animations or is on the "instant" speed preset.
             interruptible_sleep(MIN_TRICK_DWELL, None)
             if len(current.completed_tricks) == 7:  # This was the 8th trick
-                is_sa = current.contract == "sans_atout"
+                is_sa = current.contract == Contract.SANS_ATOUT
                 # Use the Rupture-aware helper so the announcement names the
                 # team that actually gets credited in scoring (see
                 # `compute_trick_winners` in game.py). Pass the projected

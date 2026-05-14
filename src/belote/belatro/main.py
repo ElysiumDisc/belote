@@ -170,7 +170,14 @@ class BelAtroGame:
         acc.deck_id = self.run.deck_id
         acc.carnet_active = self.run.show_north_hand
         acc.target_score = self.run.target_score
-        acc.contract_levels = self.run.contract_levels
+        # `run.contract_levels` is typed as the wider `dict[str, dict[str, Any]]`
+        # to avoid an import cycle; the accumulator's TypedDict-typed reads
+        # are checked at the consumer side. The cast keeps mypy quiet on the
+        # boundary.
+        from typing import cast
+
+        from belote.belatro.core.scoring import ContractReward
+        acc.contract_levels = cast("dict[str, ContractReward]", self.run.contract_levels)
         acc.permanent_chips = self.run.permanent_chips
         acc.permanent_mult = self.run.permanent_mult
         acc.attach_jokers(self.run.jokers + self.run.partner.jokers)
@@ -253,6 +260,11 @@ class BelAtroGame:
 
             def on_round_end(self, breakdown: object) -> None:
                 pass
+
+            def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
+                """3.7.1 D3: ask the NS taker whether to surcoinche after EW coinches."""
+                prompt = f"{coincheur.name} coinched! Surcoinche back?"
+                return BelAtroAnnounce.yes_no(prompt, self.reader)
 
         # Check if boss
         boss = None

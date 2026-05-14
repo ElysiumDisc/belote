@@ -32,11 +32,18 @@ class PatchedGameState:
         step. The `getattr(state, "_X", False)` reading anti-pattern is locked
         against in tests/belatro/test_boss_modifiers_integration.py
         `test_invariant_no_underscore_boss_attrs`.
+
+        3.6.0 (audit M3): narrowed the leading-underscore guard so it only
+        rejects `_X` where `X` is an actual BossModifiers field name — the
+        precise anti-pattern. Legitimate GameState scalars like `_chips`,
+        `_mult`, `_joker_state`, `_rng` are now patchable through this
+        proxy, which a future joker / boss effect may need.
         """
-        if attr.startswith("_"):
+        if attr.startswith("_") and attr[1:] in _BOSS_FIELDS:
             raise ValueError(
-                f"patch() received leading-underscore attr {attr!r}; the 3.0.x shim "
-                "was removed in 3.1.0 — use the unprefixed boss field name."
+                f"patch() received leading-underscore boss attr {attr!r}; the "
+                "3.0.x shim was removed in 3.1.0 — use the unprefixed boss "
+                f"field name ({attr[1:]!r})."
             )
 
         if attr in _BOSS_FIELDS:

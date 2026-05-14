@@ -1934,3 +1934,80 @@ class TestLeJugementRarity:
         finally:
             reg_mod.registry.get_available_jokers = orig  # type: ignore[assignment]
         _ = tarot_mod  # silence unused-import lint
+
+
+# ─── 3.7.1 BA-L2 regression: L'Accumulateur credits team, not seat ────────
+
+
+class TestLAccumulateurTeamCredit:
+    """3.7.1 BA-L2: L'Accumulateur credits any NS trick win, not just South.
+
+    Pre-3.7.1 the joker gated on `event.winner == Seat.SOUTH`, silently
+    dropping +5 chips per 7/8 whenever the partner (North) won the trick.
+    The description says "you win in a trick" — in BelAtro "you" = team
+    (NS), same convention as Le Patriote / Le Premier Sang fixed in 3.5.0.
+    """
+
+    def setup_method(self) -> None:
+        from belote.belatro.items.jokers.hand_comp import LAccumulateur
+
+        self.joker = LAccumulateur()
+        self.state: dict = {}
+        self.joker.on_round_start(self.state)
+
+    def _trick_with_seven(self, winner: Seat) -> object:
+        return make_trick_event(
+            winner=winner,
+            cards=(
+                Card(Suit.HEARTS, Rank.SEVEN),
+                Card(Suit.HEARTS, Rank.NINE),
+                Card(Suit.HEARTS, Rank.KING),
+                Card(Suit.HEARTS, Rank.ACE),
+            ),
+            trump=Suit.HEARTS,
+        )
+
+    def test_south_win_credits(self) -> None:
+        self.joker.on_trick_won(self._trick_with_seven(Seat.SOUTH), self.state)
+        assert self.state["laccumulateur_stored_chips"] == 5
+
+    def test_north_partner_win_credits(self) -> None:
+        """Partner (NORTH) trick wins must credit — the BA-L2 fix."""
+        self.joker.on_trick_won(self._trick_with_seven(Seat.NORTH), self.state)
+        assert self.state["laccumulateur_stored_chips"] == 5
+
+    def test_east_win_does_not_credit(self) -> None:
+        self.joker.on_trick_won(self._trick_with_seven(Seat.EAST), self.state)
+        assert self.state["laccumulateur_stored_chips"] == 0
+
+    def test_west_win_does_not_credit(self) -> None:
+        self.joker.on_trick_won(self._trick_with_seven(Seat.WEST), self.state)
+        assert self.state["laccumulateur_stored_chips"] == 0
+
+    def test_mixed_round_credits_only_ns_tricks(self) -> None:
+        """Realistic round: NS and EW trade tricks; only NS counts."""
+        self.joker.on_trick_won(self._trick_with_seven(Seat.SOUTH), self.state)  # +5
+        self.joker.on_trick_won(self._trick_with_seven(Seat.EAST), self.state)   # +0
+        self.joker.on_trick_won(self._trick_with_seven(Seat.NORTH), self.state)  # +5
+        self.joker.on_trick_won(self._trick_with_seven(Seat.WEST), self.state)   # +0
+        assert self.state["laccumulateur_stored_chips"] == 10
+
+    def test_credits_eight_too_not_just_seven(self) -> None:
+        """Description: 'every 7 OR 8 you win' — both ranks count."""
+        from belote.belatro.engine.event_bus import TrickWonEvent
+
+        evt = TrickWonEvent(
+            winner=Seat.NORTH,
+            cards=(
+                Card(Suit.HEARTS, Rank.SEVEN),
+                Card(Suit.HEARTS, Rank.EIGHT),
+                Card(Suit.SPADES, Rank.KING),
+                Card(Suit.DIAMONDS, Rank.ACE),
+            ),
+            trick_number=1,
+            is_last=False,
+            card_points=0,
+            trump=Suit.HEARTS,
+        )
+        self.joker.on_trick_won(evt, self.state)
+        assert self.state["laccumulateur_stored_chips"] == 10

@@ -278,3 +278,29 @@ def test_invariant_no_underscore_boss_attrs() -> None:
     # And the canonical access path still works.
     assert state.boss_modifiers.no_belote is True
     assert state.boss_modifiers.kings_zero is True
+
+
+def test_patched_state_rejects_only_underscore_boss_attrs() -> None:
+    """3.6.0 audit M3: the leading-underscore guard in
+    PatchedGameState.patch should target ONLY the actual anti-pattern
+    (a boss-field name prefixed with `_`). Legitimate scalar GameState
+    fields like `_chips`, `_mult`, `_joker_state`, `_rng` must remain
+    patchable so a future joker/boss effect can adjust them."""
+    from belote.belatro.engine.modifier_patch import PatchedGameState
+    from belote.game import BossModifiers, GameState
+
+    state = GameState(hands=((), (), (), ()), boss_modifiers=BossModifiers())
+    proxy = PatchedGameState(state)
+
+    # The genuine anti-pattern must still raise.
+    import pytest
+    with pytest.raises(ValueError, match="leading-underscore"):
+        proxy.patch("_kings_zero", True)
+    with pytest.raises(ValueError, match="leading-underscore"):
+        proxy._no_belote = True  # via __setattr__ → patch
+
+    # Legitimate scalar GameState fields are allowed.
+    proxy.patch("_chips", 100)
+    assert proxy._chips == 100
+    proxy._mult = 2.5  # via __setattr__
+    assert proxy._mult == 2.5

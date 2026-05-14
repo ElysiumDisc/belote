@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from ..items.base import Joker, JokerResult
@@ -28,6 +28,32 @@ _SUIT_TO_CONTRACT: dict[Suit, str] = {
 }
 
 
+class ContractReward(TypedDict, total=False):
+    """Schema for a single entry in `BelAtroRun.contract_levels` (3.6.0).
+
+    Planet items at the shop bump their associated contract's reward — the
+    populated keys depend on the planet. `total=False` permits partial
+    entries; the TypedDict catches typos (`bonus_mult_per_trick` vs
+    `bonus_per_trick`) at type-check time. See `belatro/items/planets.py`
+    for the producing site of each key.
+    """
+
+    # Per-suit (Saturn / Venus / Mercury / Jupiter): trick-level bonuses
+    add_chips: int          # +chips per trick won on this contract
+    add_mult: float         # +mult per trick won on this contract (Venus: 0.3)
+    jack_9_bonus: int       # +chips per Jack/Nine in a won trick
+    # The Moon (Sans Atout)
+    honor_bonus: int        # +chips per honor card in a won trick
+    # The Sun (Tout Atout)
+    bonus_mult_per_trick: float  # +mult per trick past the 4th (Sun: 1.0)
+    # Mercury planet round-end
+    add_money: int          # money awarded at round-end on success
+    # Pluto (Capot)
+    capot_bonus: int        # +chips on capot success
+    # Libra (Coinche)
+    coinche_multiplier: float  # +mult per coinche level on NS success (Libra: 1.0)
+
+
 @dataclass(slots=True)
 class ScoreAccumulator:
     """
@@ -40,7 +66,7 @@ class ScoreAccumulator:
     partner_jokers_double: bool = False
     partner_tier: int = 1  # Phase 2.3 — 0=degraded … 4=elite
     target_score: int = 80
-    contract_levels: dict[str, Any] = field(default_factory=dict)
+    contract_levels: dict[str, ContractReward] = field(default_factory=dict)
     permanent_chips: int = 0
     permanent_mult: float = 1.0
     _jokers: list[Joker] = field(default_factory=list)
@@ -241,12 +267,12 @@ class ScoreAccumulator:
                     and not event.breakdown.is_failed
                 ):
                     libra_reward = self.contract_levels.get("coinche", {})
-                    libra_mult = libra_reward.get("coinche_multiplier", 0)
+                    libra_mult: float = libra_reward.get("coinche_multiplier", 0)
                     if libra_mult:
-                        bonus = libra_mult * event.coinche_level
-                        new_mult += bonus
+                        libra_bonus: float = libra_mult * event.coinche_level
+                        new_mult += libra_bonus
                         self._log.append(
-                            f"Balance: +{bonus} Mult (coinche×{event.coinche_level})"
+                            f"Balance: +{libra_bonus} Mult (coinche×{event.coinche_level})"
                         )
             _fire_jokers("on_round_end", event)
 

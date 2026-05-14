@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .stats import Statistics
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Achievement:
     id: str
     title: str
@@ -56,6 +56,9 @@ ACHIEVEMENTS: tuple[Achievement, ...] = (
 )
 
 
+_ACHIEVEMENT_BY_ID: dict[str, Achievement] = {a.id: a for a in ACHIEVEMENTS}
+
+
 def evaluate_round(stats: Statistics, *, points_scored: int, was_capot: bool) -> list[Achievement]:
     """Check post-round triggers; return list of newly unlocked achievements.
 
@@ -65,10 +68,7 @@ def evaluate_round(stats: Statistics, *, points_scored: int, was_capot: bool) ->
 
     def _try(aid: str) -> None:
         if stats.unlock_achievement(aid):
-            for a in ACHIEVEMENTS:
-                if a.id == aid:
-                    newly.append(a)
-                    break
+            newly.append(_ACHIEVEMENT_BY_ID[aid])
 
     if was_capot:
         if stats.capots_achieved == 1:
@@ -91,10 +91,7 @@ def evaluate_game(
 
     def _try(aid: str) -> None:
         if stats.unlock_achievement(aid):
-            for a in ACHIEVEMENTS:
-                if a.id == aid:
-                    newly.append(a)
-                    break
+            newly.append(_ACHIEVEMENT_BY_ID[aid])
 
     if won and difficulty == "hard":
         _try("win_hard")

@@ -181,15 +181,18 @@ def register_all_items() -> None:
         if isinstance(attr, type) and issubclass(attr, Voucher) and attr is not Voucher:
             registry.register_voucher(attr)
 
-    # 3.0.1: assert the HUD synergy registry references only real joker IDs.
-    # Catches typos at module-init time rather than letting the badge silently
-    # never fire. Imported lazily to avoid a circular import at module load.
+    # 3.6.0: enforce that the HUD synergy registry references only real joker
+    # IDs. Catches typos at module-init time rather than letting the badge
+    # silently never fire. Use an explicit raise (not `assert`) so the check
+    # survives `python -O` / `PYTHONOPTIMIZE=1` in packaged installs. Imported
+    # lazily to avoid a circular import at module load.
     from ..ui.hud import validate_synergy_ids
 
     missing = validate_synergy_ids()
-    assert not missing, (
-        f"belatro/ui/hud.py::_SYNERGY_PAIRS references unregistered joker IDs: "
-        f"{missing}. Either register the joker or remove the pair."
-    )
+    if missing:
+        raise RuntimeError(
+            f"belatro/ui/hud.py::_SYNERGY_PAIRS references unregistered joker IDs: "
+            f"{missing}. Either register the joker or remove the pair."
+        )
 
     _registered = True

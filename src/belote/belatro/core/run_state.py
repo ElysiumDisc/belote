@@ -68,7 +68,11 @@ class BelAtroRun:
     deck_id: str = "classique"
     card_enhancements: dict[str, Any] = field(default_factory=dict)  # card_id → Enhancement
     show_north_hand: bool = False  # set True by LeCarnet voucher
-    contract_levels: dict[str, Any] = field(default_factory=dict)  # contract_id → planet reward dict
+    # 3.6.0 audit R4: typed via `ContractReward` (TypedDict) at the consuming
+    # site (`belatro.core.scoring.ScoreAccumulator`). Stored here as the wider
+    # `dict[str, dict]` to avoid an import cycle through items/planets; the
+    # consumer's TypedDict-annotated reads still get IDE/type-checker support.
+    contract_levels: dict[str, dict[str, Any]] = field(default_factory=dict)
     gold_seal_aces: bool = False  # L'Aristocrate: Aces won → +$1 each
     corrupted_pool_visible: bool = False  # L'Anarchiste: corrupted shop pool revealed
     surcoinche_unlocked: bool = False  # La Surcoinche voucher: enables AI surcoinche

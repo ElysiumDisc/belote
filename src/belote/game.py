@@ -6,7 +6,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Final, Literal
 
-from .deck import Card, Rank, Suit, make_deck, trick_rank
+from .deck import Card, Contract, Rank, Suit, make_deck, trick_rank
 from .deck import deal as deal_cards_
 from .deck import shuffle as shuffle_deck_
 
@@ -393,29 +393,34 @@ def place_bid(state: GameState, bid: BidValue) -> GameState:
         # special TOUT_ATOUT marker for TA, a normal suit otherwise).
         if bid == SANS_ATOUT_BID:
             new_trump: Suit | None = None
-            new_contract = "sans_atout"
+            new_contract: str = Contract.SANS_ATOUT
         elif bid == Suit.TOUT_ATOUT:
             new_trump = Suit.TOUT_ATOUT
-            new_contract = "tout_atout"
+            new_contract = Contract.TOUT_ATOUT
         else:
             assert isinstance(bid, Suit)
             new_trump = bid
-            new_contract = "normal"
+            new_contract = Contract.NORMAL
 
         # Pre-calculate belote holders. Belote = K+Q of trump. There is no
         # unique K+Q-of-trump under TA (every suit acts as trump) or SA (no
-        # trump at all), so belote is disabled for both contracts.
+        # trump at all), so belote is disabled for both contracts. 3.6.0
+        # (audit L1): single-pass per hand — previously rebuilt a set of all
+        # (rank,suit) pairs then re-iterated 4 suits, 5× more work than
+        # tracking which suits saw a King and which saw a Queen.
         belote_holders: dict[Suit, Seat] = {}
-        if new_contract == "normal":
+        if new_contract == Contract.NORMAL:
             for s_idx in range(4):
                 seat = Seat(s_idx)
-                hand = new_hands[s_idx]
-                hand_set = {(c.rank, c.suit) for c in hand}
-                for suit in Suit:
-                    if not suit.is_card_suit:
-                        continue
-                    if (Rank.KING, suit) in hand_set and (Rank.QUEEN, suit) in hand_set:
-                        belote_holders[suit] = seat
+                king_suits: set[Suit] = set()
+                queen_suits: set[Suit] = set()
+                for c in new_hands[s_idx]:
+                    if c.rank == Rank.KING:
+                        king_suits.add(c.suit)
+                    elif c.rank == Rank.QUEEN:
+                        queen_suits.add(c.suit)
+                for suit in king_suits & queen_suits:
+                    belote_holders[suit] = seat
 
         # Pre-calculate declarations
         from .scoring import get_declarations
@@ -657,7 +662,7 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
     se_trump = state.boss_modifiers.seven_eight_trump
-    is_sa = state.contract == "sans_atout"
+    is_sa = state.contract == Contract.SANS_ATOUT
 
     res_ids = _calculate_legal_cards_impl(
         hand_ids, state.trump, trick_ids, seat.value, se_trump, is_sa
@@ -849,28 +854,39 @@ def _trick_winner_seat_impl(
     return res
 
 
-def play_card(state: GameState, card: Card) -> GameState:
-    """Play a card. Returns new state, possibly advancing trick/round/phase."""
-    legal = legal_cards(state, state.turn)
-    if card not in legal:
-        raise IllegalMoveError(f"Card {card} is not a legal move for {state.turn.name}")
+@dataclass(frozen=True, slots=True)
+class _PlayContext:
+    """3.7.1 (D1): bundle of pre-computed values used across play_card helpers.
 
-    t = state.turn.value
-    old_hand = state.hands[t]
-    idx = old_hand.index(card)
-    new_hand = old_hand[:idx] + old_hand[idx + 1 :]
-    new_hands = state.hands[:t] + (new_hand,) + state.hands[t + 1 :]
+    Built once at the top of `play_card`; threaded into the per-section
+    helpers so they don't each re-derive the same fields off GameState.
+    Internal — no public consumers.
+    """
+    state: GameState
+    trump: Suit | None
+    is_sa: bool
+    se_trump: bool
 
-    new_trick = state.current_trick + (TrickCard(state.turn, card),)
 
-    # Check for belote/rebelote announcements; reset each play so popup fires only once
-    announced = None
-    trump = state.trump  # always set during PLAYING phase
+def _record_belote_announcement(
+    ctx: _PlayContext, card: Card
+) -> tuple[list[bool], Seat | None, str | None]:
+    """Update belote_tracker / belote_announcer if the played card triggers it.
+
+    Returns (belote_tracker, belote_announcer, announced_message).
+    """
+    state = ctx.state
     belote_tracker = list(state.belote_tracker)
     belote_announcer = state.belote_announcer
-    if trump and state.belote_holders.get(trump) == state.turn and not state.boss_modifiers.no_belote:
-        is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
+    announced: str | None = None
 
+    trump = ctx.trump
+    if (
+        trump
+        and state.belote_holders.get(trump) == state.turn
+        and not state.boss_modifiers.no_belote
+    ):
+        is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
         if is_k_q:
             if not belote_tracker[0]:
                 belote_tracker[0] = True
@@ -882,107 +898,153 @@ def play_card(state: GameState, card: Card) -> GameState:
             elif not belote_tracker[1]:
                 belote_tracker[1] = True
                 announced = "Rebelote!"
+    return belote_tracker, belote_announcer, announced
 
-    # Check if trick is complete (4 cards)
-    if len(new_trick) == 4:
-        se_trump = state.boss_modifiers.seven_eight_trump
-        is_sa = state.contract == "sans_atout"
-        winner = trick_winner_seat(new_trick, trump, se_trump, is_sa)
 
-        # Boss: La Rupture (No consecutive team wins)
-        if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
-            last_winner = trick_winner_seat(state.completed_tricks[-1], trump, se_trump, is_sa)
-            if last_winner and winner and team_of(winner) == team_of(last_winner):
-                # Force the other team to win if they had any card in the trick
-                # or just pick the highest card of the other team.
-                # Simplified Balatro-style boss: the current winner's team is penalized.
-                # Actually, let's just pick the best card from the other team.
-                other_team_cards = [
-                    tc for tc in new_trick if team_of(tc.seat) != team_of(last_winner)
-                ]
-                if other_team_cards and (trump or is_sa):
-                    # Find best card among other team
-                    best_other = _current_trick_winner(
-                        other_team_cards, trump, new_trick[0].card.suit, se_trump, is_sa
-                    )
-                    if best_other:
-                        winner = best_other
+def _resolve_trick_winner(
+    ctx: _PlayContext, new_trick: tuple[TrickCard, ...]
+) -> Seat:
+    """Determine the trick winner, applying the La Rupture override.
 
-        if winner is None:
-            # Unreachable: trick has 4 cards and trump is set (PLAYING phase
-            # guarantees both). Surface this as a hard error instead of papering
-            # over what would be state corruption.
-            raise AssertionError(
-                "trick_winner_seat returned None for a complete 4-card trick — "
-                "GameState invariant violated."
-            )
+    La Rupture (`no_consecutive_team_wins`): if the natural winner is on the
+    same team as the previous trick's winner, swing the trick to the best
+    card of the other team. Raises AssertionError if `trick_winner_seat`
+    returns None (invariant violation — 4 cards + trump is set under PLAYING).
+    """
+    state = ctx.state
+    winner = trick_winner_seat(new_trick, ctx.trump, ctx.se_trump, ctx.is_sa)
 
-        new_completed = state.completed_tricks + (new_trick,)
-        tricks_count = len(new_completed)
+    if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
+        last_winner = trick_winner_seat(
+            state.completed_tricks[-1], ctx.trump, ctx.se_trump, ctx.is_sa
+        )
+        if last_winner and winner and team_of(winner) == team_of(last_winner):
+            other_team_cards = [
+                tc for tc in new_trick if team_of(tc.seat) != team_of(last_winner)
+            ]
+            if other_team_cards and (ctx.trump or ctx.is_sa):
+                best_other = _current_trick_winner(
+                    other_team_cards, ctx.trump, new_trick[0].card.suit, ctx.se_trump, ctx.is_sa
+                )
+                if best_other:
+                    winner = best_other
 
-        # Live HUD running total. Delegate to `scoring.trick_card_points`,
-        # the canonical helper that already centralises every boss zero-rank
-        # flag, `ban_clubs`, and the seven_eight_trump scale — so the HUD
-        # cannot drift from the eventual round score under multi-boss combos
-        # (e.g. ban_clubs + kings_zero on a clubs-led trick).
-        # Local import mirrors `get_declarations` above to avoid the
-        # scoring → game cycle.
-        contract_active = state.contract is not None
-        if contract_active:
-            from .scoring import trick_card_points
-            trick_pts: int = trick_card_points(state, new_trick)
-        else:
-            trick_pts = 0
-        ns_pts, ew_pts = state.current_round_points
+    if winner is None:
+        # Unreachable: trick has 4 cards and trump is set (PLAYING phase
+        # guarantees both). Surface this as a hard error instead of papering
+        # over what would be state corruption.
+        raise AssertionError(
+            "trick_winner_seat returned None for a complete 4-card trick — "
+            "GameState invariant violated."
+        )
+    return winner
+
+
+def _compute_live_round_points(
+    ctx: _PlayContext,
+    new_trick: tuple[TrickCard, ...],
+    winner: Seat,
+    tricks_count: int,
+) -> tuple[int, int]:
+    """Live HUD running total: trick points + dix-de-der on trick 8.
+
+    Delegates per-trick points to `scoring.trick_card_points` (canonical
+    helper that already applies every boss zero-rank flag, `ban_clubs`,
+    and the seven_eight_trump scale) so the HUD cannot drift from the
+    eventual round score under multi-boss combos.
+    """
+    state = ctx.state
+    if state.contract is not None:
+        # Local import to break the scoring → game cycle.
+        from .scoring import trick_card_points
+        trick_pts: int = trick_card_points(state, new_trick)
+    else:
+        trick_pts = 0
+
+    ns_pts, ew_pts = state.current_round_points
+    if team_of(winner) == 0:
+        ns_pts += trick_pts
+    else:
+        ew_pts += trick_pts
+
+    # Last trick bonus (suppressed by Le Zéro Final boss).
+    if tricks_count == 8 and not state.boss_modifiers.no_dix_de_der:
         if team_of(winner) == 0:
-            ns_pts += trick_pts
+            ns_pts += 10
         else:
-            ew_pts += trick_pts
+            ew_pts += 10
+    return ns_pts, ew_pts
 
-        # Last trick bonus (suppressed by Le Zéro Final boss)
-        if tricks_count == 8 and not state.boss_modifiers.no_dix_de_der:
-            if team_of(winner) == 0:
-                ns_pts += 10
-            else:
-                ew_pts += 10
 
-        new_round_points = (ns_pts, ew_pts)
+def _rotate_dynamic_trump(ctx: _PlayContext, tricks_count: int) -> Suit | None:
+    """L'Anarchie boss: rotate trump every 2 tricks (suppressed under SA)."""
+    state = ctx.state
+    if (
+        state.boss_modifiers.dynamic_trump
+        and state.contract != Contract.SANS_ATOUT
+        and tricks_count % 2 == 0
+        and tricks_count < 8
+    ):
+        possible = [s for s in Suit if s != ctx.trump and s.is_card_suit]
+        return state._rng.choice(possible)
+    return ctx.trump
 
-        # Boss: L'Anarchie (Trump changes every 2 tricks). Suppressed under
-        # Sans Atout — there's no trump to rotate, and silently flipping
-        # `state.trump` from None to a real suit would break the SA contract
-        # mid-round.
-        current_trump = trump
-        if (
-            state.boss_modifiers.dynamic_trump
-            and state.contract != "sans_atout"
-            and tricks_count % 2 == 0
-            and tricks_count < 8
-        ):
-            possible = [s for s in Suit if s != trump and s.is_card_suit]
-            current_trump = state._rng.choice(possible)
 
-        # Check if round is complete (8 tricks)
-        if tricks_count >= 8:
-            # Round over
-            return replace(
-                state,
-                hands=tuple(new_hands),
-                current_trick=(),
-                completed_tricks=new_completed,
-                last_trick_winner=winner,
-                leader=winner,
-                turn=winner,
-                phase=Phase.SCORING,
-                announced=announced,
-                belote_tracker=(belote_tracker[0], belote_tracker[1]),
-                belote_announcer=belote_announcer,
-                first_trick_done=True,
-                current_round_points=new_round_points,
-                trump=current_trump,
-            )
-        # Next trick led by winner
-        first_trick_done = state.first_trick_done or tricks_count >= 1
+def play_card(state: GameState, card: Card) -> GameState:
+    """Play a card. Returns new state, possibly advancing trick/round/phase.
+
+    3.7.1 (D1): orchestrator over `_record_belote_announcement`,
+    `_resolve_trick_winner`, `_compute_live_round_points`, and
+    `_rotate_dynamic_trump`. Behaviour unchanged from 3.6.0.
+    """
+    legal = legal_cards(state, state.turn)
+    if card not in legal:
+        raise IllegalMoveError(f"Card {card} is not a legal move for {state.turn.name}")
+
+    # Remove card from the playing seat's hand.
+    t = state.turn.value
+    old_hand = state.hands[t]
+    idx = old_hand.index(card)
+    new_hand = old_hand[:idx] + old_hand[idx + 1 :]
+    new_hands = state.hands[:t] + (new_hand,) + state.hands[t + 1 :]
+
+    new_trick = state.current_trick + (TrickCard(state.turn, card),)
+
+    ctx = _PlayContext(
+        state=state,
+        trump=state.trump,
+        is_sa=state.contract == Contract.SANS_ATOUT,
+        se_trump=state.boss_modifiers.seven_eight_trump,
+    )
+
+    # Belote/Rebelote announcement; resets the announced popup each play so it
+    # fires exactly once per Belote-or-Rebelote event.
+    belote_tracker, belote_announcer, announced = _record_belote_announcement(ctx, card)
+
+    # Mid-trick: just advance the turn.
+    if len(new_trick) != 4:
+        next_turn = state.turn.next_seat()
+        return replace(
+            state,
+            hands=tuple(new_hands),
+            current_trick=new_trick,
+            turn=next_turn,
+            announced=announced,
+            belote_tracker=(belote_tracker[0], belote_tracker[1]),
+            belote_announcer=belote_announcer,
+        )
+
+    # Trick complete: resolve winner (honouring La Rupture override).
+    winner = _resolve_trick_winner(ctx, new_trick)
+
+    new_completed = state.completed_tricks + (new_trick,)
+    tricks_count = len(new_completed)
+
+    new_round_points = _compute_live_round_points(ctx, new_trick, winner, tricks_count)
+    current_trump = _rotate_dynamic_trump(ctx, tricks_count)
+
+    # Round complete after 8 tricks → SCORING phase.
+    if tricks_count >= 8:
         return replace(
             state,
             hands=tuple(new_hands),
@@ -991,24 +1053,32 @@ def play_card(state: GameState, card: Card) -> GameState:
             last_trick_winner=winner,
             leader=winner,
             turn=winner,
-            phase=Phase.PLAYING,
+            phase=Phase.SCORING,
             announced=announced,
             belote_tracker=(belote_tracker[0], belote_tracker[1]),
             belote_announcer=belote_announcer,
-            first_trick_done=first_trick_done,
+            first_trick_done=True,
             current_round_points=new_round_points,
             trump=current_trump,
         )
-    # Next player in trick
-    next_turn = state.turn.next_seat()
+
+    # Next trick led by the winner.
+    first_trick_done = state.first_trick_done or tricks_count >= 1
     return replace(
         state,
         hands=tuple(new_hands),
-        current_trick=new_trick,
-        turn=next_turn,
+        current_trick=(),
+        completed_tricks=new_completed,
+        last_trick_winner=winner,
+        leader=winner,
+        turn=winner,
+        phase=Phase.PLAYING,
         announced=announced,
         belote_tracker=(belote_tracker[0], belote_tracker[1]),
         belote_announcer=belote_announcer,
+        first_trick_done=first_trick_done,
+        current_round_points=new_round_points,
+        trump=current_trump,
     )
 
 
@@ -1069,8 +1139,15 @@ _SUIT_IDX_CACHE: Final[dict[Suit | None, dict[Suit, int]]] = {
 }
 
 
+@lru_cache(maxsize=512)
 def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
-    """Sort hand by suit and rank (trump first, then others, honors together)."""
+    """Sort hand by suit and rank (trump first, then others, honors together).
+
+    3.6.0 (audit P4): cached because the UI render loop hits the same
+    `(hand, trump)` pair on every redraw. Benchmark showed ~34% wall-clock
+    win on a 400-input pattern. The cache key is bounded: at most 8! / dup
+    permutations × 6 trumps, and `lru_cache` is bounded at 512.
+    """
     suit_idx = _SUIT_IDX_CACHE.get(trump) or _build_suit_idx(trump)
     # Under Tout Atout every card is trump, so the trump-rank ladder applies
     # to *every* suit. `c.suit == trump` would always be False here because

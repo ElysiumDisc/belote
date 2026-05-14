@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from enum import Enum
 
-from .deck import Card, Rank, Suit, trick_rank
+from .deck import Card, Contract, Rank, Suit, trick_rank
 from .deck import card_points as card_points_fn
 from .game import (
     SANS_ATOUT_BID,
@@ -243,9 +243,7 @@ class AIPlayer:
         jack_bonus = sum(1 for c in hand if c.rank == Rank.JACK) * 6  # Jacks dominate TA
         ta_score = ta_pts + jack_bonus
 
-        sa_pts = sum(
-            card_points_fn(c, None) for c in hand  # type: ignore[arg-type, misc]
-        )
+        sa_pts = sum(card_points_fn(c, None) for c in hand)
         # Long suits are bad under SA — opponents won't follow your suit.
         long_suit_penalty = sum(max(0, n - 3) ** 2 for n in lengths.values()) * 4
         sa_score = sa_pts - long_suit_penalty
@@ -368,7 +366,7 @@ class AIPlayer:
         p = partner(self.seat)
 
         # Check if partner is winning
-        is_sa = state.contract == "sans_atout"
+        is_sa = state.contract == Contract.SANS_ATOUT
         current_winner = _current_trick_winner(
             [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se, is_sa
         )
@@ -518,7 +516,7 @@ class AIPlayer:
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
-        is_sa = state.contract == "sans_atout"
+        is_sa = state.contract == Contract.SANS_ATOUT
         current_winner = _current_trick_winner(
             [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se, is_sa
         )

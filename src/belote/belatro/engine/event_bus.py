@@ -13,12 +13,15 @@ and double-fire. The `clear()` method exists for that future use.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from belote.deck import Card, Suit
 from belote.game import Seat
+
+_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from belote.scoring import ScoringBreakdown
@@ -52,7 +55,7 @@ class DeclarationScoredEvent:
 
 @dataclass(frozen=True)
 class RoundEndEvent:
-    breakdown: "ScoringBreakdown"
+    breakdown: ScoringBreakdown
     # `taker_seat` is None when the round ended on an all-pass (no contract).
     taker_seat: Seat | None
     trump: Suit | None
@@ -100,8 +103,20 @@ class EventBus:
             self._handlers.remove(handler)
 
     def emit(self, event: AnyEvent) -> None:
+        # Isolate subscribers from one another: a single raising handler
+        # (typically a buggy joker on_event) must not skip the rest of the
+        # round's accumulator/unlock/score updates. KeyboardInterrupt and
+        # other BaseException paths still propagate so a user Ctrl-C can
+        # tear down the round.
         for h in list(self._handlers):
-            h(event)
+            try:
+                h(event)
+            except Exception:
+                _log.exception(
+                    "EventBus subscriber %r raised on %s; continuing with siblings.",
+                    h,
+                    type(event).__name__,
+                )
 
     def clear(self) -> None:
         """Drop every subscriber.

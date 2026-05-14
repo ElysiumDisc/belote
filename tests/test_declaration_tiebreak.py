@@ -12,7 +12,6 @@ from belote.deck import Card, Rank, Suit
 from belote.game import Carre, Seat, Sequence
 from belote.scoring import resolve_declarations
 
-
 _RANK_VAL = {
     Rank.SEVEN: 1, Rank.EIGHT: 2, Rank.NINE: 3, Rank.TEN: 4,
     Rank.JACK: 5, Rank.QUEEN: 6, Rank.KING: 7, Rank.ACE: 8,

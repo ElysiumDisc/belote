@@ -43,6 +43,37 @@ def test_clear_drops_all_handlers() -> None:
     assert a_calls == [1] and b_calls == [1]
 
 
+def test_raising_subscriber_does_not_skip_siblings(caplog) -> None:
+    """3.6.0 audit H3: a buggy joker on_event handler must not halt the
+    rest of the round's subscribers. The bus catches Exception, logs it,
+    and continues iterating. (BaseException — e.g. KeyboardInterrupt —
+    is intentionally not caught so a user Ctrl-C still tears down.)"""
+    bus = EventBus()
+    seen_before: list[int] = []
+    seen_after: list[int] = []
+
+    def good_before(_e: object) -> None:
+        seen_before.append(1)
+
+    def boom(_e: object) -> None:
+        raise RuntimeError("simulated joker crash")
+
+    def good_after(_e: object) -> None:
+        seen_after.append(1)
+
+    bus.subscribe(good_before)
+    bus.subscribe(boom)
+    bus.subscribe(good_after)
+
+    import logging
+    with caplog.at_level(logging.ERROR, logger="belote.belatro.engine.event_bus"):
+        bus.emit(_evt())
+
+    assert seen_before == [1]
+    assert seen_after == [1], "subscriber after a raising handler must still fire"
+    assert any("simulated joker crash" in rec.message or rec.exc_info for rec in caplog.records)
+
+
 def test_consecutive_rounds_use_independent_buses() -> None:
     """The current contract: drive_round() creates a fresh bus per round.
     Round 2 subscribers never see round 1 events, and vice versa.

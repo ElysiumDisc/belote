@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from belote.deck import Rank
-from belote.game import Seat, team_of
+from belote.game import team_of
 
 from ...engine.event_bus import RoundEndEvent, TrickWonEvent
 from ..base import Joker, JokerResult
@@ -85,7 +85,7 @@ class LAccumulateur(Joker):
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH:
+        if team_of(event.winner) == 0:
             count = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
             stored = state.get(f"{self.id}_stored_chips", 0)
             state[f"{self.id}_stored_chips"] = stored + (count * 5)
