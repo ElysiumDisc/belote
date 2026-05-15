@@ -84,14 +84,17 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (655 tests expected)
+# Full test suite (661 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.8.1):
-Current baseline (3.8.2):
+Current baseline (3.9.0):
 
-- **655 tests** passing.
+- **661 tests** passing (3.8.2 had 655; +6 in 3.9.0: yes_no EOF, NO_COLOR ×4, benchmark smoke).
+- 3.9.0 ships a clean three-agent audit pass (classic engine / BelAtro engine / items+UI). Confirmed bugs: one (LOW) — `BelAtroAnnounce.yes_no()` hung on `Key.EOF`, fixed in `src/belote/belatro/ui/announce.py:98`. New feature: `NO_COLOR` env-var support in `src/belote/ansi.py`. Cosmetic: deduped seat-order computation in `scoring.py` tie-break helpers. Tooling: `scripts/benchmark.py` gains an end-to-end `drive_round` rounds/sec probe and a `--smoke` flag pinned by `tests/test_benchmark_smoke.py`. Performance verdict: no measured hotspot — prior L1/L2/L3/D-pass audits already addressed the obvious paths. All 21 boss modifiers, 36 jokers, 8 planets, 12 tarots, 12 vouchers wired end-to-end. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-wise-puzzle.md`.
+
+Past baselines:
+
 - 3.8.2 completes the five-agent audit pass. Final hardening includes Tout Atout streak persistence in BelAtro, Quinte trigger refinement, belote-pair timing fixes for jokers, and declaration scoring correctness for carrés and long sequences.
 - Performance: test suite speed increased by mocking `interruptible_sleep`.
 - Regression coverage maintained at 100% for game-logic modules.
@@ -162,6 +165,10 @@ once at startup; toggling mid-run has no effect.
   `~/.local/share/belote/ghosts/<label>-<seed>.json`. The file is written
   once when the run ends. Useful for sharing or replaying interesting
   runs. Backed by `src/belote/belatro/ghost_run.py`.
+- `NO_COLOR=<any-non-empty>` — suppress truecolor SGR escapes from
+  `fg()` / `bg()` per the [no-color.org](https://no-color.org/) spec.
+  Bold/dim/underline/reverse/strikethrough and cursor sequences remain
+  (they aren't color). Added in 3.9.0. Backed by `src/belote/ansi.py`.
 
 ## Releasing a New Version
 

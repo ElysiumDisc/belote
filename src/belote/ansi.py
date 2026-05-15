@@ -1,9 +1,25 @@
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 
 from .themes import Theme, theme_manager
+
+# Respect https://no-color.org/. Read once at import; tests use
+# _refresh_no_color_from_env() after monkeypatch.setenv. Only color escapes
+# are suppressed; SGR formatting (BOLD/DIM/etc.) and cursor sequences remain,
+# per the spec.
+_NO_COLOR: bool = bool(os.environ.get("NO_COLOR", ""))
+
+
+def _refresh_no_color_from_env() -> None:
+    global _NO_COLOR
+    _NO_COLOR = bool(os.environ.get("NO_COLOR", ""))
+
+
+def no_color_active() -> bool:
+    return _NO_COLOR
 
 # ── Theme cache ────────────────────────────────────────────────────────────
 # Each color flavor (felt_bg, red_fg, etc.) is hit dozens of times per render.
@@ -58,13 +74,25 @@ def ansi_ljust(s: str, width: int) -> str:
 
 
 @lru_cache(maxsize=512)
-def fg(r: int, g: int, b: int) -> str:
+def _fg_seq(r: int, g: int, b: int) -> str:
     return f"\x1b[38;2;{r};{g};{b}m"
 
 
 @lru_cache(maxsize=512)
-def bg(r: int, g: int, b: int) -> str:
+def _bg_seq(r: int, g: int, b: int) -> str:
     return f"\x1b[48;2;{r};{g};{b}m"
+
+
+def fg(r: int, g: int, b: int) -> str:
+    if _NO_COLOR:
+        return ""
+    return _fg_seq(r, g, b)
+
+
+def bg(r: int, g: int, b: int) -> str:
+    if _NO_COLOR:
+        return ""
+    return _bg_seq(r, g, b)
 
 
 BOLD = "\x1b[1m"

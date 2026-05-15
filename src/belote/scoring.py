@@ -288,15 +288,21 @@ def resolve_declarations(
     ns_best_carre = _best_carre(ns_carres)
     ew_best_carre = _best_carre(ew_carres)
 
+    # Announce-order walk: clockwise from taker. Used by both tie-break
+    # resolvers below — compute once.
+    seat_order: tuple[Seat, ...] = ()
+    if taker is not None:
+        s1 = taker.next_seat()
+        s2 = s1.next_seat()
+        s3 = s2.next_seat()
+        seat_order = (taker, s1, s2, s3)
+
     def _resolve_tie_carre() -> int | None:
         if taker is None:
             return None  # legacy cancel behaviour
-        # Walk seats in announce order starting at the taker; the first seat
-        # holding a matching-rank carré wins the tie.
         assert ns_best_carre is not None and ew_best_carre is not None
         tied_rank = ns_best_carre.rank
-        order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
-        for s in order:
+        for s in seat_order:
             for c, cs in zip(ns_carres, ns_carre_seats, strict=True):
                 if cs == s and c.rank == tied_rank:
                     return 0
@@ -310,8 +316,7 @@ def resolve_declarations(
             return None
         assert ns_best_seq is not None and ew_best_seq is not None
         tied_strength = _sequence_strength(ns_best_seq)
-        order = [taker, taker.next_seat(), taker.next_seat().next_seat(), taker.next_seat().next_seat().next_seat()]
-        for s in order:
+        for s in seat_order:
             for seq, ss in zip(ns_seqs, ns_seq_seats, strict=True):
                 if ss == s and _sequence_strength(seq) == tied_strength:
                     return 0

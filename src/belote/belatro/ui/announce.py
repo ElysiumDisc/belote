@@ -78,7 +78,7 @@ class BelAtroAnnounce:
 
     @staticmethod
     def yes_no(prompt: str, reader: KeyReader) -> bool:
-        """Centered Y/N prompt. Returns True on Y/Enter, False on N/Esc/Q.
+        """Centered Y/N prompt. Returns True on Y/Enter, False on N/Esc/Q/EOF.
 
         Repaints in-place — no scroll on alt-screen-strict terminals. Used by
         the post-Ante-8 endless-mode offer.
@@ -95,7 +95,7 @@ class BelAtroAnnounce:
             event = reader.read()
             if event.key in (Key.ENTER,):
                 return True
-            if event.key in (Key.ESC, Key.QUIT):
+            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
                 return False
             if event.key == Key.CHAR and event.char:
                 ch = event.char.lower()

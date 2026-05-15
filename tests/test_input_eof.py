@@ -99,3 +99,17 @@ def test_eof_in_consumables_overlay_returns_false() -> None:
     overlay = ConsumablesOverlay(run, reader)
     assert overlay.open() is False
     assert reader.read.call_count == 1
+
+
+def test_announce_yes_no_returns_false_on_eof() -> None:
+    """BelAtroAnnounce.yes_no must exit on EOF — pre-3.9.0 it spun forever
+    when stdin was closed during the post-Ante-8 or surcoinche prompt.
+
+    Sibling methods banner() and score_popup() in the same file already
+    handle EOF; this test pins the inconsistency closed."""
+    from belote.belatro.ui.announce import BelAtroAnnounce
+
+    reader = MagicMock()
+    reader.read.return_value = KeyEvent(Key.EOF)
+    assert BelAtroAnnounce.yes_no("Continue?", reader) is False
+    assert reader.read.call_count == 1

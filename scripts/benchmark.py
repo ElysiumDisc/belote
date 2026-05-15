@@ -68,17 +68,16 @@ def benchmark_ai(difficulty: Difficulty, iterations: int = 50) -> float:
 
 def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
     from belote.belatro.core.scoring import ScoreAccumulator
-    from belote.belatro.engine.event_bus import EventBus, TrickWonEvent
+    from belote.belatro.engine.event_bus import TrickWonEvent
     from belote.belatro.items.jokers.contract import LeDiplomate
     from belote.deck import Card, Rank
-    from belote.game import GameState
 
     print(f"Benchmarking BelAtro State Update ({num_jokers} Jokers) over {iterations} iterations...")
 
     jokers = [LeDiplomate() for _ in range(num_jokers)]
     acc = ScoreAccumulator()
     acc.attach_jokers(jokers)
-    
+
     state = new_game()
     event = TrickWonEvent(
         winner=Seat.SOUTH,
@@ -102,28 +101,28 @@ def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
 
 
 def benchmark_scoring(iterations: int = 1000) -> float:
-    from belote.scoring import score_round
     from belote.deck import Card, Rank
-    from belote.game import TrickCard, Phase, replace
-    
+    from belote.game import Phase, TrickCard, replace
+    from belote.scoring import score_round
+
     print(f"Benchmarking score_round() over {iterations} iterations...")
-    
+
     state = new_game()
     state = replace(
-        state, 
-        phase=Phase.SCORING, 
-        trump=Suit.SPADES, 
+        state,
+        phase=Phase.SCORING,
+        trump=Suit.SPADES,
         taker=Seat.SOUTH,
         completed_tricks=tuple([(TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),) * 4] * 8),
         last_trick_winner=Seat.SOUTH
     )
-    
+
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
         _ = score_round(state)
         times.append(time.perf_counter() - start)
-        
+
     avg = statistics.mean(times) * 1000
     print(f"  Scoring Time: {avg:.3f}ms")
     return avg
@@ -132,23 +131,23 @@ def benchmark_scoring(iterations: int = 1000) -> float:
 def benchmark_deal(iterations: int = 1000) -> float:
     from belote.game import start_round
     print(f"Benchmarking start_round() (deal) over {iterations} iterations...")
-    
+
     state = new_game()
     rng = random.Random(42)
-    
+
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
         _ = start_round(state, rng)
         times.append(time.perf_counter() - start)
-        
+
     avg = statistics.mean(times) * 1000
     print(f"  Deal Time: {avg:.3f}ms")
     return avg
 
 
 def benchmark_legal_cards(iterations: int = 1000) -> float:
-    from belote.game import legal_cards, clear_legal_cards_cache, replace
+    from belote.game import clear_legal_cards_cache, legal_cards, replace
     print(f"Benchmarking legal_cards() (cache cleared per call) over {iterations} iterations...")
 
     state = new_game()
@@ -173,7 +172,7 @@ def benchmark_legal_cards_cached(iterations: int = 1000) -> float:
     `benchmark_legal_cards` above invalidates every iteration and so reflects
     worst-case-only time.
     """
-    from belote.game import legal_cards, clear_legal_cards_cache, replace
+    from belote.game import clear_legal_cards_cache, legal_cards, replace
     print(f"Benchmarking legal_cards() (warm cache) over {iterations} iterations...")
 
     state = new_game()
@@ -198,8 +197,8 @@ def benchmark_trick_scoring(iterations: int = 1000) -> float:
     (HUD running total) and again from `scoring.py::_calculate_base_points`
     (final round score). One of the hottest functions in a played round.
     """
-    from belote.game import TrickCard, replace
     from belote.deck import Card, Rank
+    from belote.game import TrickCard, replace
     from belote.scoring import trick_card_points
 
     print(f"Benchmarking trick_card_points() over {iterations} iterations...")
@@ -249,6 +248,55 @@ def benchmark_ai_legality_filter(iterations: int = 500) -> float:
     return avg
 
 
+def benchmark_belatro_round(rounds: int = 30, seed: int = 42) -> float:
+    """End-to-end BelAtro round throughput under a deterministic seed.
+
+    Drives a full round (bid → 8 tricks → score) headlessly via the same
+    round_driver path the game uses, with AI on every seat. The seed is
+    threaded into drive_round so the per-round work is reproducible — a
+    regression sentinel, not a wall-clock target.
+    """
+    from belote.belatro.core.scoring import ScoreAccumulator
+    from belote.belatro.engine.event_bus import EventBus
+    from belote.belatro.engine.round_driver import RoundUICallbacks, drive_round
+    from belote.belatro.partner.partner_state import PartnerState
+    from belote.deck import Card
+    from belote.game import GameState, legal_cards
+
+    class _HeadlessUI(RoundUICallbacks):
+        def prompt_bid(self, state: GameState) -> Suit | None:
+            return None  # pass; AI seats may take
+
+        def prompt_card(self, state: GameState) -> tuple[Card, GameState]:
+            return legal_cards(state, Seat.SOUTH)[0], state
+
+        def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None:
+            pass
+
+        def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None:
+            pass
+
+        def on_round_end(self, breakdown: object) -> None:
+            pass
+
+    print(f"Benchmarking drive_round() E2E over {rounds} rounds (seed={seed})...")
+
+    times = []
+    for i in range(rounds):
+        bus = EventBus()
+        partner = PartnerState()
+        acc = ScoreAccumulator()
+        start = time.perf_counter()
+        drive_round(bus=bus, partner=partner, ui_callbacks=_HeadlessUI(), acc=acc, seed=seed + i)
+        times.append(time.perf_counter() - start)
+
+    mean = statistics.mean(times) * 1000
+    p95 = sorted(times)[int(len(times) * 0.95) - 1] * 1000 if len(times) > 1 else mean
+    rps = 1.0 / statistics.mean(times) if times else 0.0
+    print(f"  E2E Round Time: mean {mean:.2f}ms, p95 {p95:.2f}ms ({rps:.1f} rounds/sec)")
+    return mean
+
+
 def run_benchmarks() -> None:
     print("=== Belote-CLI Performance Benchmark ===")
     benchmark_render()
@@ -265,9 +313,29 @@ def run_benchmarks() -> None:
     benchmark_legal_cards_cached()
     benchmark_trick_scoring()
     benchmark_ai_legality_filter()
+    print()
+    benchmark_belatro_round()
     print("========================================")
 
 
+def run_smoke() -> None:
+    """Tiny smoke pass: every benchmark runs once at minimum iteration count.
+    Used by the test suite to keep the script from rotting.
+    """
+    benchmark_render(iterations=2)
+    benchmark_ai(Difficulty.EASY, iterations=2)
+    benchmark_belatro_bus(iterations=2)
+    benchmark_scoring(iterations=2)
+    benchmark_deal(iterations=2)
+    benchmark_legal_cards(iterations=2)
+    benchmark_legal_cards_cached(iterations=2)
+    benchmark_trick_scoring(iterations=2)
+    benchmark_ai_legality_filter(iterations=2)
+    benchmark_belatro_round(rounds=2)
+
 
 if __name__ == "__main__":
-    run_benchmarks()
+    if "--smoke" in sys.argv:
+        run_smoke()
+    else:
+        run_benchmarks()

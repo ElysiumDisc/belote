@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-05-14
+
+Comprehensive bug-hunt, logic, and performance audit pass. Three parallel Explore agents covered the classic engine (`game.py` / `scoring.py` / `ai.py` / `gameflow.py` / `deck.py`), the BelAtro engine (`round_driver.py` / `modifier_patch.py` / `event_bus.py` / `belatro/core/scoring.py` / `boss.py` / `run_state.py` / `shop.py` / `belatro/main.py`), and the items catalogue + UI hot paths (`registry.py` + every joker / planet / tarot / voucher + `render.py` / `hud.py` / shop UI). Every load-bearing claim was spot-checked against the current code. **One real bug** (LOW), **one feature gap** filled, and a defensive cosmetic cleanup. Performance verdict: no measured hotspot — prior 3.6 / 3.7.1 / 3.8.0 audits already addressed the obvious paths. All 21 boss modifiers, 36 jokers, 8 planets, 12 tarots, 12 vouchers verified wired end-to-end. **+6 regression tests** (655 → 661). Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-wise-puzzle.md`.
+
+### Fixed
+
+- **`src/belote/belatro/ui/announce.py:98` (LOW) — `BelAtroAnnounce.yes_no()` no longer hangs on `Key.EOF`.** Pre-3.9.0 the prompt loop exited on `Key.ENTER`, `Key.ESC`, `Key.QUIT`, or character `y`/`n`/`o`, but had no `Key.EOF` return path. Two call sites in `belatro/main.py` (the post-Ante-8 endless prompt at line 137 and the player-side surcoinche prompt at line 267) would hang the process on Ctrl-D / piped-empty stdin / closed terminal. Established inconsistency: sibling `banner()` (line 75) and `score_popup()` (line 126) in the same file already handled EOF. Regression test in `tests/test_input_eof.py::test_announce_yes_no_returns_false_on_eof`.
+
+### Added
+
+- **`src/belote/ansi.py` — `NO_COLOR` env-var support** per the [no-color.org](https://no-color.org/) spec. When `NO_COLOR` is set to any non-empty value, `fg()` / `bg()` return the empty string. SGR formatting (`BOLD`, `DIM`, `REVERSE`, `UNDERLINE`, `STRIKETHROUGH`, `RESET`) and cursor/clear sequences are unchanged — they aren't color. Read once at import (mirrors `a11y._ENABLED`); `_refresh_no_color_from_env()` exported for tests. 4 new tests in `tests/test_no_color.py`.
+- **`scripts/benchmark.py::benchmark_belatro_round` (new)** — end-to-end `drive_round` rounds/sec probe under a deterministic seed (mean + p95 + rounds/sec). Regression sentinel for round-driver throughput. New `--smoke` flag runs every benchmark at iterations=2 for a fast CI-friendly check; pinned by `tests/test_benchmark_smoke.py`.
+
+### Changed
+
+- **`src/belote/scoring.py::resolve_declarations` (cosmetic)** — the 4-seat announce-order tuple (clockwise from taker) is now built once in the enclosing function and shared by `_resolve_tie_carre` and `_resolve_tie_seq` via closure. Pre-3.9.0 each helper rebuilt the same tuple inline. Behavior-preserving; the regression guard is the existing `tests/test_declaration_tiebreak.py` suite.
+- **`scripts/benchmark.py` cleanup** — auto-fixed 17 long-standing ruff issues (W293/W291/I001/F401) in the file as part of the enhancement-pass scope.
+
+### Audit verdict — verified clean, no fix needed
+
+- **Classic engine** (game.py / scoring.py / ai.py / gameflow.py / deck.py): all 19 game mechanics wired end-to-end (bidding pass/normal/TA/SA/coinche/surcoinche, trump-play follow/trump/overtrump/partner-master exception, declarations + tie-break, belote/rebelote, contract-aware Capot 220/348/252, Dix-de-der, litige, taker-failed redistribution). AI memoization (`processed_tricks_count` / `last_voids_key` / `last_partner_hand_key`) resets correctly on both new-round and undo paths.
+- **BelAtro engine**: all 21 boss modifiers patch → state → read end-to-end; no `boss.id == "…"` string branching anywhere; event bus correctly round-scoped; `ScoreAccumulator.update_state` already coalesces into one `replace()` per event; voucher idempotency guard live; endless mode (×2.2) scaling correct.
+- **Items + UI**: all 36 jokers' `on_event` signatures match bus dispatch; team-not-seat convention applied correctly (jokers checking "did our team win" use `team_of(event.winner) == 0`, partner jokers deliberately key on `Seat.NORTH`). Theme cache invalidates on theme change; `_card_face` and `visible_len` both `lru_cache(4096)` with proper invalidation; HUD opt-in rebuild via `force_hud=False` since 3.8.0. Shop layout: card frame 16 cells, gap 2→1→0 degradation works.
+
+### Performance verdict
+
+No measured hotspot. `dataclasses.replace()` on the frozen `GameState` runs ~256 calls/round at sub-µs each — well under the 1 ms/round budget. Joker triggers linear-scan over ≤ 5 jokers (max slots). The "enhancement plan" here is the regression sentinel (`benchmark_belatro_round`), not a speculative rewrite.
+
+### Internal
+
+- **Tests**: 655 → 661 (+6). yes_no EOF ×1, NO_COLOR ×4, benchmark smoke ×1.
+- **Strict gates**: pytest 661/661 green, mypy `--strict` 0 errors (77 files), ruff 0 violations.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+
 ## [3.8.2] - 2026-05-14
 
 Final logic audit and performance hardening. This release addresses the remaining edge cases identified during the deep-dive audit, focusing on BelAtro joker persistence, declaration scoring correctness, and test suite optimization. All 655 tests passing.
