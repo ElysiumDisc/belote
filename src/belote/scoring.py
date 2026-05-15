@@ -59,7 +59,9 @@ def get_declaration_points(decls: list[Sequence | Carre]) -> int:
     pts = 0
     for d in decls:
         if isinstance(d, Sequence):
-            pts += _SEQUENCE_POINTS.get(d.length, 0)
+            # 5+ cards is always a Quinte (100 pts)
+            length = min(d.length, 5)
+            pts += _SEQUENCE_POINTS.get(length, 0)
         elif isinstance(d, Carre):
             pts += _CARRE_POINTS.get(_VALUE_TO_RANK[d.rank], 0)
     return pts
@@ -226,7 +228,7 @@ def _carre_points(carre: Carre) -> int:
 
 
 def _sequence_points(seq: Sequence) -> int:
-    return _SEQUENCE_POINTS.get(seq.length, 0)
+    return _SEQUENCE_POINTS.get(min(seq.length, 5), 0)
 
 
 def resolve_declarations(
@@ -732,6 +734,12 @@ def _score_capot_outcome(
         capot_base = GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT
     else:
         capot_base = GLOBAL_CONFIG.CAPOT_BASE
+
+    # Le Zéro Final: if last-trick bonus is suppressed, the Capot reward (which
+    # includes the +10) must drop by 10 too. Matches the chute-pool logic
+    # in _score_normal_outcome.
+    if state.boss_modifiers.no_dix_de_der:
+        capot_base -= GLOBAL_CONFIG.LAST_TRICK_BONUS
 
     is_failed = False
     if capot_winner_team == ctx.taker_team:

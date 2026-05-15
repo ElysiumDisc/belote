@@ -47,7 +47,8 @@ class BelAtroRun:
     guarantee_tarot_in_shop: bool = False
     show_partner_bid_tendency: bool = False
     tie_breaks_for_taker: bool = False
-    partner_throws_trick: bool = False
+    partner_throws_trick: bool = False  # Le Traître joker (1 random trick/round)
+    agent_double_joker: bool = False  # L'Agent Double joker (2 random tricks/round)
     capot_insurance: bool = False  # one-shot: halve a chute loss
 
     # ── Phase 1+ feature flags ──────────────────────────────

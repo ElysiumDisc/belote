@@ -530,3 +530,73 @@ def test_d3_default_callback_returns_false() -> None:
     state = GameState(hands=((), (), (), ()))
     assert cb.prompt_surcoinche(state, Seat.EAST) is False
 
+
+
+# ── 3.8.1: boss flags must be applied before acc.trigger_round_start ──
+
+
+def test_boss_flags_applied_before_trigger_round_start() -> None:
+    """3.8.1 fix: round_driver previously called acc.trigger_round_start
+    BEFORE boss.apply, so any joker_state field derived from
+    state.boss_modifiers.X (e.g. joker_state["no_dix_de_der"]) captured the
+    default value instead of the boss-patched one. The order must be
+    boss.apply → trigger_round_start.
+
+    Lock the fix: joker_state["no_dix_de_der"] must reflect the active boss
+    flag after drive_round completes the round.
+    """
+    from belote.belatro.core.scoring import ScoreAccumulator
+    from belote.belatro.engine.event_bus import EventBus
+    from belote.belatro.engine.round_driver import RoundUICallbacks, drive_round
+    from belote.belatro.partner.partner_state import PartnerState
+    from belote.belatro.run.boss import BossModifier
+
+    class LeZeroFinal(BossModifier):
+        id = "le_zero_final_test"
+        name = "Le Zéro Final (test)"
+        description = "Disables Dix de Der"
+
+        def apply(self, state: object) -> None:  # PatchedGameState
+            state.patch("no_dix_de_der", True)  # type: ignore[attr-defined]
+
+    class _NoopUI(RoundUICallbacks):
+        def prompt_bid(self, state):  # type: ignore[no-untyped-def, override]
+            return None  # Pass — round will exhaust bids and short-circuit.
+        def prompt_card(self, state):  # type: ignore[no-untyped-def, override]
+            return state.hands[state.turn.value][0], state
+        def on_card_played(self, state, seat, card) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+        def on_trick_end(self, state, winner, points) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+        def on_round_end(self, breakdown) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+
+    bus = EventBus()
+    partner = PartnerState()
+    captured: dict[str, object] = {}
+
+    class _SpyAcc(ScoreAccumulator):
+        def trigger_round_start(self, state):  # type: ignore[no-untyped-def, override]
+            captured["no_dix_de_der"] = state.boss_modifiers.no_dix_de_der
+            return super().trigger_round_start(state)
+
+    acc = _SpyAcc(target_score=80)
+
+    import contextlib
+    # Drive may error out without a fleshed-out UI; we only care that
+    # trigger_round_start was called once and observed the patched boss flag.
+    with contextlib.suppress(Exception):
+        drive_round(
+            bus=bus,
+            partner=partner,
+            ui_callbacks=_NoopUI(),
+            acc=acc,
+            boss=LeZeroFinal(),
+            target_score=80,
+            seed=42,
+        )
+
+    assert captured.get("no_dix_de_der") is True, (
+        "Boss flag was not applied before trigger_round_start — the joker "
+        "state snapshot would see stale BossModifiers defaults."
+    )

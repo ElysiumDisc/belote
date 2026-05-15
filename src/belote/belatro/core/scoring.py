@@ -216,7 +216,7 @@ class ScoreAccumulator:
                 # The Moon (Sans Atout): honor bonus per honor won
                 if event.trump is None:
                     moon_reward = self.contract_levels.get("sans_atout", {})
-                    honor_bonus = moon_reward.get("honor_bonus", 0)
+                    honor_bonus = moon_reward.get("honor_bonus", 0.0)
                     if honor_bonus:
                         honors = sum(
                             1 for c in event.cards
@@ -228,7 +228,7 @@ class ScoreAccumulator:
                 # The Sun (Tout Atout): +X Mult per trick beyond the 4th
                 if event.trump == Suit.TOUT_ATOUT and event.trick_number > 4:
                     sun_reward = self.contract_levels.get("tout_atout", {})
-                    sun_mult = sun_reward.get("bonus_mult_per_trick", 0)
+                    sun_mult = sun_reward.get("bonus_mult_per_trick", 0.0)
                     if sun_mult:
                         new_mult += sun_mult
                         self._log.append(
@@ -267,7 +267,7 @@ class ScoreAccumulator:
                     and not event.breakdown.is_failed
                 ):
                     libra_reward = self.contract_levels.get("coinche", {})
-                    libra_mult: float = libra_reward.get("coinche_multiplier", 0)
+                    libra_mult: float = libra_reward.get("coinche_multiplier", 0.0)
                     if libra_mult:
                         libra_bonus: float = libra_mult * event.coinche_level
                         new_mult += libra_bonus

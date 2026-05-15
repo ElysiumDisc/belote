@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from belote.ai import AIPlayer, Difficulty
-from belote.deck import Card, Contract, Suit
+from belote.deck import Card, Suit
 from belote.game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -18,7 +18,6 @@ from belote.game import (
     play_card,
     process_bid,
     start_round,
-    trick_winner_seat,
 )
 from belote.scoring import get_declaration_points, is_capot, score_round
 
@@ -132,10 +131,21 @@ def drive_round(
         new_jstate2 = {**state._joker_state, "agent_double_tricks": sabotage}
         state = replace(state, boss_modifiers=new_bm, _joker_state=new_jstate2)
 
-    if acc is not None:
-        state = acc.trigger_round_start(state)
+    # L'Agent Double joker (corrupted): like Le Traître but two sabotage tricks.
+    # Same precedence rule — boss agent_double takes priority.
+    if (
+        state._joker_state.get("agent_double_joker_active")
+        and not state.boss_modifiers.agent_double_active
+    ):
+        sabotage2 = frozenset(rng.sample(range(1, 9), 2))
+        new_bm2 = replace(state.boss_modifiers, agent_double_active=True)
+        new_jstate3 = {**state._joker_state, "agent_double_tricks": sabotage2}
+        state = replace(state, boss_modifiers=new_bm2, _joker_state=new_jstate3)
 
-    # B1: Apply boss modifier flags onto the frozen GameState so play_card sees them
+    # B1: Apply boss modifier flags onto the frozen GameState so play_card sees them.
+    # Must run BEFORE acc.trigger_round_start so the accumulator's snapshot of
+    # boss-derived flags (e.g. joker_state["no_dix_de_der"]) reflects the live
+    # boss state instead of the BossModifiers defaults.
     if boss is not None:
         from ..engine.modifier_patch import PatchedGameState
 
@@ -146,6 +156,9 @@ def drive_round(
 
         # Ensure boss modifiers don't use stale cached logic/values
         clear_legal_cards_cache()
+
+    if acc is not None:
+        state = acc.trigger_round_start(state)
 
     # Populate sabotage_tricks for any path that flagged agent_double_active.
     # Sources: L'Agent Double boss (3 random tricks), BetrayalArc (tricks 4-8 via
@@ -377,11 +390,14 @@ def drive_round(
         if is_last_in_trick(state):
             last_trick = state.completed_tricks[-1]
 
-            winner = trick_winner_seat(
-                last_trick,
-                state.trump,
-                state.boss_modifiers.seven_eight_trump,
-                state.contract == Contract.SANS_ATOUT,
+            # Use the resolved winner cached by play_card (Rupture-aware).
+            # 3.8.1: pre-fix this re-derived via trick_winner_seat, which
+            # returns the RAW winner; under La Rupture the event.winner
+            # would disagree with the team scoring authority.
+            winner = state.last_trick_winner
+            assert winner is not None, (
+                "last_trick_winner unset after a complete trick — "
+                "GameState invariant violated."
             )
             # Use state diff to get points; perfectly handles all boss-aware points and Dix de Der
             points = sum(state.current_round_points) - old_pts_total

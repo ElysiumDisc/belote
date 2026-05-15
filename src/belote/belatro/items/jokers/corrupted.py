@@ -69,18 +69,12 @@ class LAgentDouble(Joker):
     cost = 9
     is_corrupted = True
 
-    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_sabotage_remaining"] = 2
-        return None
+    def on_purchase(self, run: BelAtroRun) -> None:
+        # Flag the run so round_driver flips agent_double_active + populates
+        # a 2-trick sabotage set every round. Mirrors Le Traître's wiring.
+        run.agent_double_joker = True
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        # Count down the sabotage window once per trick regardless of who won —
-        # otherwise NS sweeping the round leaves the sabotage flag stuck on for
-        # the whole game. The "for 2 tricks" wording in the description is
-        # absolute, not "until the opponents have won 2".
-        remaining = state.get(f"{self.id}_sabotage_remaining", 0)
-        if remaining > 0:
-            state[f"{self.id}_sabotage_remaining"] = remaining - 1
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=4.0)
         return None

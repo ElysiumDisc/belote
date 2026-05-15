@@ -384,3 +384,55 @@ def test_phase2_vouchers_and_tarots_are_registered() -> None:
     assert "tierce_forge" in registry.vouchers
     assert "la_maison_dieu" in registry.tarots
     assert "le_diable" in registry.tarots
+
+
+# ── 3.8.1: belote-pair joker double-fire fix ───────────────────────────────
+
+
+def test_le_rebelle_fires_once_per_belote_pair() -> None:
+    """3.8.1 fix: BeloteAnnouncedEvent fires twice per round (belote, then
+    rebelote). LeRebelle's times_mult=3.0 must apply once, not ×9 net."""
+    from belote.belatro.items.jokers.contract import LeRebelle
+
+    acc = ScoreAccumulator(target_score=100)
+    acc.attach_jokers([LeRebelle()])
+    state = GameState(hands=((), (), (), ()), _chips=100, _mult=1.0)
+
+    # First event: belote (is_rebelote=False) — fires.
+    e1 = BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False)
+    state = acc.update_state(state, e1)
+    # Second event: rebelote (is_rebelote=True) — gated, must not fire.
+    e2 = BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=True)
+    state = acc.update_state(state, e2)
+
+    # ×3 Mult applied exactly once.
+    assert state._mult == 3.0
+    # Chip subtraction applied exactly once (-20).
+    assert state._chips == 80
+
+
+def test_le_notaire_pays_once_per_belote_pair() -> None:
+    """3.8.1 fix: LeNotaire's $5 cash must apply once, not $10 net."""
+    from belote.belatro.items.jokers.economy import LeNotaire
+
+    acc = ScoreAccumulator(target_score=100)
+    acc.attach_jokers([LeNotaire()])
+    state = GameState(hands=((), (), (), ()), _chips=100, _mult=1.0)
+
+    state = acc.update_state(state, BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False))
+    state = acc.update_state(state, BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=True))
+
+    assert state._bonus_money == 5
+    assert state._chips == 80
+
+
+def test_lagent_double_purchase_flags_run() -> None:
+    """3.8.1 fix: LAgentDouble.on_purchase must flag the run so round_driver
+    populates the sabotage tricks. Pre-3.8.1 the joker only awarded +4 Mult
+    and never triggered the partner-sabotage half of its description."""
+    from belote.belatro.items.jokers.corrupted import LAgentDouble
+
+    run = BelAtroRun()
+    assert run.agent_double_joker is False
+    LAgentDouble().on_purchase(run)
+    assert run.agent_double_joker is True

@@ -915,9 +915,13 @@ def _resolve_trick_winner(
     winner = trick_winner_seat(new_trick, ctx.trump, ctx.se_trump, ctx.is_sa)
 
     if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
-        last_winner = trick_winner_seat(
-            state.completed_tricks[-1], ctx.trump, ctx.se_trump, ctx.is_sa
-        )
+        # Use the cached resolved winner (state.last_trick_winner), not the
+        # raw trick_winner_seat result from completed_tricks[-1]. play_card
+        # stores the *resolved* winner, so reading from state keeps the
+        # Rupture chain consistent with compute_trick_winners (used in final
+        # scoring). Pre-3.8.1 the two paths drifted on trick 3+ whenever
+        # Rupture flipped trick N-1.
+        last_winner = state.last_trick_winner
         if last_winner and winner and team_of(winner) == team_of(last_winner):
             other_team_cards = [
                 tc for tc in new_trick if team_of(tc.seat) != team_of(last_winner)

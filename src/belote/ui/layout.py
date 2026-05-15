@@ -36,7 +36,7 @@ class LayoutPreset:
     hud_style: str
 
     # Whether the W/E "Last Trick" sidebar shows in side columns at this size.
-    # At compact widths we hide it — the user can press T for full history.
+    # At compact widths we hide it — the user can press H for full history.
     show_last_trick_sidebar: bool
 
 

@@ -304,3 +304,80 @@ def test_patched_state_rejects_only_underscore_boss_attrs() -> None:
     assert proxy._chips == 100
     proxy._mult = 2.5  # via __setattr__
     assert proxy._mult == 2.5
+
+
+# ── 3.8.1: La Rupture — play_card and score_round must agree on tricks 3+ ──
+
+
+def test_rupture_play_card_resolves_consistently_with_scoring() -> None:
+    """3.8.1 fix: play_card's _resolve_trick_winner used the RAW previous winner
+    from completed_tricks[-1] via trick_winner_seat. score_round's
+    compute_trick_winners threads the RESOLVED previous winner. On trick 3+,
+    when Rupture flipped trick N-1, the two paths disagreed and state.
+    last_trick_winner could be inconsistent with the final scoring tally.
+
+    Lock the fix: state.last_trick_winner (stored from _resolve_trick_winner)
+    must equal compute_trick_winners(...)[-1] after each play_card call.
+    """
+    from belote.game import compute_trick_winners, play_card, team_of
+
+    # Trick 1 (raw winner NS) and trick 2 (raw winner NS).
+    # Rupture flips trick 2 to EW, so the resolved chain after 2 tricks is NS → EW.
+    def ns_sweep(lead_rank: Rank) -> tuple[TrickCard, ...]:
+        return (
+            TrickCard(Seat.SOUTH, Card(Suit.SPADES, lead_rank)),
+            TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.SEVEN)),
+            TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
+            TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
+        )
+
+    completed = (ns_sweep(Rank.ACE), ns_sweep(Rank.TEN))
+
+    # Build a state with hands forcing a third NS-sweep trick.
+    # SOUTH leads ♠K, WEST/NORTH/EAST follow with low ♠.
+    south_hand = (Card(Suit.SPADES, Rank.KING),)
+    west_hand = (Card(Suit.SPADES, Rank.JACK),)
+    north_hand = (Card(Suit.SPADES, Rank.QUEEN),)
+    east_hand = (Card(Suit.SPADES, Rank.NINE),)
+
+    pre_winners = compute_trick_winners(
+        GameState(
+            hands=((), (), (), ()),
+            boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+            completed_tricks=completed,
+        ),
+        Suit.HEARTS,
+        False,
+    )
+    # Sanity: trick 1 = NS (no prev), trick 2 = flipped to EW (prev was NS).
+    assert team_of(pre_winners[0]) == 0
+    assert team_of(pre_winners[1]) == 1
+
+    state = GameState(
+        hands=(south_hand, east_hand, north_hand, west_hand),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        leader=Seat.SOUTH,
+        turn=Seat.SOUTH,
+        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        completed_tricks=completed,
+        last_trick_winner=pre_winners[-1],  # EW, the resolved winner
+    )
+
+    # Simulate trick 3: SOUTH leads ♠K, the rest follow with lower ♠.
+    # Order is S → E → N → W.
+    state = play_card(state, Card(Suit.SPADES, Rank.KING))   # SOUTH
+    state = play_card(state, Card(Suit.SPADES, Rank.NINE))   # EAST
+    state = play_card(state, Card(Suit.SPADES, Rank.QUEEN))  # NORTH
+    state = play_card(state, Card(Suit.SPADES, Rank.JACK))   # WEST
+
+    winners = compute_trick_winners(state, state.trump, False)
+    assert len(winners) == 3
+    # Post-fix: play_card consults state.last_trick_winner (=EW). Trick 3 raw=NS,
+    # opposite team of prev=EW → no flip → NS wins. Must equal scoring path.
+    assert state.last_trick_winner == winners[-1], (
+        f"Rupture drift: state.last_trick_winner={state.last_trick_winner!r} "
+        f"but compute_trick_winners gives {winners[-1]!r}"
+    )
+    assert team_of(winners[-1]) == 0  # NS keeps trick 3 — alternation NS/EW/NS

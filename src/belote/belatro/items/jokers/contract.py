@@ -93,8 +93,13 @@ class LeRebelle(Joker):
     description = "The Belote/Rebelote declaration gives ×3 Mult instead of a flat 20 points."
     cost = 8
 
-    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.seat == Seat.SOUTH:
+    def on_belote(
+        self, event: BeloteAnnouncedEvent, state: dict[str, Any]
+    ) -> JokerResult | None:
+        # Belote/Rebelote points (20) are only awarded if both cards are played.
+        # Gate on the second event (rebelote) so we only subtract points that
+        # the player actually earned.
+        if event.seat == Seat.SOUTH and event.is_rebelote:
             return JokerResult(add_chips=-20, times_mult=3.0)
         return None
 

@@ -327,6 +327,10 @@ class BelAtroGame:
             # Le Traître joker: partner sabotages one random trick per round.
             # round_driver picks the trick + reuses the agent_double AI path.
             round_flags["traitre_active"] = True
+        if self.run.agent_double_joker:
+            # L'Agent Double joker: partner sabotages two random tricks per round.
+            # round_driver picks the tricks + reuses the agent_double AI path.
+            round_flags["agent_double_joker_active"] = True
         if self.run.surcoinche_unlocked:
             round_flags["surcoinche_unlocked"] = True
 
@@ -358,6 +362,11 @@ class BelAtroGame:
         pending = final_state._joker_state.get("_pending_tierce_charge", 0)
         if isinstance(pending, int) and pending > 0:
             self.run.tierce_charges += pending
+
+        # Phase 2.1: persist Tout Atout streak between rounds.
+        streak = final_state._joker_state.get("tout_streak_streak", 0)
+        if isinstance(streak, int):
+            self.run.card_enhancements["tout_streak_streak"] = streak
 
         # Phase 2.3: refresh partner_mood for HUD display.
         self.run.partner_mood = trust.mood()

@@ -73,7 +73,11 @@ class QuinteRoyale(Joker):
     def on_declaration(
         self, event: DeclarationScoredEvent, state: dict[str, Any]
     ) -> JokerResult | None:
-        if event.seat in (Seat.SOUTH, Seat.NORTH) and event.points >= 100:
+        if (
+            event.seat in (Seat.SOUTH, Seat.NORTH)
+            and event.declaration_type == "sequence"
+            and event.points >= 100
+        ):
             # Quinte = 100 pts in classic belote scoring; mark for round-end mult.
             state[f"{self.id}_armed"] = True
         return None

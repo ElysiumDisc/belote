@@ -634,7 +634,7 @@ def _render_middle_section(
     right_rows[mid - 2] = e_cards
     right_rows[mid - 1] = e_count
 
-    # Last Trick Panel — hidden at compact widths (toggle with T/H key for full history).
+    # Last Trick Panel — hidden at compact widths (press H for full history).
     if state.completed_tricks and layout.show_last_trick_sidebar:
         last = state.completed_tricks[-1]
         right_rows[mid + 1] = f"{UNDERLINE}Last Trick:{RESET}"

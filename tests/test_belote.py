@@ -620,7 +620,8 @@ class TestCapot:
         breakdown = score_round(state)
         assert breakdown.is_capot is True
         # South has K♠+Q♠ (trump honors) so belote is detected → CAPOT_BASE + BELOTE_POINTS
-        assert breakdown.taker_total == CAPOT_BASE + BELOTE_POINTS
+        # South and North each hold sequences (detected from tricks) → +200 decls
+        assert breakdown.taker_total == CAPOT_BASE + BELOTE_POINTS + 200
         assert breakdown.taker_belote == BELOTE_POINTS
 
 # ---------------------------------------------------------------------------
@@ -694,16 +695,18 @@ class TestCapotPerContract:
         state = _make_capot_state(contract="sans_atout", trump=None)
         breakdown = score_round(state)
         assert breakdown.is_capot is True
-        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_SANS_ATOUT, (
-            f"SA Capot must use base 220, got {breakdown.taker_total}"
+        # Base 220 + 200 from NS sequences (South's 8 hearts + North's 8 diamonds)
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_SANS_ATOUT + 200, (
+            f"SA Capot must use base 220 (+200 decls), got {breakdown.taker_total}"
         )
 
     def test_capot_base_tout_atout(self) -> None:
         state = _make_capot_state(contract="tout_atout", trump=Suit.TOUT_ATOUT)
         breakdown = score_round(state)
         assert breakdown.is_capot is True
-        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT, (
-            f"TA Capot must use base 348, got {breakdown.taker_total}"
+        # Base 348 + 200 from NS sequences
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE_TOUT_ATOUT + 200, (
+            f"TA Capot must use base 348 (+200 decls), got {breakdown.taker_total}"
         )
 
     def test_capot_base_normal_unchanged(self) -> None:
@@ -711,8 +714,9 @@ class TestCapotPerContract:
         breakdown = score_round(state)
         assert breakdown.is_capot is True
         # Hearts trump means South's K+Q hearts trigger Belote (BELOTE_POINTS=20).
-        # Compare against base+belote rather than bare base.
-        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE + breakdown.taker_belote
+        # Plus 200 from NS sequences.
+        assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE + breakdown.taker_belote + 200
+
 
 
 # ---------------------------------------------------------------------------

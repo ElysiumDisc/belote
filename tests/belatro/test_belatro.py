@@ -1267,7 +1267,7 @@ class TestLeNotaire:
         self.state: dict[str, Any] = {}
 
     def test_south_belote_gives_money_removes_chips(self) -> None:
-        evt = make_belote_event(seat=Seat.SOUTH, is_rebelote=False)
+        evt = make_belote_event(seat=Seat.SOUTH, is_rebelote=True)
         result = self.joker.on_belote(evt, self.state)
         assert result is not None
         assert result.add_money == 5
