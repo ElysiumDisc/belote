@@ -167,8 +167,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Polished Felt Mat (3.9.4):** The trick mat now has a subtle vignette at its edges, a faint deterministic braille pip-dot texture (fabric-weave feel without intrusive glyphs), and — at standard/spacious terminal sizes — a decorative `╔═══◆═══...═══◆═══╗` outer frame with corner ornaments.
 - **Selection HUD (3.9.4):** Selecting a card in hand now paints a highlighted bar under it AND a centered `► A♠ — Trump ◄` readout below, color-coded by suit / trump / legality.
 - **Grimaud Card Detail (4.0.0):** Press `F` while a card is under the cursor (or during bidding to inspect the up-card) to open a full-screen zoomed view rendered with the half-block pixel trick (2× vertical density). All twelve face cards (J/Q/K × four suits) have hand-drawn illustrations loosely inspired by the *Grimaud Standard 1898* plate — distinct palettes, headwear, and held objects per (rank, suit). Non-face cards get a scaled-up pip layout. Any key dismisses.
-- **4.1.0 Audit Pass:** Full bug-hunt + perf sweep. LeDémon now fires on every team-NS trick win (matches its "+3 Mult unconditionally" description; pre-4.1.0 it silently skipped North-partner wins). Hard AI now correctly avoids bidding Clubs under *Les Clubs Bannis*. Felt-row rendering caches the active theme name (faster per-frame redraws). Diff-emit rows now append `clear_to_eol` so terminal shrink mid-game can't leave stale tail chars. Five defensive `re_emit` guards added to state-mutating jokers (LeBanquier, CoincheStack, ToutStreak, QuinteRoyale, RebeloteEcho).
-- **Incremental Rendering:** High-performance cursor-based updates for zero-flicker gameplay even at high speeds.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
 - **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
 - **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
@@ -216,7 +214,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (742 tests)
+├── tests/             # Comprehensive test suite (751 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -232,14 +230,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **742 tests** passing with 100% coverage on game-logic modules (4.1.0).
+Currently **751 tests** passing with 100% coverage on game-logic modules (4.1.1).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 742/742 passed
+- **pytest**: 751/751 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

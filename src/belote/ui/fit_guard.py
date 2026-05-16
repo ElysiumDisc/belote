@@ -25,7 +25,7 @@ from ..ansi import (
     white_fg,
 )
 from ..input import Key
-from .render import get_term_size
+from .render import get_term_size, invalidate_diff
 
 if TYPE_CHECKING:
     from ..input import KeyReader
@@ -48,36 +48,48 @@ def require_minimum(
     """
     import sys
 
-    while True:
-        cols, rows = get_term_size()
-        if cols >= min_cols and rows >= min_rows:
-            return
+    # Track whether we ever painted the overlay. If the terminal was already
+    # large enough on first poll, no stdout write happens and we don't need
+    # to invalidate the diff baseline. Otherwise every return / raise path
+    # MUST call invalidate_diff() so the next display() emits a full frame
+    # rather than diffing against the (now stale) pre-overlay baseline —
+    # same architectural rule that 4.0.1 codified across every BelAtro overlay.
+    painted = False
+    try:
+        while True:
+            cols, rows = get_term_size()
+            if cols >= min_cols and rows >= min_rows:
+                return
 
-        mid = max(1, rows // 2)
-        title = f"{red_fg()}{BOLD}Terminal too small{RESET}"
-        body = (
-            f"{white_fg()}Please resize to at least "
-            f"{gold_fg()}{min_cols}x{min_rows}{RESET}"
-            f"{white_fg()} (currently {cols}x{rows}){RESET}"
-        )
-        hint = f"{white_fg()}Press Q to quit{RESET}"
+            mid = max(1, rows // 2)
+            title = f"{red_fg()}{BOLD}Terminal too small{RESET}"
+            body = (
+                f"{white_fg()}Please resize to at least "
+                f"{gold_fg()}{min_cols}x{min_rows}{RESET}"
+                f"{white_fg()} (currently {cols}x{rows}){RESET}"
+            )
+            hint = f"{white_fg()}Press Q to quit{RESET}"
 
-        sys.stdout.write(
-            clear_screen()
-            + hide_cursor()
-            + move(max(1, mid - 1), 1)
-            + ansi_center(title, cols)
-            + move(mid + 1, 1)
-            + ansi_center(body, cols)
-            + move(min(rows, mid + 3), 1)
-            + ansi_center(hint, cols)
-        )
-        sys.stdout.flush()
+            sys.stdout.write(
+                clear_screen()
+                + hide_cursor()
+                + move(max(1, mid - 1), 1)
+                + ansi_center(title, cols)
+                + move(mid + 1, 1)
+                + ansi_center(body, cols)
+                + move(min(rows, mid + 3), 1)
+                + ansi_center(hint, cols)
+            )
+            sys.stdout.flush()
+            painted = True
 
-        event = reader.read_timeout(0.25)
-        if event is None:
-            continue
-        if event.key in (Key.QUIT, Key.EOF):
-            raise FitAbortedError
-        if event.key == Key.CHAR and event.char and event.char.lower() == "q":
-            raise FitAbortedError
+            event = reader.read_timeout(0.25)
+            if event is None:
+                continue
+            if event.key in (Key.QUIT, Key.EOF):
+                raise FitAbortedError
+            if event.key == Key.CHAR and event.char and event.char.lower() == "q":
+                raise FitAbortedError
+    finally:
+        if painted:
+            invalidate_diff()

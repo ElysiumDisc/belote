@@ -210,6 +210,108 @@ def test_patch_trick_card_invalidates_diff_baseline() -> None:
     )
 
 
+def test_require_minimum_invalidates_diff_on_return(monkeypatch) -> None:
+    """4.1.1 fix: `fit_guard.require_minimum` paints a centered "Terminal too
+    small" overlay directly to stdout. Before 4.1.1 it returned without
+    calling `invalidate_diff()`, so the diff baseline went out of sync with
+    the actual terminal state — the next `display()` would diff against
+    the cached pre-overlay frame and emit incomplete updates, leaving
+    overlay residue visible behind the game. Same architectural rule as
+    the BelAtro overlays / `patch_trick_card` / `show_round_summary`.
+
+    We verify: small → paint overlay → resize large → return; assert
+    `_last_emitted_lines` is None (the invalidation signal).
+    """
+    from belote.ui.fit_guard import require_minimum
+
+    render_mod = sys.modules["belote.ui.render"]
+    fit_guard_mod = sys.modules["belote.ui.fit_guard"]
+
+    # Sentinel baseline that require_minimum must invalidate.
+    render_mod._last_emitted_lines = ("sentinel-frame",)
+
+    # First poll = small, second poll = large. The function paints once,
+    # then reads (returns None to keep looping), then re-polls and exits.
+    sizes = iter([(40, 20), (40, 20), (120, 40)])
+    monkeypatch.setattr(fit_guard_mod, "get_term_size", lambda: next(sizes))
+
+    class _Reader:
+        def read_timeout(self, _t: float) -> KeyEvent | None:
+            return None  # keep looping; next poll picks up the resize
+
+    require_minimum(_Reader(), min_cols=80, min_rows=32)  # type: ignore[arg-type]
+
+    assert render_mod._last_emitted_lines is None, (
+        "require_minimum must call invalidate_diff() before returning when "
+        "it painted the overlay — otherwise the next display() diffs "
+        "against a stale baseline and leaves overlay residue on screen."
+    )
+
+
+def test_require_minimum_does_not_invalidate_if_never_paints(monkeypatch) -> None:
+    """Fast-path: if the terminal is already large enough on the first poll,
+    `require_minimum` returns immediately without painting. The diff
+    baseline must NOT be touched in that case — a no-op call shouldn't
+    force a full redraw on the next display().
+    """
+    from belote.ui.fit_guard import require_minimum
+
+    render_mod = sys.modules["belote.ui.render"]
+    fit_guard_mod = sys.modules["belote.ui.fit_guard"]
+
+    render_mod._last_emitted_lines = ("intact-baseline",)
+    monkeypatch.setattr(fit_guard_mod, "get_term_size", lambda: (200, 60))
+
+    class _Reader:
+        def read_timeout(self, _t: float) -> KeyEvent | None:
+            return None
+
+    require_minimum(_Reader(), min_cols=80, min_rows=32)  # type: ignore[arg-type]
+
+    assert render_mod._last_emitted_lines == ("intact-baseline",), (
+        "require_minimum must NOT invalidate the diff baseline when the "
+        "fast path is taken (terminal already large enough — no overlay "
+        "was painted)."
+    )
+
+
+def test_classic_ui_overlays_invalidate_diff() -> None:
+    """REGRESSION (4.1.1): the classic-ui paint sites must invalidate the
+    diff baseline on exit, same rule as the BelAtro overlays. Static
+    check — greps the source for paint sites and asserts the
+    `invalidate_diff()` count is at the expected floor.
+
+    - `fit_guard.py::require_minimum` paints the "Terminal too small"
+      overlay; pre-4.1.1 it never invalidated.
+    - `announce.py::show_stats` paints the stats screen; pre-4.1.1 it
+      never invalidated.
+    """
+    import re
+    from pathlib import Path
+
+    paint_sites = {
+        # fit_guard: one invalidate_diff() inside the `finally` block.
+        "src/belote/ui/fit_guard.py": 1,
+        # announce.py: show_round_summary() + show_stats() each call
+        # invalidate_diff(). `announce()` itself paints with absolute
+        # positioning and is pinned by test_announce_never_writes_crlf to
+        # never scroll, so it does NOT invalidate. Pre-4.1.1 count was 1
+        # (show_round_summary only); 4.1.1 adds show_stats → 2.
+        "src/belote/ui/announce.py": 2,
+    }
+    repo_root = Path("/home/mrrobot/belote/")
+    invalidate_re = re.compile(r"invalidate_diff\s*\(\s*\)")
+
+    for relpath, min_count in paint_sites.items():
+        text = (repo_root / relpath).read_text()
+        n_invalidate = len(invalidate_re.findall(text))
+        assert n_invalidate >= min_count, (
+            f"{relpath}: expected at least {min_count} invalidate_diff() "
+            f"calls, found {n_invalidate}. Any classic-ui paint that "
+            f"bypasses display() must call invalidate_diff()."
+        )
+
+
 def test_gameflow_no_crlf_writes() -> None:
     """No source line in `src/belote/gameflow.py` should contain a literal
     `\\r\\n` inside a `sys.stdout.write(...)` argument. This pins the

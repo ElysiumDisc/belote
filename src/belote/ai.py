@@ -4,7 +4,6 @@ import random
 from enum import Enum
 
 from .deck import Card, Contract, Rank, Suit, trick_rank
-from .deck import card_points as card_points_fn
 from .game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -382,6 +381,11 @@ class AIPlayer:
         if trump is None:
             return self._easy_play(state, legal)
         trick = state.current_trick
+        # 4.1.1: discard tiebreakers must honor zero-rank boss flags (kings_zero,
+        # aces_zero, jacks_zero, tens_zero, ban_clubs). Pre-4.1.1 medium AI used
+        # raw card_points and would "preserve" a K of trump under kings_zero as
+        # if it still scored 20 — picking it as the highest-value card to keep.
+        bm = state.boss_modifiers
 
         # Update void inferences
         self._update_voids(state)
@@ -415,7 +419,7 @@ class AIPlayer:
                 # Try to win if we can afford it
                 return max(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
             # No trumps, discard low non-trump
-            return min(legal, key=lambda c: card_points_fn(c, trump, self._se))
+            return min(legal, key=lambda c: card_points_with_modifiers(c, trump, bm))
 
         # Non-trump led
         my_suit = [c for c in legal if c.suit == lead_suit]
@@ -438,7 +442,7 @@ class AIPlayer:
                 return min(winners, key=lambda c: trick_rank(c, trump, self._se))
             return min(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
 
-        return min(legal, key=lambda c: card_points_fn(c, trump, self._se))
+        return min(legal, key=lambda c: card_points_with_modifiers(c, trump, bm))
 
     def _medium_lead(self, legal: tuple[Card, ...], trump: Suit | None, state: GameState) -> Card:
         """Lead strategy: void forcing, high non-trump A, longest suit, then trump pulls."""
@@ -637,7 +641,12 @@ class AIPlayer:
     ) -> float:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
-        points = card_points_fn(card, trump, self._se)
+        # 4.1.1: per-card point value must honor zero-rank boss flags
+        # (kings_zero / aces_zero / jacks_zero / tens_zero / ban_clubs).
+        # Propagates to _score_discarding_strategy / _score_winning_strategy
+        # via the `points` parameter and to _score_leading_strategy via `bm`.
+        bm = state.boss_modifiers
+        points = card_points_with_modifiers(card, trump, bm)
         # Small per-card tiebreaker: when win/loss heuristics are otherwise
         # equal, slightly bias toward playing the higher-value card. The
         # 0.1 coefficient keeps this strictly subordinate to the win/loss
@@ -645,7 +654,7 @@ class AIPlayer:
         score += points * 0.1
 
         if not trick:
-            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps)
+            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps, bm)
 
         if partner_winning and trick[0].card.suit != trump:
             return self._score_discarding_strategy(card, trump, points, hand_suit_counts)
@@ -653,7 +662,7 @@ class AIPlayer:
         return self._score_winning_strategy(card, state, trump, trick, partner_winning, points)
 
     def _score_leading_strategy(
-        self, card: Card, trump: Suit, my_trumps: int, opp_trumps: int
+        self, card: Card, trump: Suit, my_trumps: int, opp_trumps: int, bm: object
     ) -> float:
         """Heuristics for when we are leading the trick."""
         score = 0.0
@@ -665,7 +674,7 @@ class AIPlayer:
                 score += 1
         elif card.rank == Rank.ACE:
             score += 5
-        elif card_points_fn(card, trump, self._se) == 0:
+        elif card_points_with_modifiers(card, trump, bm) == 0:
             # Leading waste card to probe
             score += 2
         return score

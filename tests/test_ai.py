@@ -421,3 +421,174 @@ def test_ai_legal_cards_empty_raises() -> None:
         pytest.raises(AssertionError, match="legal_cards empty"),
     ):
         player.decide_card(state)
+
+
+def test_ai_no_raw_card_points_import() -> None:
+    """4.1.1 fix: `ai.py` must not import the raw `card_points` helper from
+    `deck`. Every play-time card valuation routes through
+    `card_points_with_modifiers` so zero-rank boss flags (kings_zero,
+    aces_zero, jacks_zero, tens_zero, ban_clubs) propagate to discard /
+    lead heuristics. Pre-4.1.1 the bid path migrated to the boss-aware
+    helper but the play path still called raw `card_points_fn`.
+    """
+    import inspect
+
+    import belote.ai as ai_mod
+
+    src = inspect.getsource(ai_mod)
+    assert "card_points as card_points_fn" not in src, (
+        "ai.py must not re-import raw card_points — play heuristics must "
+        "route through card_points_with_modifiers"
+    )
+    assert "card_points_fn(" not in src, (
+        "ai.py contains a leftover card_points_fn(...) call — every play-"
+        "time card valuation must use card_points_with_modifiers"
+    )
+
+
+def test_hard_ai_play_score_uses_jacks_zero() -> None:
+    """4.1.1 fix: `_score_card_play` must read per-card value through
+    `card_points_with_modifiers`, not raw `card_points`. The boss-modified
+    points propagate into `_score_discarding_strategy` (`-points * 0.7`)
+    and `_score_winning_strategy` (`-points * 0.4` or `-points * 0.9`),
+    which are the branches that actually consult them.
+
+    Under `jacks_zero` the Jack of trump is worth 0, not 20. In a partner-
+    winning discard scenario the discarding-strategy penalty `-0.7 * pts`
+    drops by 0.7 * 20 = 14.0 between the no-flag and jacks_zero states.
+    """
+    from belote.deck import Contract
+
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player._se = False
+    trump = Suit.HEARTS
+    j_trump = Card(Suit.HEARTS, Rank.JACK)  # 20pts as trump
+
+    # Partner (NORTH) leads SPADES.ACE (non-trump, partner is winning) →
+    # `_score_card_play` routes to `_score_discarding_strategy` because
+    # `partner_winning=True` and lead suit (SPADES) != trump (HEARTS).
+    # The discarding penalty is `-points * 0.7`, so under jacks_zero the
+    # score for J-trump must rise by 0.7 * 20 = 14.0.
+    trick = (TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.ACE)),)
+
+    state_no = GameState(
+        hands=((j_trump,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=trump,
+        contract=Contract.NORMAL,
+    )
+    state_jz = GameState(
+        hands=((j_trump,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=trump,
+        contract=Contract.NORMAL,
+        boss_modifiers=BossModifiers(jacks_zero=True),
+    )
+
+    # (trick, partner_winning, hand_suit_counts, my_trumps, opp_trumps)
+    args = (trick, True, {Suit.HEARTS: 1}, 1, 7)
+    score_no = player._score_card_play(j_trump, state_no, trump, *args)
+    score_jz = player._score_card_play(j_trump, state_jz, trump, *args)
+
+    # discarding_strategy: -0.7 * pts. Under no flag pts=20 → -14;
+    # under jacks_zero pts=0 → 0. score_jz - score_no = 14.0.
+    delta = score_jz - score_no
+    assert abs(delta - 14.0) < 1e-6, (
+        f"Expected score delta = 14.0 (-0.7 * 20pts discard penalty wiped "
+        f"under jacks_zero), got {delta}. If this fails, _score_card_play "
+        f"is still computing `points` via raw card_points instead of "
+        f"card_points_with_modifiers."
+    )
+
+
+def test_hard_ai_play_score_uses_ban_clubs() -> None:
+    """4.1.1 fix: same wiring under `ban_clubs` — every clubs card scores 0,
+    so the discarding-strategy penalty `-0.7 * pts` for A-clubs (11 raw)
+    must drop to 0 under the flag. Delta = 0.7 * 11 = 7.7.
+    """
+    from belote.deck import Contract
+
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player._se = False
+    trump = Suit.HEARTS
+    a_clubs = Card(Suit.CLUBS, Rank.ACE)  # 11pts non-trump
+
+    trick = (TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.KING)),)
+
+    state_no = GameState(
+        hands=((a_clubs,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=trump,
+        contract=Contract.NORMAL,
+    )
+    state_ban = GameState(
+        hands=((a_clubs,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=trump,
+        contract=Contract.NORMAL,
+        boss_modifiers=BossModifiers(ban_clubs=True),
+    )
+
+    args = (trick, True, {Suit.CLUBS: 1}, 0, 8)
+    score_no = player._score_card_play(a_clubs, state_no, trump, *args)
+    score_ban = player._score_card_play(a_clubs, state_ban, trump, *args)
+
+    delta = score_ban - score_no
+    assert abs(delta - 7.7) < 1e-6, (
+        f"Expected score delta = 7.7 (-0.7 * 11pts discard penalty wiped "
+        f"under ban_clubs), got {delta}. _score_card_play must thread "
+        f"card_points_with_modifiers into the discarding-strategy `points` "
+        f"parameter."
+    )
+
+
+def test_medium_ai_discard_consults_boss_modifier_helper() -> None:
+    """4.1.1 fix: `_medium_play`'s discard `min()` at the two no-trump-led
+    void-in-trump branches must route through `card_points_with_modifiers`.
+    Pre-4.1.1 the lambda called raw `card_points_fn`, so under kings_zero
+    the AI preserved a K (raw 4-pt off-suit value) instead of treating it
+    as a 0-pt discard candidate.
+
+    We pin the wiring by stubbing `belote.ai.card_points_with_modifiers`
+    and asserting `_medium_play` calls it at least once for the discard
+    decision. The earlier import-line test pins that raw `card_points_fn`
+    is gone; this one pins the replacement is wired correctly.
+    """
+    from belote.deck import Contract
+
+    # Hand: K-clubs + 7-clubs. Lead is trump (Hearts ACE) so the AI is
+    # void in trump → falls through to the line-418 discard branch
+    # (`No trumps, discard low non-trump`).
+    hand = (Card(Suit.CLUBS, Rank.KING), Card(Suit.CLUBS, Rank.SEVEN))
+    state = GameState(
+        hands=((), (), (), hand),  # WEST holds the hand
+        turn=Seat.WEST,
+        phase=Phase.PLAYING,
+        trump=Suit.HEARTS,
+        contract=Contract.NORMAL,
+        current_trick=(TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.ACE)),),
+        boss_modifiers=BossModifiers(kings_zero=True),
+    )
+    player = AIPlayer(Seat.WEST, Difficulty.MEDIUM)
+
+    import belote.ai as ai_mod
+
+    real_helper = ai_mod.card_points_with_modifiers
+    calls: list[tuple] = []
+
+    def wrapper(card, trump, bm):  # type: ignore[no-untyped-def]
+        calls.append((card, trump, bm))
+        return real_helper(card, trump, bm)
+
+    with unittest.mock.patch.object(ai_mod, "card_points_with_modifiers", wrapper):
+        player.decide_card(state)
+
+    assert calls, (
+        "Medium AI's discard heuristic must consult "
+        "card_points_with_modifiers (4.1.1) — pre-fix it called raw "
+        "card_points_fn and so was blind to zero-rank boss flags."
+    )

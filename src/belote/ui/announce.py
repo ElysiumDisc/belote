@@ -131,74 +131,87 @@ def show_stats(reader: KeyReader) -> None:
     profile = SaveManager().load_profile()
     b_stats = profile.stats
 
-    while True:
-        term_w, term_h = get_term_size()
+    # 4.1.1: hoist the line-list build outside the read loop. The stats numbers
+    # are immutable for the lifetime of the modal — pre-4.1.1 every keystroke
+    # rebuilt the full list AND re-walked the difficulty / trump dicts AND
+    # re-formatted every f-string. Same cache pattern as _build_history_lines.
+    lines: list[str] = []
+    lines.append(f"{BOLD}{gold_fg()}GLOBAL STATISTICS{RESET}")
+    lines.append("=" * 17)
+    lines.append("")
 
-        lines = []
-        lines.append(f"{BOLD}{gold_fg()}GLOBAL STATISTICS{RESET}")
-        lines.append("=" * 17)
-        lines.append("")
+    # ── BELOTE (Classic) ────────────────────────────────────────────────
+    lines.append(f"{BOLD}{white_fg()}CLASSIC BELOTE{RESET}")
+    lines.append("-" * 14)
+    win_rate = (stats.games_won / stats.games_played * 100) if stats.games_played > 0 else 0
+    lines.append(
+        f"  Games Played: {stats.games_played:<6} Won: {stats.games_won:<6} ({win_rate:.1f}%)"
+    )
+    avg_pts = (stats.total_points_scored / stats.total_rounds) if stats.total_rounds > 0 else 0
+    lines.append(f"  Total Rounds: {stats.total_rounds:<6} Avg Pts/Rd: {avg_pts:.1f}")
+    worst = stats.worst_round_score if stats.total_rounds > 0 else 0
+    lines.append(f"  Best Rd: {stats.best_round_score:<10} Worst Rd: {worst}")
+    lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
+    lines.append("")
 
-        # ── BELOTE (Classic) ────────────────────────────────────────────────
-        lines.append(f"{BOLD}{white_fg()}CLASSIC BELOTE{RESET}")
-        lines.append("-" * 14)
-        win_rate = (stats.games_won / stats.games_played * 100) if stats.games_played > 0 else 0
-        lines.append(
-            f"  Games Played: {stats.games_played:<6} Won: {stats.games_won:<6} ({win_rate:.1f}%)"
-        )
-        avg_pts = (stats.total_points_scored / stats.total_rounds) if stats.total_rounds > 0 else 0
-        lines.append(f"  Total Rounds: {stats.total_rounds:<6} Avg Pts/Rd: {avg_pts:.1f}")
-        worst = stats.worst_round_score if stats.total_rounds > 0 else 0
-        lines.append(f"  Best Rd: {stats.best_round_score:<10} Worst Rd: {worst}")
-        lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
-        lines.append("")
+    # ── BELATRO (Roguelite) ──────────────────────────────────────────────
+    lines.append(f"{BOLD}{gold_fg()}BELATRO EXPANSION{RESET}")
+    lines.append("-" * 17)
+    lines.append(f"  Runs Won (Ante 8): {b_stats.get('runs_won', 0)}")
+    lines.append(f"  Total Capots:      {b_stats.get('total_capots', 0)}")
+    lines.append(
+        f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
+        f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}"
+    )
+    lines.append(f"  Discovered:        {len(profile.discovered_items)} items seen")
+    lines.append(f"  Unlocked:          {len(profile.unlocked_ids)} items earned")
+    lines.append("")
 
-        # ── BELATRO (Roguelite) ──────────────────────────────────────────────
-        lines.append(f"{BOLD}{gold_fg()}BELATRO EXPANSION{RESET}")
-        lines.append("-" * 17)
-        lines.append(f"  Runs Won (Ante 8): {b_stats.get('runs_won', 0)}")
-        lines.append(f"  Total Capots:      {b_stats.get('total_capots', 0)}")
-        lines.append(
-            f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
-            f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}"
-        )
-        lines.append(f"  Discovered:        {len(profile.discovered_items)} items seen")
-        lines.append(f"  Unlocked:          {len(profile.unlocked_ids)} items earned")
-        lines.append("")
+    # ── OTHER ──────────────────────────────────────────────────────────
+    trump_list = sorted(stats.most_used_trump.items(), key=lambda x: x[1], reverse=True)
+    trump_str = " ".join(f"{k}:{v}" for k, v in trump_list)
+    lines.append(f"  Trump Usage: {trump_str}")
 
-        # ── OTHER ──────────────────────────────────────────────────────────
-        # Trump usage
-        trump_list = sorted(stats.most_used_trump.items(), key=lambda x: x[1], reverse=True)
-        trump_str = " ".join(f"{k}:{v}" for k, v in trump_list)
-        lines.append(f"  Trump Usage: {trump_str}")
+    lines.append(f"  {UNDERLINE}Win Rate by AI Level:{RESET}")
+    for diff, dstats in stats.difficulty_stats.items():
+        dp = dstats["played"]
+        dw = dstats["won"]
+        dwr = (dw / dp * 100) if dp > 0 else 0
+        lines.append(f"    {diff.capitalize():<8}: {dw}/{dp} ({dwr:.1f}%)")
 
-        # Difficulty breakdown
-        lines.append(f"  {UNDERLINE}Win Rate by AI Level:{RESET}")
-        for diff, dstats in stats.difficulty_stats.items():
-            dp = dstats["played"]
-            dw = dstats["won"]
-            dwr = (dw / dp * 100) if dp > 0 else 0
-            lines.append(f"    {diff.capitalize():<8}: {dw}/{dp} ({dwr:.1f}%)")
+    # Session Panel
+    lines.append("")
+    lines.append(f"{banner_bg()}{banner_fg()}       THIS SESSION       {RESET}")
+    lines.append(
+        f"  Games: {session.games_played} ({session.games_won} won)  Rounds: {session.total_rounds}"
+    )
+    lines.append(f"  Points: {session.total_points}  Capots: {session.capots}")
 
-        # Session Panel
-        lines.append("")
-        lines.append(f"{banner_bg()}{banner_fg()}       THIS SESSION       {RESET}")
-        lines.append(
-            f"  Games: {session.games_played} ({session.games_won} won)  Rounds: {session.total_rounds}"
-        )
-        lines.append(f"  Points: {session.total_points}  Capots: {session.capots}")
+    lines.append("")
+    lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
 
-        lines.append("")
-        lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
+    # Cache the centered rendering per terminal width so a SIGWINCH mid-modal
+    # rebuilds the frame, but repeated reads at the same width reuse it.
+    last_w = -1
+    rendered = ""
+    try:
+        while True:
+            term_w, _ = get_term_size()
+            if term_w != last_w:
+                rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
+                last_w = term_w
+            out = clear_screen() + hide_cursor()
+            sys.stdout.write("".join([out, rendered]))
+            sys.stdout.flush()
 
-        out = clear_screen() + hide_cursor()
-        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
-        sys.stdout.write("".join([out, rendered]))
-        sys.stdout.flush()
-
-        event = reader.read()
-        if event:
-            break
+            event = reader.read()
+            if event:
+                break
+    finally:
+        # 4.1.1: paint a stats screen → must invalidate the diff baseline so
+        # the next display() emits a full frame. Same architectural rule as
+        # fit_guard / BelAtro overlays.
+        invalidate_diff()
 
 
 def animate_score_update(
