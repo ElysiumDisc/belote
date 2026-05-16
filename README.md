@@ -1,6 +1,6 @@
 # Belote – 4-Player Terminal Card Game
 
-Complete implementation of the French card game Belote for the terminal, with a full-screen green felt table and full card graphics at compass positions (N/W/E/S).
+Complete implementation of the French card game Belote for the terminal, with a full-screen themed felt table (11 palettes), full card graphics at compass positions (N/W/E/S), vignette and braille pip-texture polish, and an optional decorative outer frame.
 
 ## BelAtro Expansion
 
@@ -148,7 +148,8 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `←` `→` or `↑` `↓`: Move selection
 - `Enter`: Confirm card/bid
 - `1`-`8`: Direct card selection (or `1`-`4` for bids)
-- `O`: Sort hand by suit and rank
+- `O`: Re-sort hand by suit and rank (hand auto-sorts on every play turn since 3.9.4 — this key is now a manual re-sort, kept for muscle memory)
+- `F`: View card detail (full-screen Grimaud-style zoomed view of the selected card; press any key to dismiss). Also works on the up-card during bidding.
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
 - During bidding round 2: `P` = Pass, `A` = Tout Atout, `S` = Sans Atout
@@ -160,9 +161,12 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
 - **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
-- **Rich Terminal UI:** Full-screen green felt table with detailed card graphics and "You" vs "Partner" terminology.
+- **Rich Terminal UI:** Full-screen themed felt table with detailed card graphics and "You" vs "Partner" terminology.
 - **Enhanced Hard AI**: Advanced void inference and 2-ply lookahead for critical tricks (Dix de Der).
-- **Customizable Themes:** Switch between seven color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind) using the `T` key during gameplay.
+- **Customizable Themes:** Switch between eleven color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind, Forest Night, Moonlit Tavern, Royal Purple, Emerald Isle) using the `T` key during gameplay.
+- **Polished Felt Mat (3.9.4):** The trick mat now has a subtle vignette at its edges, a faint deterministic braille pip-dot texture (fabric-weave feel without intrusive glyphs), and — at standard/spacious terminal sizes — a decorative `╔═══◆═══...═══◆═══╗` outer frame with corner ornaments.
+- **Selection HUD (3.9.4):** Selecting a card in hand now paints a highlighted bar under it AND a centered `► A♠ — Trump ◄` readout below, color-coded by suit / trump / legality.
+- **Grimaud Card Detail (4.0.0):** Press `F` while a card is under the cursor (or during bidding to inspect the up-card) to open a full-screen zoomed view rendered with the half-block pixel trick (2× vertical density). All twelve face cards (J/Q/K × four suits) have hand-drawn illustrations loosely inspired by the *Grimaud Standard 1898* plate — distinct palettes, headwear, and held objects per (rank, suit). Non-face cards get a scaled-up pip layout. Any key dismisses.
 - **Incremental Rendering:** High-performance cursor-based updates for zero-flicker gameplay even at high speeds.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
 - **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
@@ -211,7 +215,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (691 tests)
+├── tests/             # Comprehensive test suite (723 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -227,14 +231,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **691 tests** passing with 100% coverage on game-logic modules (3.9.3).
+Currently **723 tests** passing with 100% coverage on game-logic modules (4.0.1).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 691/691 passed
+- **pytest**: 711/711 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 
@@ -243,7 +247,7 @@ The codebase is strictly validated with the following tools:
 **Belote-CLI** tracks your long-term performance across both game modes.
 
 - **Global Statistics:** View your win rates, best round scores, and trump usage from the "Statistics" menu.
-- **BelAtro Unlocks:** Progression in the roguelite mode is saved automatically. You can track your Ante 8 wins and total items found in the expansion.
+- **BelAtro Unlocks:** Progression in the roguelite mode is saved automatically. The Statistics screen tracks your Ante 8 wins and shows two distinct counts (since 3.9.4): **Discovered** (items you've actually seen in a shop or starting deck — these show up in the Collection screen) and **Unlocked** (items you've earned access to via achievements; fresh profiles start with 3 unlocked starter decks).
 
 ### Resetting Progress
 If you want to start fresh and clear your history/collection, manually delete the data files:

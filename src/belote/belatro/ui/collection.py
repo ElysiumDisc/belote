@@ -18,7 +18,7 @@ from belote.ansi import (
     white_fg,
 )
 from belote.input import Key
-from belote.ui.render import get_term_size
+from belote.ui.render import get_term_size, invalidate_diff
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -135,6 +135,7 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
 
         sys.stdout.write("".join(out))
         sys.stdout.flush()
+        invalidate_diff()
 
         event = reader.read()
         match event.key:

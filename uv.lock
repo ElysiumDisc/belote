@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "belote-cli"
-version = "3.8.2"
+version = "4.0.1"
 source = { editable = "." }
 
 [package.optional-dependencies]

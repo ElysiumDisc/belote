@@ -16,7 +16,7 @@ from belote.ansi import (
 )
 from belote.input import Key
 from belote.rules import RulesPage
-from belote.ui.render import get_term_size
+from belote.ui.render import get_term_size, invalidate_diff
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -222,6 +222,7 @@ def show_belatro_rules(reader: KeyReader) -> None:
 
         sys.stdout.write("".join(output))
         sys.stdout.flush()
+        invalidate_diff()
 
         event = reader.read()
         key = event.key

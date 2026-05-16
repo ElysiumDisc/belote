@@ -11,6 +11,7 @@ from pathlib import Path
 class Theme:
     name: str
     felt_bg: tuple[int, int, int]
+    felt_edge_bg: tuple[int, int, int]
     card_face_bg: tuple[int, int, int]
     face_card_bg: tuple[int, int, int]
     card_back_bg: tuple[int, int, int]
@@ -32,6 +33,7 @@ THEMES: dict[str, Theme] = {
     "classic_green": Theme(
         name="Classic Green",
         felt_bg=(25, 75, 45),
+        felt_edge_bg=(15, 50, 30),
         card_face_bg=(248, 245, 230),
         face_card_bg=(250, 240, 200),
         card_back_bg=(110, 35, 35),
@@ -51,6 +53,7 @@ THEMES: dict[str, Theme] = {
     "dark_mode": Theme(
         name="Dark Mode",
         felt_bg=(26, 26, 46),
+        felt_edge_bg=(16, 16, 30),
         card_face_bg=(45, 45, 60),
         face_card_bg=(60, 60, 80),
         card_back_bg=(80, 40, 120),
@@ -70,6 +73,7 @@ THEMES: dict[str, Theme] = {
     "blue_velvet": Theme(
         name="Blue Velvet",
         felt_bg=(26, 39, 68),
+        felt_edge_bg=(15, 24, 44),
         card_face_bg=(240, 240, 245),
         face_card_bg=(220, 230, 240),
         card_back_bg=(40, 60, 100),
@@ -89,6 +93,7 @@ THEMES: dict[str, Theme] = {
     "red_casino": Theme(
         name="Red Casino",
         felt_bg=(74, 21, 32),
+        felt_edge_bg=(46, 12, 20),
         card_face_bg=(250, 245, 235),
         face_card_bg=(255, 235, 200),
         card_back_bg=(40, 40, 40),
@@ -108,6 +113,7 @@ THEMES: dict[str, Theme] = {
     "sepia_vintage": Theme(
         name="Sepia Vintage",
         felt_bg=(61, 46, 31),
+        felt_edge_bg=(38, 29, 20),
         card_face_bg=(225, 205, 175),
         face_card_bg=(210, 180, 140),
         card_back_bg=(80, 50, 30),
@@ -127,6 +133,7 @@ THEMES: dict[str, Theme] = {
     "high_contrast": Theme(
         name="High Contrast",
         felt_bg=(0, 0, 0),
+        felt_edge_bg=(0, 0, 0),
         card_face_bg=(255, 255, 255),
         face_card_bg=(255, 255, 255),
         card_back_bg=(0, 0, 255),
@@ -150,6 +157,7 @@ THEMES: dict[str, Theme] = {
     "colorblind": Theme(
         name="Colorblind",
         felt_bg=(40, 40, 50),
+        felt_edge_bg=(25, 25, 34),
         card_face_bg=(245, 240, 220),
         face_card_bg=(245, 240, 220),
         card_back_bg=(50, 80, 150),
@@ -165,6 +173,87 @@ THEMES: dict[str, Theme] = {
         felt_placeholder_fg=(80, 80, 100),
         menu_art_fg=(255, 200, 0),
         menu_border_fg=(0, 150, 200),
+    ),
+    # 3.9.4: four new themes plus felt_edge_bg field for vignette gradient.
+    "forest_night": Theme(
+        name="Forest Night",
+        felt_bg=(18, 42, 28),
+        felt_edge_bg=(10, 26, 18),
+        card_face_bg=(238, 230, 210),
+        face_card_bg=(245, 232, 200),
+        card_back_bg=(60, 38, 22),
+        highlight_bg=(212, 158, 60),    # lantern gold
+        red_fg=(180, 60, 50),
+        black_fg=(35, 30, 25),
+        white_fg=(228, 222, 200),
+        gold_fg=(212, 158, 60),         # copper / lantern
+        light_gray_fg=(145, 138, 120),
+        green_fg=(90, 150, 95),
+        banner_bg=(28, 50, 32),
+        banner_fg=(232, 200, 130),
+        felt_placeholder_fg=(60, 95, 70),
+        menu_art_fg=(212, 158, 60),
+        menu_border_fg=(90, 130, 80),
+    ),
+    "moonlit_tavern": Theme(
+        name="Moonlit Tavern",
+        felt_bg=(32, 38, 56),
+        felt_edge_bg=(20, 24, 38),
+        card_face_bg=(240, 226, 196),   # parchment
+        face_card_bg=(245, 232, 200),
+        card_back_bg=(70, 50, 30),
+        highlight_bg=(220, 170, 80),    # candle amber
+        red_fg=(180, 55, 60),
+        black_fg=(40, 35, 30),
+        white_fg=(230, 224, 210),
+        gold_fg=(220, 170, 80),
+        light_gray_fg=(140, 140, 160),
+        green_fg=(110, 150, 145),
+        banner_bg=(40, 50, 70),
+        banner_fg=(232, 200, 140),
+        felt_placeholder_fg=(70, 80, 105),
+        menu_art_fg=(220, 170, 80),
+        menu_border_fg=(140, 150, 180),
+    ),
+    "royal_purple": Theme(
+        name="Royal Purple",
+        felt_bg=(48, 24, 64),
+        felt_edge_bg=(32, 14, 44),
+        card_face_bg=(245, 238, 230),   # ivory
+        face_card_bg=(250, 232, 200),
+        card_back_bg=(35, 18, 50),
+        highlight_bg=(212, 175, 55),    # gold
+        red_fg=(190, 50, 70),
+        black_fg=(35, 25, 40),
+        white_fg=(238, 232, 240),
+        gold_fg=(212, 175, 55),
+        light_gray_fg=(170, 158, 175),
+        green_fg=(120, 140, 175),
+        banner_bg=(60, 30, 80),
+        banner_fg=(225, 200, 240),
+        felt_placeholder_fg=(85, 55, 100),
+        menu_art_fg=(212, 175, 55),
+        menu_border_fg=(180, 160, 200),
+    ),
+    "emerald_isle": Theme(
+        name="Emerald Isle",
+        felt_bg=(12, 70, 50),
+        felt_edge_bg=(6, 46, 32),
+        card_face_bg=(245, 240, 220),   # cream
+        face_card_bg=(248, 238, 200),
+        card_back_bg=(70, 50, 22),      # brass
+        highlight_bg=(212, 175, 55),    # brass gold
+        red_fg=(178, 48, 56),
+        black_fg=(30, 35, 30),
+        white_fg=(232, 230, 215),
+        gold_fg=(212, 175, 55),
+        light_gray_fg=(150, 160, 150),
+        green_fg=(80, 175, 130),
+        banner_bg=(20, 60, 45),
+        banner_fg=(232, 210, 150),
+        felt_placeholder_fg=(50, 100, 80),
+        menu_art_fg=(212, 175, 55),
+        menu_border_fg=(110, 170, 130),
     ),
 }
 

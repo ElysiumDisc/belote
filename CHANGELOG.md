@@ -5,6 +5,153 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.1] - 2026-05-15
+
+Four bug fixes in the same family: writes that bypass `render.display()` were leaving the render-diff baseline out of sync with terminal state. **+7 regression tests** (716 → 723).
+
+### Fixed
+
+- **Two stacked `Partner ▓▓▓ (N cards)` rows and two `╔═══◆═══` mat-tops after the bid→play transition** (user-reported via `/home/mrrobot/belote/screen-2026-05-15-21-47-41.jpg`). Root cause: `src/belote/gameflow.py` wrote `f"\\r\\n  {bidder.name} takes it as {bid}!\\r\\n"` (and similar for play and round-end messages) directly to stdout, bypassing `render.display()`. When the cursor was at the bottom of the alt-screen, the trailing `\\n` forced strict terminals (Konsole) to scroll the entire frame up by one row. The render-diff layer in `render.display()` never learned about the scroll, so the next `display()` diffed the new frame against the cached `_last_emitted_lines` baseline, saw most rows as "unchanged", and emitted zero updates — leaving the scrolled-up old partner row visible above the new one. Documented at length in `src/belote/ui/announce.py:32-35` long before the fix, but the gameflow writes had never adopted the `announce()` primitive that comment was warning about.
+- **Leftover card fragment at non-lead seats between tricks** (user-reported via the first take of `/home/mrrobot/belote/screen-2026-05-15-22-13-41.jpg`). Root cause: `render.patch_trick_card()` writes a single card directly to the terminal during a trick (called 3× per trick, for cards 2-4). It did not update `_last_emitted_lines`, so when the next trick began and `display()` ran to redraw the empty mat, the diff layer compared the new "empty mat" frame against the cached "empty mat" baseline (which reflected the *pre-patch* frame, when only the lead card was on the mat). Rows matched → diff emitted nothing → the 3 patched cards from the previous trick stayed visible behind the new trick's placeholders. Fix: `patch_trick_card()` now calls `invalidate_diff()` at the end, forcing the next `display()` to emit a full frame. Same architectural rule as the 4.0.0 popup fix.
+- **BelAtro main menu, shop, rules, history, collection, and consumables overlays leaking into the next game frame** (user-reported via the second take of `screen-2026-05-15-22-13-41.jpg`, where the BELATRO ascii-art title + "Start Run / Select Deck / Collection / Rules / Quit" options were visible underneath the trick mat during an active round). Same architectural root cause: every BelAtro overlay paints directly to stdout (`clear_screen()` + content + flush) without updating `_last_emitted_lines`. When the overlay exited and the game's `display()` ran, the diff compared against a baseline that pre-dated the overlay; rows where the baseline happened to match the new frame (typically blank felt rows in the middle of the mat) skipped emit, leaving the overlay's content visible on the terminal. Fix: `invalidate_diff()` added to the end of each render path in `belatro/ui/menu.py`, `shop.py`, `rules.py`, `history.py`, `collection.py`, `consumables.py`.
+- **BelAtro `I`-key score popup stuck on screen "the whole time"** (user-reported during 4.0.1 dev). Pressing `I` during BelAtro play calls `_show_overlay` which paints the score breakdown via `BelAtroAnnounce.score_popup()`, waits 1.5s, then expects the next `display()` call (line below in main.py) to redraw the game frame and overwrite the popup. The popup's `print(move(...) + lines)` writes bypassed `_last_emitted_lines`, so the post-popup `display()` diffed the unchanged game state against the cached pre-popup baseline, saw "no changes", and emitted nothing — popup pixels stayed visible until something else forced a full redraw. Same fix in all four `BelAtroAnnounce` methods (`boss_reveal`, `banner`, `yes_no`, `score_popup`): each now calls `invalidate_diff()` on exit. `yes_no` wraps its return paths in a `try/finally` to guarantee the invalidation fires regardless of which branch is taken.
+
+### Changed
+
+- **`src/belote/gameflow.py:131-145`** — AI bid-result writes now go through `announce()` instead of raw `sys.stdout.write(f"\\r\\n  {bidder.name} takes it as ...\\r\\n")`. The `skip_anims` flag still propagates: `announce()` now returns the dismiss `KeyEvent` from `interruptible_sleep` (was always `None` pre-4.0.1).
+- **`src/belote/gameflow.py:199-200`** — Deleted the redundant `f"\\r\\n  {player.name} plays {card}\\r\\n"` write after every AI card play. The card is already drawn on the mat by the immediately-preceding `display()` / `patch_trick_card()` call, so the text was visually redundant and was the highest-frequency scroll source (24× per round). The TTS path in `src/belote/a11y.py:87` still announces plays independently for screen-reader users.
+- **`src/belote/gameflow.py:407-431`** — Replaced the ~10-line raw `\\r\\n`-dump round-end summary with a call to the new `show_round_summary()` modal.
+- **`src/belote/ui/announce.py::announce`** — return type is now `KeyEvent | None` (was `None`). Existing callers that ignored the return are unaffected.
+
+### Added
+
+- **`src/belote/ui/announce.py::show_round_summary`** — new end-of-round modal. Mirrors the `show_help` / `show_stats` pattern: title, taker info, breakdown messages (gold), team totals (NS/EW), optional replay summary, dismiss-on-any-key (or timeout). Painted with absolute cursor positioning so it cannot scroll, and calls `render.invalidate_diff()` on exit so the next `display()` does a full redraw. Returns `bool` indicating whether the user pressed a key to skip the pause.
+- **`tests/test_alt_screen_scroll.py`** — 7 new regression tests:
+  - `test_announce_never_writes_crlf` — `announce()` output contains no literal `\\r\\n`.
+  - `test_announce_returns_keyevent_when_skipped` — pins the new return-value contract via `interruptible_sleep` monkey-patching.
+  - `test_announce_returns_none_when_no_reader` — backward-compatible no-reader path returns `None`.
+  - `test_show_round_summary_no_crlf_and_invalidates_diff` — the new modal emits no `\\r\\n`, includes the expected text, and resets `_last_emitted_lines`.
+  - `test_belatro_overlays_invalidate_diff` — **static check**: each BelAtro overlay source file (`menu.py`, `shop.py`, `rules.py`, `history.py`, `collection.py`, `consumables.py`, and the four `BelAtroAnnounce` methods in `announce.py`) must call `invalidate_diff()` at least as many times as it has render-paint sites. Pins the architectural rule against future BelAtro overlays.
+  - `test_patch_trick_card_invalidates_diff_baseline` — pins the trick-residue fix: after `patch_trick_card`, `_last_emitted_lines` must be `None`.
+  - `test_gameflow_no_crlf_writes` — **architectural rule pin**: no `sys.stdout.write(...\\r\\n...)` may appear anywhere in `src/belote/gameflow.py` ever again. Any new scrolling write fails this test.
+
+### Removed
+
+- Unused imports cleaned from `src/belote/gameflow.py` after the deletions: `import sys`, `BOLD`, `RESET`, `gold_fg`.
+
+### Internal
+
+- **Tests**: 716 → 723 (+7).
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Design note — the `belote.ui` package shadow.** The `belote/ui/__init__.py` re-exports `render` (the function) and `announce` (the function), which means `from belote.ui import render` and `from belote.ui import announce` return the *functions*, not the modules. Tests that need to mutate module globals (e.g. patch `interruptible_sleep` or invalidate `_last_emitted_lines`) must use `sys.modules["belote.ui.render"]` / `sys.modules["belote.ui.announce"]`. Documented in `project_belatro_architecture.md`'s 4.0.0 wiring notes; the new tests added in 4.0.1 follow the same workaround.
+
+
+## [4.0.0] - 2026-05-15
+
+Major version bump for the **Grimaud Card Detail** feature — pressing `F` during play or bidding opens a full-screen zoomed view of the selected card with hand-drawn half-block illustrations for every face card (12 unique J/Q/K × suit combinations) loosely inspired by the *Grimaud Standard 1898* plate. Also fixes a long-latent diff-render bug where modal overlays could leave visible remnants after dismissal ("two stacks of cards"). **+5 regression tests** (711 → 716).
+
+### Added
+
+- **`src/belote/ui/card_detail.py`** — new module. Public entry `show_card_detail(card, reader)` paints a centered popup over a `felt_bg()` backdrop. The 18×24 pixel-art interior compiles to 12 cell rows via half-blocks (`▀` with independent fg/bg per cell — 2× vertical density). All 32 cards have a detail view: face cards use one of three silhouette templates (king / queen / jack) plus per-(rank, suit) palette + held-object overlay (sword, scepter, flower, fan, axe, bow, orb, halberd, leaf, scroll, feather fan); non-face cards (7-A) get a procedural pip layout scaled to the same canvas.
+- **`Key.CARD_DETAIL` enum value + `f` binding** in `src/belote/input.py` (both Unix `_UnixKeyReader.read()` at the printable-character switch and Windows `_WindowsKeyReader.read()` for parity).
+- **Hooks in `src/belote/ui/prompts.py`**: `prompt_card` opens the popup on the currently-selected card; `prompt_bid` opens it on `state.up_card`. `show_help`'s gameplay section lists the new key.
+- **`render.invalidate_diff()`** public helper (`src/belote/ui/render.py`) — resets `_last_emitted_lines` to `None` so the next `display()` emits a full frame. Used by `show_card_detail` on dismiss, and defensively by `show_help` / `show_history` / `show_rules` to fix the same latent diff-skip bug.
+- **`tests/test_card_detail.py`** — 5 new tests:
+  - `test_every_card_renders_correct_shape` — every card in `make_deck()` renders exactly `CARD_H × CARD_W` cells (visible-width strip of ANSI).
+  - `test_face_card_designs_complete_and_distinct` — all 12 face-card art outputs are pairwise unequal.
+  - `test_card_detail_key_enum_exists` — `Key.CARD_DETAIL` is present.
+  - `test_show_card_detail_dismisses_on_any_key` — popup writes title + body + footer to stdout and returns after a single `reader.read()`.
+  - `test_show_card_detail_invalidates_diff_baseline` — **regression pin** for the "two stacks of cards" bug; uses `sys.modules['belote.ui.render']` to bypass the `belote.ui` package-init function shadowing.
+
+### Fixed
+
+- **Diff-render baseline invalidation on overlay dismissal.** `show_card_detail`, `show_help`, `show_history`, and `show_rules` all write directly to `sys.stdout`, bypassing `render.display()`. Before 4.0.0, the next `display()` call would diff the new game frame against the pre-overlay `_last_emitted_lines` cache, see "no rows changed", and write zero bytes — leaving the overlay visible on screen behind a partial redraw (the popup card frozen mid-screen while the hand redrew at the bottom). All four call sites now call `invalidate_diff()` before returning. Pinned by `test_show_card_detail_invalidates_diff_baseline`.
+
+### Internal
+
+- **Tests**: 711 → 716 (+5: `tests/test_card_detail.py`).
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Plan file**: `/home/mrrobot/.claude/plans/home-mrrobot-belote-grimaud-standard-pl-twinkling-waffle.md`.
+- **Design note — face card art style.** The in-hand 3-row × 7-cell face cards (`render.py:184-203`) intentionally keep their generic box-drawing icon style; the popup is the dedicated "zoomed art view" with raster half-blocks. Two visual idioms serving different scales is fine — the in-hand cards must stay readable bracketed by 7 other cards on a felt mat at 9×7 cells, the popup gets 18×24 pixels of figure budget.
+
+
+## [3.9.5] - 2026-05-15
+
+Audit pass: bug-hunt, performance, dead-code, and logic-quality review across the whole codebase (five parallel Explore agents). **No critical bugs found** — rules, scoring, declarations, and target-score logic all match French Belote. Most "scattered if-check" / "deep cascade" findings turned out to be stale reads of the actual code, and the boss-modifier and legal-cards refactors the audit suggested were *deferred* after re-verification showed the existing structure was already correct. The remaining wins are real but small. **+9 regression tests** (702 → 711).
+
+### Changed
+
+- **`src/belote/ansi.py` — palette accessor fast path.** Theme palette functions (`felt_bg()`, `red_fg()`, `card_face_bg()`, …, 17 total) previously did a `_t().field` lookup + tuple unpack + `_bg_seq/_fg_seq` lru_cache hit per call. They now read a precomputed escape string from a `_Palette` dataclass cached at module level. The cache is rebuilt by `_refresh_theme_cache()` via `theme_manager.register_callback()` so theme switches still take effect immediately. ~10x fewer ops per palette call; cumulative ~50µs/render saving on wide terminals.
+- **`src/belote/ansi.py::visible_len` — ASCII fast path.** Strings without an `\x1b` escape skip the regex entirely and return `len(s)`. The function already had `lru_cache(maxsize=4096)`, but seat labels and separator dividers vary per-frame because they're rebuilt with different color codes, so the cache often misses. The fast path eliminates the regex pass for plain-ASCII fragments.
+- **`src/belote/scoring.py::is_capot` — accepts pre-computed winners.** `score_round` already pre-computes `compute_trick_winners()` once and threads it through `_calculate_base_points` and `_apply_scoring_modifiers`; `is_capot` was the lone scoring-phase caller still re-walking the 8 tricks. New optional `winners=` parameter avoids the redundant walk when the caller has already resolved them.
+- **`src/belote/input.py::interruptible_sleep` — tunable polling granularity.** New `granularity` parameter (default 0.05s — unchanged, preserves ESC vs. arrow-key disambiguation). Animation callers may pass a tighter value for snappier interruptibility without affecting the keyboard-decoding path. Backwards-compatible signature.
+
+### Removed
+
+- **Dead helpers in `src/belote/ui/render.py`** — `_get_card_back()`, `_get_felt_blank()`, `_felt_pad()`, and the `_TRICK_ROW_OFFSETS` "legacy constant retained for any caller still importing it (none in-tree now)" sentinel. Grep across `src/` and `tests/` confirmed zero callers; `_felt_pad_ns()` (the active variant) handled the remaining use cases.
+
+### Added
+
+- **`tests/test_invariants.py`** — 4 new property tests:
+  - **`test_boss_modifier_pairs_complete_round`** — drives a full round under every pair of suppression / zero-rank flags from a 9-flag pool (36 combinations). Asserts no crash, all hands drained, scoring returns. Cross-product safety net for future modifier additions.
+  - **`test_la_rupture_makes_capot_unreachable`** — under `no_consecutive_team_wins`, the same team cannot win two consecutive tricks, so capot (all 8) is mathematically impossible. 25 seeds × Spades contract.
+  - **`test_anarchie_plus_no_belote_suppresses_belote_across_rotations`** — `dynamic_trump` + `no_belote` together must keep `belote_tracker == (False, False)` even with mid-round trump rotation.
+  - **`test_zero_rank_flags_never_increase_table_total`** — zero-rank flags can only subtract points; table total must stay ≤ 162 baseline.
+- **`tests/test_perf_regression.py`** + **`tests/perf_baselines.json`** — 5 perf regression guards on `render`, `legal_cards` (cold + warm), `score_round`, `trick_card_points`. Compares median timings against committed baselines; fails on >2.5x regression (hardware-tolerant). Print warnings at 1.2x. Set `BELOTE_SKIP_PERF=1` to skip on weak runners.
+
+### Audit notes
+
+Reviewed but **deferred** after re-verification — code was cleaner than the audit's initial reading:
+
+- **Boss-modifier consolidation (proposed).** 23 `state.boss_modifiers.X` references across `game.py` / `scoring.py` / `ai.py`. Counter-evidence: zero-rank flags are already consolidated in `scoring.py::_card_points_with_zero_ranks`; every other flag has exactly one logical integration point (e.g. `no_belote` at `_record_belote_announcement`; `no_dix_de_der` at the +10 site; `no_consecutive_team_wins` at `compute_trick_winners`). Forcing a registry would add indirection without reducing real touch-points.
+- **`_calculate_legal_cards_impl` flattening (proposed).** Max nesting is ~4 levels; `partner_winning` is consulted in one branch only (`game.py:623`). Audit's "5-6 levels" figure was a misread. Refactor risk on rule-critical code outweighs marginal clarity gain.
+- **`_medium_play` / `_medium_lead` merge (proposed).** `_medium_play` already delegates to `_medium_lead` when the trick is empty. The two methods address genuinely different decision contexts. Already structured correctly.
+- **Skip full re-render after non-South card (proposed).** `gameflow.py:192-195` already gates `display()` vs. `patch_trick_card()` via `if len(current_trick) == 1 else …`. No code change needed.
+- **Cache terminal size per render frame (proposed).** `TerminalContext.get_size()` already caches at module level and invalidates on SIGWINCH. Threading args adds complexity for zero gain.
+- **Hoist felt color calls out of cell loop (proposed).** `_felt_segment_cached` (`render.py:390-392`) already calls `felt_bg()` / `felt_edge_bg()` / `felt_placeholder_fg()` once before its per-cell loop.
+
+### Internal
+
+- **Tests**: 702 → 711 (+9: 4 invariants + 5 perf guards).
+- **Plan file**: `/home/mrrobot/.claude/plans/bug-hunt-code-performance-distributed-harp.md`.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+
+
+## [3.9.4] - 2026-05-15
+
+UI polish pass: four new themes, decorated felt mat (vignette + braille pip texture + corner-ornamented frame), reworked hand selection display, auto-sort, and a stats-screen accuracy fix. **+10 regression tests** (691 → 702).
+
+### Added
+
+- **Four new themes** in `src/belote/themes.py`: **Forest Night** (mossy green with copper accents), **Moonlit Tavern** (cool slate-blue with candle amber and parchment cards), **Royal Purple** (regal violet with ivory + gold), **Emerald Isle** (jewel emerald with cream cards and brass trim). All eleven themes selectable via the `T`-key cycle or the Theme submenu (`src/belote/ui/menu.py`).
+- **`Theme.felt_edge_bg` field** (`src/belote/themes.py`) + matching `felt_edge_bg()` accessor in `src/belote/ansi.py`. Populated for all 11 themes (~70% luminance of `felt_bg`). Drives the new vignette band on the trick mat. The required-fields validation test (`tests/test_ansi_helpers.py:114-119`) is updated to enforce the new key on every theme.
+- **Felt-mat polish (`src/belote/ui/render.py`):**
+  - **Vignette band** — leftmost / rightmost 2 cells of each row and the top + bottom rows now paint in `felt_edge_bg`, giving the mat a spotlit look that pops the playing area away from the edges.
+  - **Braille pip texture overlay** — sparse single-dot braille glyphs (U+2800–U+28FF, the `_BRAILLE_DOTS = "⠁⠂⠄⡀⠈⠐⠠⢀"` constant) stamped on ~9% of blank felt cells via the pure `_pip_at(row, col)` function. Pure-deterministic on `(row, col)` so the Phase-6 diff renderer at `display()` line ~1146 still skips unchanged rows. Color is `felt_placeholder_fg()` so the texture reads as fabric weave, not pattern. Skipped on non-UTF-8 terminals via the existing `TERMINAL.has_utf8` guard.
+  - **Decorative outer frame (`_render_trick_mat_framed`)** — wraps the trick mat with `╔═══◆═══...═══◆═══╗ / ║ ... ║ / ╚═══◆═══...═══◆═══╝` border + corner ornaments at ⅓ / ⅔ positions, in `felt_placeholder_fg()` on `felt_edge_bg()`. Auto-gated: only fires when `term_h >= layout.min_rows + 2` so the bottom of the south hand never gets pushed off-screen at COMPACT (80×32) or at STANDARD's minimum (96×38).
+  - All blank-felt helpers (`_slot_frame_row`, `_felt_pad_ns`, `_we_row`, `_slot_label_ns`) now take `row_id` and route blank cells through the new `_felt_segment` helper. `clear_card_cache()` also clears `_felt_segment_cached` / `_felt_blank_internal` on theme change.
+- **Hand-UI rework (`_render_hand_horizontal`):**
+  - Bare `▲` cursor replaced with a `card_w`-wide highlight bar in `highlight_bg()` directly under the selected card — clearer on the now-busier felt.
+  - Centered card-name readout `► A♠ — Trump ◄` below the bar, color-coded: `gold_fg()` if trump, suit color otherwise, `light_gray_fg()` if illegal. Tagged with `— Trump` / `— Illegal` where applicable. New `trump: Suit | None` and `show_readout: bool` parameters; the caller in `render()` gates `show_readout` at `term_h > layout.min_rows` so the readout disappears at min terminal sizes rather than pushing the south hand off-screen.
+- **Auto-sort south hand on entry to `prompt_card`** (`src/belote/ui/prompts.py`). One call to the existing `sort_south_hand(state)` at the top of the function — same helper the manual `S` key already used. Returned state propagates per the existing docstring contract. The `Key.SORT` handler stays in place as a harmless re-sort (preserves muscle memory + documented controls).
+
+### Fixed
+
+- **Stats menu `Unlocks` line misleading on fresh profiles (`src/belote/ui/announce.py:91`).** The line `Unlocks: {len(profile.unlocked_ids)} items found` showed "3 items found" on a brand-new profile, but the BelAtro collection screen showed nothing unlocked — because `Profile.unlocked_ids` defaults to `["le_classique", "le_courageux", "l_econome"]` (3 starter items) while `Profile.discovered_items` defaults to `[]`, and the collection screen filters on `discovered_items` (`src/belote/belatro/ui/collection.py:77`). The two lists were never synced, but the stats line implied they were. Fix replaces the single line with two: `Discovered: N items seen` and `Unlocked: N items earned`. Both counts are now visible and the discrepancy is intelligible. Regression: `tests/test_announce_stats.py::test_stats_shows_discovered_and_unlocked_separately`.
+
+### Internal
+
+- **Tests**: 691 → 702 (+11; +10 new + 1 in `test_ansi_helpers.py`). New files: `tests/test_render_felt_polish.py` (8: pip determinism, braille presence, vignette, frame gating at COMPACT/STANDARD-min/STANDARD-with-slack, readout gating at slack/at-minimum), `tests/test_hand_auto_sort.py` (1: `prompt_card` propagates sorted hand), `tests/test_announce_stats.py` (1: stats screen shows both `Discovered:` and `Unlocked:` with correct counts). Existing `test_ansi_helpers.py::test_themes_have_required_palette_keys` updated for `felt_edge_bg` + new `test_felt_edge_bg_returns_csi_sequence`.
+- **Strict gates**: pytest 702/702 green.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Plan file**: `/home/mrrobot/.claude/plans/i-want-to-add-inherited-wilkes.md`.
+
+### Design notes
+
+- **Perkins integration path.** The braille-texture and corner-ornament approach was chosen partly so future visual polish can be designed in [Perkins](https://github.com/Mr-Robot-err-404/perkins) (an ASCII pixel-art editor that uses braille glyphs natively) and pasted in as ANSI-string constants. The current `╔═══◆` corner is a placeholder — a Perkins-designed fleur-de-lis / compass-rose / themed crest could replace it without touching the framing logic.
+- **Diff-renderer compatibility.** Pip placement must remain a pure function of `(row, col)`. Tested by `tests/test_render_felt_polish.py::test_pip_overlay_is_deterministic` which re-renders the same state and asserts byte-identical output. Any future change introducing `random` or `time` into the felt pattern will break this test.
+
+
 ## [3.9.3] - 2026-05-15
 
 Multi-agent audit pass (six Explore agents — three broad-sweep + three targeted deep-dives on AI, scoring edge cases, per-joker mechanics, endless mode, meta-progression). Every load-bearing finding verified against the live code before patching; **8 false positives** caught and documented (corrupted-joker seat semantics being intentional, ToutStreak persistence working correctly via `card_enhancements`, `_card_back` LRU cache being theme-keyed, etc.). **Six real fixes (R1–R7)** landed plus three larger phases: render-diff layer, endless-mode boss-variety guard, and a Quinte Royale unlock that had been marked `is_unlockable` for releases without a trigger. **Rematch entirely removed** at user request — game-over screen keeps only `[Enter/Q] Menu` and `[H] History`; players who want to play again use the menu. **+30 regression tests** (661 → 691).

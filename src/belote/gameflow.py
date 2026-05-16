@@ -2,16 +2,10 @@ from __future__ import annotations
 
 import os
 import random
-import sys
 from dataclasses import replace
 
 from . import a11y
 from .ai import AIPlayer, Difficulty
-from .ansi import (
-    BOLD,
-    RESET,
-    gold_fg,
-)
 from .deck import Card, Contract, Suit
 from .game import (
     SANS_ATOUT_BID,
@@ -48,6 +42,7 @@ from .ui import (
     patch_trick_card,
     prompt_bid,
     prompt_card,
+    show_round_summary,
 )
 
 # Minimum time the four cards stay on the mat before a trick clears. This
@@ -130,18 +125,13 @@ def run_bidding(
             bid = ai.decide_bid(current)
             display(current, None)
             if bid is not None:
-                sys.stdout.write(
-                    f"\r\n  {bidder.name} takes it as {_bid_label(bid)}!\r\n"
-                )
+                message = f"{bidder.name} takes it as {_bid_label(bid)}!"
+                duration = (ai_delay * 2 + 0.5) if not skip_anims else 0
             else:
-                sys.stdout.write(f"\r\n  {bidder.name} passes\r\n")
-            sys.stdout.flush()
-
-            # If someone takes, pause longer so user can see it
-            if not skip_anims:
-                delay = ai_delay * 2 + 0.5 if bid else ai_delay
-                if interruptible_sleep(delay, reader):
-                    skip_anims = True
+                message = f"{bidder.name} passes"
+                duration = ai_delay if not skip_anims else 0
+            if announce(message, duration=duration, reader=reader) is not None:
+                skip_anims = True
 
         history.append(current)
         current = process_bid(current, bid)
@@ -194,16 +184,19 @@ def run_play(
         else:
             patch_trick_card(display_state, player, card)
 
-        # 2. Handle AI message and short delay for cards 1, 2, 3
-        if player != Seat.SOUTH:
-            sys.stdout.write(f"\r\n  {player.name} plays {card}\r\n")
-            sys.stdout.flush()
-            if (
-                len(display_state.current_trick) < 4
-                and not skip_anims
-                and interruptible_sleep(ai_delay, reader)
-            ):
-                skip_anims = True
+        # 2. Short delay for cards 1, 2, 3. The card is already visible on the
+        # mat from step 1 (display() or patch_trick_card just above); no text
+        # banner is needed — pre-4.0.1 wrote "X plays Y" to stdout, which
+        # scrolled the alt-screen and corrupted the diff baseline. The TTS
+        # path in a11y.py:87 still announces the play independently for
+        # screen-reader users.
+        if (
+            player != Seat.SOUTH
+            and len(display_state.current_trick) < 4
+            and not skip_anims
+            and interruptible_sleep(ai_delay, reader)
+        ):
+            skip_anims = True
 
         # 3. If this completes a trick, pause longer and show announcements
         if len(display_state.current_trick) == 4:
@@ -406,29 +399,18 @@ def run_round(
         if current.phase == Phase.SCORING:
             breakdown = score_round(current)
             display(current, None)
-            sys.stdout.write(f"\r\n{'=' * 50}\r\n")
-            sys.stdout.write("  Round Results:\r\n")
-            taker_name = current.taker.name if current.taker else "?"
-            team_label = "NS" if current.taker is not None and team_of(current.taker) == 0 else "EW"
-            sys.stdout.write(f"  Taker: {taker_name} (Team {team_label})\r\n")
-            for msg in breakdown.messages:
-                sys.stdout.write(f"  {BOLD}{gold_fg()}{msg}{RESET}\r\n")
-            ns_pts = (
-                breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total
-            )
-            ew_pts = (
-                breakdown.defender_total if breakdown.taker_team == 0 else breakdown.taker_total
-            )
-            sys.stdout.write(f"  Team NS: {ns_pts} points\r\n")
-            sys.stdout.write(f"  Team EW: {ew_pts} points\r\n")
+            replay_str: str | None = None
             if replay_decisions:
                 from .replay import analyze_round, summarize
                 reports = analyze_round(replay_decisions, rng=current._rng)
-                sys.stdout.write(f"  Replay: {summarize(reports)}\r\n")
-            sys.stdout.write(f"{'=' * 50}\r\n\r\n")
-            sys.stdout.flush()
-
-            skip_round_pause = interruptible_sleep(round_pause, reader)
+                replay_str = summarize(reports)
+            skip_round_pause = show_round_summary(
+                current,
+                breakdown,
+                reader,
+                timeout=round_pause,
+                replay_summary=replay_str,
+            )
 
             # Animate score update
             ns_old, ew_old = current.team_scores

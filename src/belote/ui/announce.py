@@ -19,13 +19,16 @@ from ..ansi import (
     move,
     white_fg,
 )
-from ..game import GameState
-from ..input import KeyReader, interruptible_sleep
+from ..game import GameState, team_of
+from ..input import KeyEvent, KeyReader, interruptible_sleep
+from ..scoring import ScoringBreakdown
 from ..stats import get_session_stats, load_stats
-from .render import display_hud, get_term_size
+from .render import display_hud, get_term_size, invalidate_diff
 
 
-def announce(message: str, duration: float = 2.0, reader: KeyReader | None = None) -> None:
+def announce(
+    message: str, duration: float = 2.0, reader: KeyReader | None = None
+) -> KeyEvent | None:
     """Display a transient announcement banner.
 
     Painted with absolute cursor positioning + clear_line so it never triggers
@@ -33,6 +36,12 @@ def announce(message: str, duration: float = 2.0, reader: KeyReader | None = Non
     screen. Writing \\r\\n at the bottom row scrolls the alt-screen on Konsole
     and other strict emulators, which leaks the previous frame onto rows the
     next render's blank padding doesn't repaint.
+
+    Returns the `KeyEvent` from `interruptible_sleep` if the user pressed a
+    key to skip the pause (callers use this to propagate a `skip_anims` flag),
+    otherwise `None`. Returning `None` for a non-interactive sleep (no reader
+    or zero duration) preserves the pre-4.0.1 contract for callers that
+    ignored the return.
     """
     term_w, term_h = get_term_size()
     banner = ansi_center(
@@ -41,9 +50,74 @@ def announce(message: str, duration: float = 2.0, reader: KeyReader | None = Non
     sys.stdout.write(move(max(1, term_h - 1), 1) + clear_line() + banner)
     sys.stdout.flush()
     if reader and duration > 0:
-        interruptible_sleep(duration, reader)
-    else:
+        return interruptible_sleep(duration, reader)
+    if duration > 0:
         time.sleep(duration)
+    return None
+
+
+def show_round_summary(
+    state: GameState,
+    breakdown: ScoringBreakdown,
+    reader: KeyReader,
+    timeout: float = 0,
+    replay_summary: str | None = None,
+) -> bool:
+    """End-of-round results modal. Replaces the pre-4.0.1 raw `\\r\\n`-dump
+    in `gameflow.py:407-428` that was scrolling the alt-screen and corrupting
+    the render-diff baseline.
+
+    Painted with absolute cursor positioning so it cannot scroll. Returns
+    `True` if the user pressed a key (signaling "skip remaining animations"),
+    `False` if the `timeout` expired naturally. Always calls
+    `invalidate_diff()` on exit so the next `display()` redraws the full
+    game frame.
+    """
+    term_w, term_h = get_term_size()
+
+    taker_name = state.taker.name if state.taker else "?"
+    taker_team_label = (
+        "NS" if state.taker is not None and team_of(state.taker) == 0 else "EW"
+    )
+    if breakdown.taker_team == 0:
+        ns_pts = breakdown.taker_total
+        ew_pts = breakdown.defender_total
+    else:
+        ns_pts = breakdown.defender_total
+        ew_pts = breakdown.taker_total
+
+    lines: list[str] = [
+        f"{BOLD}{gold_fg()}══════ Round Results ══════{RESET}",
+        "",
+        f"{white_fg()}Taker:{RESET} {taker_name} (Team {taker_team_label})",
+        "",
+    ]
+    for msg in breakdown.messages:
+        lines.append(f"{BOLD}{gold_fg()}{msg}{RESET}")
+    if breakdown.messages:
+        lines.append("")
+    lines.append(f"{white_fg()}Team NS:{RESET} {ns_pts} points")
+    lines.append(f"{white_fg()}Team EW:{RESET} {ew_pts} points")
+    if replay_summary:
+        lines.append("")
+        lines.append(f"{DIM}Replay: {replay_summary}{RESET}")
+    lines.append("")
+    if timeout > 0:
+        footer = f"{DIM}[Any Key] continue  ({timeout:.1f}s){RESET}"
+    else:
+        footer = f"{DIM}[Any Key] continue{RESET}"
+    lines.append(footer)
+
+    start_row = max(1, (term_h - len(lines)) // 2)
+    parts: list[str] = [clear_screen(), hide_cursor()]
+    for i, line in enumerate(lines):
+        parts.append(move(start_row + i, 1) + ansi_center(line, term_w))
+    sys.stdout.write("".join(parts))
+    sys.stdout.flush()
+
+    event = reader.read_timeout(timeout) if timeout > 0 else reader.read()
+    invalidate_diff()
+    return event is not None
 
 
 def show_stats(reader: KeyReader) -> None:
@@ -88,7 +162,8 @@ def show_stats(reader: KeyReader) -> None:
             f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
             f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}"
         )
-        lines.append(f"  Unlocks:           {len(profile.unlocked_ids)} items found")
+        lines.append(f"  Discovered:        {len(profile.discovered_items)} items seen")
+        lines.append(f"  Unlocked:          {len(profile.unlocked_ids)} items earned")
         lines.append("")
 
         # ── OTHER ──────────────────────────────────────────────────────────

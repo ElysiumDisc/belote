@@ -18,7 +18,7 @@ from belote.ansi import (
     white_fg,
 )
 from belote.input import Key
-from belote.ui.render import get_term_size
+from belote.ui.render import get_term_size, invalidate_diff
 
 from ..core.run_state import BelAtroRun
 from ..run.decks import STARTING_DECKS
@@ -114,6 +114,13 @@ class BelAtroMainMenu:
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
+        # 4.0.1: this overlay paints directly to stdout, bypassing the
+        # diff-managed display(). Without invalidating the baseline, when
+        # the main menu exits and the game's first display() runs, the
+        # diff compares against a stale frame; rows that happen to match
+        # leak whatever the menu painted (BELATRO ascii art, menu options,
+        # etc.) into the game frame. Same rule as patch_trick_card.
+        invalidate_diff()
 
     def _select_deck(self) -> None:
         """Deck selection submenu — two-panel layout."""
@@ -177,6 +184,7 @@ class BelAtroMainMenu:
 
             sys.stdout.write("".join(out))
             sys.stdout.flush()
+            invalidate_diff()
 
             event = self.reader.read()
             key = event.key

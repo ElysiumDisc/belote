@@ -34,7 +34,7 @@ from ...ansi import (
     white_fg,
 )
 from ...input import Key, KeyReader
-from ...ui.render import get_term_size
+from ...ui.render import get_term_size, invalidate_diff
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +184,7 @@ def show_belatro_history(reader: KeyReader, entries: list[BelAtroHistoryEntry]) 
         rendered = "\r\n".join(ansi_center(line, term_w) for line in visible)
         sys.stdout.write(out + rendered)
         sys.stdout.flush()
+        invalidate_diff()
 
         event = reader.read()
         match event.key:

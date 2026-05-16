@@ -66,6 +66,8 @@ class ConsumablesOverlay:
             lines.append(ansi_center("Esc to return", term_w))
             sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
             sys.stdout.flush()
+            from belote.ui.render import invalidate_diff
+            invalidate_diff()
             while True:
                 event = self.reader.read()
                 if event.key in (Key.ESC, Key.QUIT, Key.ENTER, Key.EOF):
@@ -83,6 +85,8 @@ class ConsumablesOverlay:
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()
 
         while True:
             event = self.reader.read()

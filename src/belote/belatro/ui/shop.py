@@ -136,6 +136,8 @@ class ShopScreen:
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()
 
         while True:
             event = self.reader.read()
@@ -303,3 +305,5 @@ class ShopScreen:
             f"← → Navigate   Enter: Buy   C: Consumables ({consumable_count})   Esc: Continue"
         )
         print(move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w))
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from belote.ansi import BOLD, RESET, ansi_center, clear_screen, gold_fg, move, red_fg, white_fg
 from belote.input import Key, interruptible_sleep
+from belote.ui.render import invalidate_diff
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -56,6 +57,7 @@ class BelAtroAnnounce:
             + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, term_w)
         )
         interruptible_sleep(2.0, reader)
+        invalidate_diff()
 
     @staticmethod
     def banner(message: str, reader: KeyReader, *, color: str = "gold", hold: float = 1.5) -> None:
@@ -75,6 +77,7 @@ class BelAtroAnnounce:
             if event.key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
                 break
             remaining = end - time.time()
+        invalidate_diff()
 
     @staticmethod
     def yes_no(prompt: str, reader: KeyReader) -> bool:
@@ -91,18 +94,21 @@ class BelAtroAnnounce:
         hint = white_fg() + "[Y]es / [N]o" + RESET
         print(move(row, 1) + ansi_center(body, term_w), end="")
         print(move(row + 2, 1) + ansi_center(hint, term_w), end="", flush=True)
-        while True:
-            event = reader.read()
-            if event.key in (Key.ENTER,):
-                return True
-            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
-                return False
-            if event.key == Key.CHAR and event.char:
-                ch = event.char.lower()
-                if ch in ("y", "o"):  # Y / O for "Oui"
+        try:
+            while True:
+                event = reader.read()
+                if event.key in (Key.ENTER,):
                     return True
-                if ch == "n":
+                if event.key in (Key.ESC, Key.QUIT, Key.EOF):
                     return False
+                if event.key == Key.CHAR and event.char:
+                    ch = event.char.lower()
+                    if ch in ("y", "o"):  # Y / O for "Oui"
+                        return True
+                    if ch == "n":
+                        return False
+        finally:
+            invalidate_diff()
 
     @staticmethod
     def score_popup(lines: list[str], reader: KeyReader) -> None:
@@ -127,3 +133,9 @@ class BelAtroAnnounce:
                 break
             remaining = end - time.time()
         toggle_overlay()
+        # The popup painted lines directly to stdout. Without resetting the
+        # diff baseline, the next display() call diffs the (unchanged) game
+        # state against the cached pre-popup baseline, sees no row changes,
+        # and writes nothing — leaving the popup lines visible "the whole
+        # time" until something forces a full redraw.
+        invalidate_diff()

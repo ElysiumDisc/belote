@@ -27,6 +27,7 @@ class Key(Enum):
     THEME = "THEME"
     HIST = "HIST"
     OVERLAY = "OVERLAY"
+    CARD_DETAIL = "CARD_DETAIL"
     # End-of-file on stdin (closed pipe, headless harness, Ctrl-D on a real
     # tty). Distinct from ESC so the outermost game loops can recognise a
     # closed input stream and exit cleanly instead of spinning through
@@ -167,6 +168,8 @@ class _UnixKeyReader:
                 return KeyEvent(Key.SORT)
             if ch.lower() == "i" or ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
+            if ch.lower() == "f":
+                return KeyEvent(Key.CARD_DETAIL)
 
             return KeyEvent(Key.CHAR, ch)
         except (ValueError, UnicodeDecodeError):
@@ -179,17 +182,25 @@ class _UnixKeyReader:
             return self.read()
         return None
 
-def interruptible_sleep(seconds: float, reader: KeyReader | None = None) -> KeyEvent | None:
-    """Sleep for some time, but return immediately if a key is pressed."""
+def interruptible_sleep(
+    seconds: float,
+    reader: KeyReader | None = None,
+    granularity: float = 0.05,
+) -> KeyEvent | None:
+    """Sleep for `seconds`, but return immediately if a key is pressed.
+
+    `granularity` is the poll interval (seconds). Default 0.05 matches the ESC
+    vs. arrow-key disambiguation window. Animation callers (trick dwell, score
+    ticker) may pass a tighter value (e.g. 0.01) for snappier interruption.
+    """
     start = time.time()
     while time.time() - start < seconds:
         if reader:
-            # Check if input is available
-            r, _, _ = select.select([sys.stdin], [], [], 0.05)
+            r, _, _ = select.select([sys.stdin], [], [], granularity)
             if r:
                 return reader.read()
         else:
-            time.sleep(0.05)
+            time.sleep(granularity)
     return None
 
 
@@ -286,6 +297,8 @@ if os.name == "nt":
                 return KeyEvent(Key.SORT)
             if ch.lower() in (b"i", b"v"):
                 return KeyEvent(Key.OVERLAY)
+            if ch.lower() == b"f":
+                return KeyEvent(Key.CARD_DETAIL)
 
             try:
                 char = ch.decode("utf-8")

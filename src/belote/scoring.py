@@ -373,7 +373,11 @@ def resolve_declarations(
     )
 
 
-def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None) -> int | None:
+def is_capot(
+    state: GameState,
+    tricks: list[tuple[TrickCard, ...]] | None = None,
+    winners: list[Seat | None] | None = None,
+) -> int | None:
     """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None.
 
     Honors La Rupture (`no_consecutive_team_wins`) for both the default
@@ -382,10 +386,15 @@ def is_capot(state: GameState, tricks: list[tuple[TrickCard, ...]] | None = None
     8th trick (`gameflow.py` passes `tricks=completed + [current]`) must use
     the same Rupture-aware resolution as the final scoring path or it will
     falsely announce CAPOT mid-round.
+
+    `winners` is honored only when `tricks is None` — when a caller already
+    resolved winners for `state.completed_tricks`, pass them in to avoid the
+    repeated trick-winner walk that `score_round` would otherwise trigger.
     """
     is_sa = state.contract == Contract.SANS_ATOUT
     if tricks is None:
-        winners = compute_trick_winners(state, state.trump, is_sa)
+        if winners is None:
+            winners = compute_trick_winners(state, state.trump, is_sa)
     else:
         if not tricks or len(tricks) < 8:
             return None
@@ -982,7 +991,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     taker_declarations, defender_declarations = _compute_declaration_points(ctx, resolved)
 
     # 7. Capot check → branch to capot or normal outcome.
-    capot_winner_team = is_capot(state)
+    capot_winner_team = is_capot(state, winners=winners)
     if capot_winner_team is not None:
         return _score_capot_outcome(
             ctx,
