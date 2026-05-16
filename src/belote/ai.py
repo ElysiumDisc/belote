@@ -311,11 +311,15 @@ class AIPlayer:
                 "likely a deal bug (check deck.deal gives 8 cards per player)."
             )
         if not legal:
-            # Defensive: legal_cards should never be empty mid-play.
-            # Fall back to full hand rather than constructing a phantom card.
-            # The old fallback Card(Suit.SPADES, Rank.ACE) caused crashes when
-            # that card wasn't in the player's hand.
-            legal = hand
+            # legal_cards is empty only if the hand is empty (caught above) or
+            # if there's a dealing/legal-cards regression. Earlier versions
+            # silently fell back to the full hand, which let illegal-card
+            # bugs slip past the AI silently. Raise loudly instead.
+            raise AssertionError(
+                f"AI {self.seat.name}: legal_cards empty during PLAYING "
+                f"(trump={state.trump}, lead={state.current_trick[0] if state.current_trick else None}, "
+                f"hand_size={len(hand)}) — likely a legal_cards regression."
+            )
 
         if self.difficulty == Difficulty.EASY:
             return self._easy_play(state, legal)
@@ -531,7 +535,17 @@ class AIPlayer:
                     elif other_count == 1:
                         suit_scores[suit] += 1
 
+        # 4.1.0: under LesClubsBannis (`ban_clubs`) every clubs trick scores 0,
+        # making clubs a suicidal trump. The point-total branch already returns
+        # 0 for clubs cards via `card_points_with_modifiers`, but the honor
+        # count + cross-suit short-suit bonuses still pushed clubs above the
+        # bid threshold on club-honor-heavy hands. Exclude clubs from the
+        # candidate list under the flag.
         avail = [s for s in card_suits if s != exclude]
+        if bm.ban_clubs:
+            avail = [s for s in avail if s != Suit.CLUBS]
+        if not avail:
+            return None
         best_suit = max(avail, key=lambda s: suit_scores[s])
         if suit_scores[best_suit] + personality >= 6:
             return best_suit

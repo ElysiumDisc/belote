@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from belote.game import Seat
+from belote.game import Seat, team_of
 
 from ...engine.event_bus import TrickWonEvent
 from ..base import Joker, JokerResult
@@ -15,7 +15,8 @@ class LeTraitre(Joker):
     id = "le_traitre"
     name = "Le Traître"
     description = (
-        "Once purchased, reveals itself: partner throws one trick per round. Gives +2.5 Mult."
+        "Once purchased, reveals itself: partner throws one trick per round. "
+        "+2.5 Mult when you (South) win a trick."
     )
     cost = 6
     is_corrupted = True
@@ -24,6 +25,8 @@ class LeTraitre(Joker):
         run.partner_throws_trick = True
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        # Seat-themed (South-only): the joker punishes the partner, so the
+        # mult only credits the player who reaped the benefit.
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=2.5)
         return None
@@ -32,7 +35,7 @@ class LeTraitre(Joker):
 class LeDemon(Joker):
     id = "le_demon"
     name = "Le Démon"
-    description = "+3 Mult unconditionally. Partner personality permanently degrades one tier."
+    description = "+3 Mult unconditionally per trick won. Partner personality permanently degrades one tier."
     cost = 8
     is_corrupted = True
 
@@ -41,7 +44,10 @@ class LeDemon(Joker):
         run.partner.trust.value = max(0, run.partner.trust.value - 3)
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.winner == Seat.SOUTH:
+        # "Unconditionally" per the description: fires for any trick won by
+        # team NS (matches the team-aware joker cohort like L'Accumulateur).
+        # Pre-4.1.0 this gated on Seat.SOUTH only, contradicting the description.
+        if team_of(event.winner) == 0:
             return JokerResult(add_mult=3.0)
         return None
 
@@ -65,7 +71,10 @@ class LEgoiste(Joker):
 class LAgentDouble(Joker):
     id = "lagent_double"
     name = "L'Agent Double"
-    description = "+4 Mult. Partner plays optimally for the opponents for 2 tricks."
+    description = (
+        "+4 Mult when you (South) win a trick. "
+        "Partner plays optimally for the opponents for 2 tricks."
+    )
     cost = 9
     is_corrupted = True
 
@@ -75,6 +84,8 @@ class LAgentDouble(Joker):
         run.agent_double_joker = True
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        # Seat-themed (South-only): partner is actively sabotaging, so the
+        # mult only credits tricks that survived the sabotage.
         if event.winner == Seat.SOUTH:
             return JokerResult(add_mult=4.0)
         return None

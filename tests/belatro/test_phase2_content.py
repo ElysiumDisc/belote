@@ -503,3 +503,149 @@ def test_lagent_double_purchase_flags_run() -> None:
     assert run.agent_double_joker is False
     LAgentDouble().on_purchase(run)
     assert run.agent_double_joker is True
+
+
+# ── 4.1.0 fixes: corrupted-joker description/code alignment ────────────────
+
+
+def _trick_won(winner: Seat, card_points: int = 10) -> TrickWonEvent:
+    """Helper for the 4.1.0 corrupted-joker tests."""
+    return TrickWonEvent(
+        winner=winner,
+        cards=(),
+        trick_number=1,
+        is_last=False,
+        card_points=card_points,
+        trump=Suit.HEARTS,
+        leader_seat=Seat.SOUTH,
+    )
+
+
+def test_le_demon_fires_unconditionally_on_team_ns_trick() -> None:
+    """4.1.0 fix: LeDémon's description claims '+3 Mult unconditionally per
+    trick won'. Pre-4.1.0 the code only fired on Seat.SOUTH wins, so trick
+    wins by the North partner silently dropped the mult — contradicting the
+    description. The fix gates on `team_of(event.winner) == 0` so both South
+    and North trick wins credit the mult.
+    """
+    from belote.belatro.items.jokers.corrupted import LeDemon
+
+    j = LeDemon()
+    # South win: fires.
+    res_south = j.on_trick_won(_trick_won(Seat.SOUTH), {})
+    assert res_south is not None and res_south.add_mult == 3.0
+    # North win (partner): also fires now.
+    res_north = j.on_trick_won(_trick_won(Seat.NORTH), {})
+    assert res_north is not None and res_north.add_mult == 3.0
+    # EW wins still drop nothing.
+    assert j.on_trick_won(_trick_won(Seat.EAST), {}) is None
+    assert j.on_trick_won(_trick_won(Seat.WEST), {}) is None
+
+
+def test_le_traitre_remains_seat_themed() -> None:
+    """LeTraître's gating is intentional (seat-themed: the joker punishes the
+    partner, so the mult only credits the player who reaped the benefit). The
+    4.1.0 audit kept this and clarified the docstring.
+    """
+    from belote.belatro.items.jokers.corrupted import LeTraitre
+
+    j = LeTraitre()
+    assert (j.on_trick_won(_trick_won(Seat.SOUTH), {}) or JokerResult()).add_mult == 2.5
+    assert j.on_trick_won(_trick_won(Seat.NORTH), {}) is None
+    assert j.on_trick_won(_trick_won(Seat.EAST), {}) is None
+    assert "win a trick" in (j.description or ""), (
+        "LeTraître's description must spell out the seat-themed gating"
+    )
+
+
+def test_lagent_double_remains_seat_themed() -> None:
+    """LAgentDouble: partner is actively sabotaging — mult only credits tricks
+    that survived the sabotage. 4.1.0 keeps the South-only gate but clarifies
+    the description.
+    """
+    from belote.belatro.items.jokers.corrupted import LAgentDouble
+
+    j = LAgentDouble()
+    assert (j.on_trick_won(_trick_won(Seat.SOUTH), {}) or JokerResult()).add_mult == 4.0
+    assert j.on_trick_won(_trick_won(Seat.NORTH), {}) is None
+    assert "win a trick" in (j.description or ""), (
+        "LAgentDouble's description must spell out the seat-themed gating"
+    )
+
+
+# ── 4.1.0: re-emit short-circuit guards (Phase B) ──────────────────────────
+
+
+def _round_end_with_re_emit() -> RoundEndEvent:
+    """Build a RoundEndEvent and stamp a re_emit=True attribute on it.
+
+    RoundEndEvent is frozen so we use object.__setattr__ to bypass the
+    immutability guard — mirrors how a future replay/UI layer might extend
+    the dataclass with the flag.
+    """
+    e = RoundEndEvent(
+        breakdown=_StubBreakdown(),
+        taker_seat=Seat.SOUTH,
+        trump=Suit.HEARTS,
+        capot=False,
+        coinche_level=2,
+    )
+    object.__setattr__(e, "re_emit", True)
+    return e
+
+
+def test_le_banquier_short_circuits_on_re_emit() -> None:
+    """4.1.0 Phase B: re-emit short-circuit must skip the cash payout."""
+    from belote.belatro.items.jokers.economy import LeBanquier
+
+    class _OkBd:
+        is_failed = False
+        taker_total = 200
+        defender_total = 50
+
+    e = RoundEndEvent(
+        breakdown=_OkBd(),
+        taker_seat=Seat.SOUTH,
+        trump=Suit.HEARTS,
+        capot=False,
+    )
+    object.__setattr__(e, "re_emit", True)
+    assert LeBanquier().on_round_end(e, {"target_score": 80}) is None
+
+
+def test_coinche_stack_short_circuits_on_re_emit() -> None:
+    """4.1.0 Phase B."""
+    assert CoincheStack().on_round_end(_round_end_with_re_emit(), {}) is None
+
+
+def test_tout_streak_short_circuits_on_re_emit() -> None:
+    """4.1.0 Phase B: the streak counter must not advance on re-emit."""
+    j = ToutStreak()
+    state: dict[str, Any] = {f"{j.id}_streak": 2}
+    e = RoundEndEvent(
+        breakdown=_StubBreakdown(),
+        taker_seat=Seat.SOUTH,
+        trump=Suit.TOUT_ATOUT,
+        capot=False,
+    )
+    object.__setattr__(e, "re_emit", True)
+    assert j.on_round_end(e, state) is None
+    assert state[f"{j.id}_streak"] == 2, "streak must not advance on re-emit"
+
+
+def test_quinte_royale_preserves_armed_flag_on_re_emit() -> None:
+    """4.1.0 Phase B: re-emit must NOT consume the armed flag — otherwise the
+    second pass disarms the joker without paying out.
+    """
+    j = QuinteRoyale()
+    state: dict[str, Any] = {f"{j.id}_armed": True}
+    e = _round_end_with_re_emit()
+    assert j.on_round_end(e, state) is None
+    assert state.get(f"{j.id}_armed") is True, "armed flag must survive re-emit"
+
+
+def test_rebelote_echo_short_circuits_on_re_emit() -> None:
+    """4.1.0 Phase B."""
+    e = BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=True)
+    object.__setattr__(e, "re_emit", True)
+    assert RebeloteEcho().on_belote(e, {}) is None

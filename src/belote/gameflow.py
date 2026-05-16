@@ -210,7 +210,8 @@ def run_play(
                 # team that actually gets credited in scoring (see
                 # `compute_trick_winners` in game.py). Pass the projected
                 # 8-trick list because the 8th trick hasn't been pushed to
-                # `completed_tricks` yet.
+                # `completed_tricks` yet. Reuse the list across the Capot
+                # check below to avoid a redundant rebuild.
                 projected = list(current.completed_tricks) + [display_state.current_trick]
                 winner = compute_trick_winners(
                     current, current.trump, is_sa, tricks=projected
@@ -225,13 +226,7 @@ def run_play(
                     display(display_state, None)
 
                 # Check for Capot while cards are still visible
-                if (
-                    is_capot(
-                        current,
-                        tricks=list(current.completed_tricks) + [display_state.current_trick],
-                    )
-                    is not None
-                ):
+                if is_capot(current, tricks=projected) is not None:
                     announce(
                         "CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader
                     )

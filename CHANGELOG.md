@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-05-15
+
+Audit pass: bug-hunt, performance, and mechanics verification across the whole codebase (three parallel Explore agents: classic engine, BelAtro layer, UI/render). Three real bugs fixed, six concrete perf wins landed, five defensive re-emit guards added to state-mutating jokers, and one false-alarm category (litige carry-over, partner-hand memo, sequence reconstruction) documented as by-design after re-verification. **+19 regression tests** (723 → 742). All previous baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 742/742, `tests/test_perf_regression.py` 5/5 within tolerance.
+
+### Fixed
+
+- **`LeDémon` now fires on every team-NS trick win** (`src/belote/belatro/items/jokers/corrupted.py:32-50`). The description has always said "+3 Mult unconditionally" but the pre-4.1.0 code only fired on `event.winner == Seat.SOUTH` — wins by the North partner silently dropped the mult, contradicting the description and breaking the joker's value proposition. The fix gates on `team_of(event.winner) == 0` (matching the team-aware cohort like L'Accumulateur / Le Patriote). `LeTraître` and `LAgentDouble` retain their seat-themed (South-only) gating because their descriptions tie the mult to *you* surviving partner sabotage — their docstrings were tightened to spell this out. `LEgoiste` was verified correct (both seat branches present and aligned with the description).
+- **Hard AI no longer bids Clubs under *Les Clubs Bannis*** (`src/belote/ai.py::_hard_bid`). `card_points_with_modifiers` correctly zeros all club cards under `ban_clubs`, but the bid heuristic's honor count (J/9/A = +3 each) and cross-suit short-suit bonuses still pushed club-heavy hands above the bid threshold. The fix excludes Clubs from the candidate list when `bm.ban_clubs` is True. Pre-4.1.0 a club-J/9/A hand confidently called Clubs as trump and scored 0 across the round.
+- **`AIPlayer.decide_card` raises on empty `legal_cards`** (`src/belote/ai.py:313-322`). The pre-4.1.0 fallback `legal = hand` masked any dealing or legal-cards regression by silently playing an illegal card. The 4.1.0 code raises `AssertionError("AI {seat}: legal_cards empty during PLAYING ...")` so any regression surfaces at the offending decision rather than as a downstream scoring mystery.
+- **Diff-emit rows now append `clear_to_eol()`** (`src/belote/ui/render.py` diff-emit path). The full-render path always emitted `clear_to_eol()` per row, but the diff-emit path did not — when a row shrunk mid-game (e.g. terminal narrowed, contract changed from `tout_atout` to `normal` reducing the HUD width), stale chars past the new line's end would persist. Pinned by `test_diff_emit_appends_clear_to_eol_on_row_shrink`.
+
+### Changed
+
+- **`render.py` caches `theme_manager.current_name`** in a new `_cached_theme_name` module global, refreshed by a registered callback (mirroring the `ansi.py::_active_palette` pattern from 3.9.5). Each felt-row call previously queried `theme_manager.current_name` (a property dispatch) and the result was passed to `_felt_segment_cached` as a cache key. On a wide terminal that's 40+ property reads per frame, none of which can change without firing the callback. The cache also resets `_last_emitted_lines = None` on refresh, so theme switches still force a full redraw.
+- **`_pip_at(row_id, col)` gained `@lru_cache(maxsize=1024)`** (`src/belote/ui/render.py:380-391`). Pure deterministic function of (row, col); `TERMINAL.has_utf8` is process-constant. The cache eliminates redundant modular-arithmetic work on the cache-miss path of `_felt_segment_cached` for the first frame after eviction.
+- **`_pending_rendered_lines` and `_last_emitted_lines` are tuples** (was `list[str] | None`). The side-channel was rebuilt as a fresh list on every frame; tuples are immutable, hashable, and avoid the per-frame allocation. `_pending_rendered_lines` is now pre-cleared at the top of `display()` so an exception escaping `render()` can't leave a stale tuple for a later `display()` call.
+- **`show_history` overlay caches its line list across scroll iterations** (`src/belote/ui/prompts.py::_build_history_lines`). Pre-4.1.0 every `↑`/`↓` rebuilt the full lines list — for a 60-round game with the wide-layout 8-column table that was the dominant per-keystroke cost in the modal. The cache key is `(term_w, len(state.score_history))`; state is immutable during the modal so the invariant holds.
+- **`gameflow.py` reuses the 8th-trick projected list** between the Dix-de-Der and Capot announcement paths (`src/belote/gameflow.py:214-229`). Previously the same `list(current.completed_tricks) + [display_state.current_trick]` was built twice in succession.
+- **Corrupted-joker docstrings tightened** (`LeTraître`, `LAgentDouble`) to spell out "+X Mult when **you** win a trick" — the seat-themed gating is intentional but pre-4.1.0 the docstring was ambiguous and the 4.1.0 audit initially flagged them as bugs before re-reading.
+
+### Added
+
+- **Five defensive `re_emit` short-circuit guards** on state-mutating jokers: `LeBanquier.on_round_end`, `CoincheStack.on_round_end`, `ToutStreak.on_round_end`, `QuinteRoyale.on_round_end`, `RebeloteEcho.on_belote`. Pattern mirrors the `re_emit=True` gating that `BidMadeEvent` already uses (`src/belote/belatro/engine/event_bus.py:79`). No current code path re-emits these events, but future replay / UI-driven re-emit work won't accidentally double-pay or double-advance state counters. `QuinteRoyale` is the most consequential: pre-4.1.0 a re-emit would have `state.pop(...)` the armed flag and *then* return None on the second pass, silently disarming the joker without paying out.
+- **`tests/test_history_overlay_cache.py`** — 4 new tests pinning the `_build_history_lines` helper (empty / wide / narrow layouts) and the scroll-loop cache invariant (`_build_history_lines` called exactly once across multiple scroll keystrokes).
+- **8 new tests in `tests/belatro/test_phase2_content.py`**: corrupted-joker description/code alignment (LeDémon team gate, LeTraître & LAgentDouble seat-themed pinning) and 5 re-emit pins. Re-emit pins use `object.__setattr__` to stamp `re_emit=True` on a frozen RoundEndEvent / BeloteAnnouncedEvent, mirroring how a future replay layer would extend the dataclass.
+- **2 new tests in `tests/test_ai.py`**: `test_hard_ai_avoids_clubs_bid_under_ban_clubs` (boss-pipeline pin) and `test_ai_legal_cards_empty_raises` (monkey-patches `legal_cards` to `()` and pins the new AssertionError).
+- **5 new tests in `tests/test_render_diff.py`**: `test_pip_at_is_cached` (lru-cache hit-counter pin), `test_theme_name_cache_invalidated_on_theme_change` (callback wiring pin via real `theme_manager.set_current`), `test_diff_emit_appends_clear_to_eol_on_row_shrink` (regression pin for the diff-emit `clear_to_eol` fix), `test_pending_rendered_lines_pre_cleared_in_display` and `test_pending_rendered_lines_is_tuple` (C3/C6 pins).
+
+### Internal
+
+- **Tests**: 723 → 742 (+19).
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Verified-false / by-design audit claims** (documented so future audits don't re-investigate):
+  - `litige_points` not in `reset_round_fields` → **by design**: it's an across-round accumulator reset in `scoring.py::apply_round_score` only when `is_litige=False`. Verified by tracing `scoring.py:1146-1155`.
+  - `AIMemory.last_partner_hand_key` memo collision on undo → **already handled**: the undo branch at `ai.py:85-99` resets `last_partner_hand_key = None`.
+  - `show_rules` missing `invalidate_diff()` → **already present** at `prompts.py:303`. The exit-on-quit/enter/esc/EOF branch covers all return paths.
+  - Sequence-reconstruction fence-post error in `scoring.py:147-166` → agent retracted in-paragraph; verified correct.
+  - Capot base under L'Anarchie trump rotation → contract-dependent, not trump-dependent (documented in 3.0.0 wiring notes; verified by re-reading `scoring.py:769-788`).
+  - `TierceCharger` and partner-joker seat keying → **partner jokers ARE seat-keyed by design** (per 3.7.1 wiring notes).
+  - `LEgoiste` seat branches → both seats handled correctly; description matches code.
+- **`_trick_winner_seat_impl.cache_clear()` already wired** into `clear_legal_cards_cache()` (`game.py:496-499`) — the audit's "speculative" cleanup turned out to already be in place. No change needed.
+- **`belote.ui.render` module-shadowing trap** persists in 4.1.0 (the `belote/ui/__init__.py` re-exports `render` as a function); new tests follow the `sys.modules["belote.ui.render"]` pattern documented in the 4.0.0 wiring notes.
+- **Plan file**: `/home/mrrobot/.claude/plans/bug-hunt-code-performance-immutable-treehouse.md`.
+
+
 ## [4.0.1] - 2026-05-15
 
 Four bug fixes in the same family: writes that bypass `render.display()` were leaving the render-diff baseline out of sync with terminal state. **+7 regression tests** (716 → 723).

@@ -55,6 +55,10 @@ class RebeloteEcho(Joker):
     def on_belote(
         self, event: BeloteAnnouncedEvent, state: dict[str, Any]
     ) -> JokerResult | None:
+        # Re-emit short-circuit (4.1.0 defensive): if a future replay path
+        # re-emits the belote/rebelote event, the ×3 mult must not double.
+        if getattr(event, "re_emit", False):
+            return None
         if event.seat == Seat.SOUTH and event.is_rebelote:
             return JokerResult(times_mult=3.0)
         return None
@@ -85,6 +89,10 @@ class QuinteRoyale(Joker):
     def on_round_end(
         self, event: RoundEndEvent, state: dict[str, Any]
     ) -> JokerResult | None:
+        # Re-emit short-circuit (4.1.0): state.pop() consumes the armed flag,
+        # so a re-emit would silently disarm without paying out. Skip entirely.
+        if getattr(event, "re_emit", False):
+            return None
         if state.pop(f"{self.id}_armed", False) and not event.breakdown.is_failed:
             return JokerResult(times_mult=4.0)
         return None

@@ -70,7 +70,29 @@ _last_render_key: tuple[int, int, str] | None = None
 # frame, near-zero for an idle re-render (e.g. polling for input between
 # keystrokes). Set to None to force a full redraw (theme change, layout
 # change, explicit `force=True`, env-var bypass).
-_last_emitted_lines: list[str] | None = None
+#
+# 4.1.0 — promoted to tuple[str, ...] | None. The list-of-strings form was
+# rebuilt as a fresh list every frame; tuples are immutable and let callers
+# treat the value as a reusable snapshot without a per-frame allocation.
+_last_emitted_lines: tuple[str, ...] | None = None
+
+
+# 4.1.0 (perf): cache `theme_manager.current_name` here so the felt-row
+# segment cache key reads a module-local instead of a method call + dict
+# lookup. Pattern mirrors `_active_palette` in `ansi.py`. Refreshed by the
+# `_refresh_theme_name_cache` callback registered against the theme manager.
+_cached_theme_name: str = theme_manager.current_name
+
+
+def _refresh_theme_name_cache() -> None:
+    global _cached_theme_name, _last_emitted_lines
+    _cached_theme_name = theme_manager.current_name
+    # Theme change invalidates the diff baseline so the next display() emits
+    # a full frame with the new palette.
+    _last_emitted_lines = None
+
+
+theme_manager.register_callback(_refresh_theme_name_cache)
 
 
 def _trick_row_offsets(layout: LayoutPreset) -> dict[Seat, int]:
@@ -377,7 +399,13 @@ _BRAILLE_DOTS: Final = "⠁⠂⠄⡀⠈⠐⠠⢀"
 _VIGNETTE_WIDTH: Final = 2
 
 
+@lru_cache(maxsize=1024)
 def _pip_at(row_id: int, col: int) -> str | None:
+    # Pure deterministic function of (row_id, col). Called once per non-edge
+    # felt cell on a cache-miss path of `_felt_segment_cached`; the lru_cache
+    # collapses the second-and-later hits within a frame. UTF-8 fallback is
+    # captured in `TERMINAL.has_utf8` which is process-constant, so the cache
+    # entry is stable for the process lifetime. 4.1.0.
     if not TERMINAL.has_utf8:
         return None
     if ((row_id * 31 + col * 17) % 23) >= 2:
@@ -426,9 +454,12 @@ def _felt_segment_cached(
 def _felt_segment(
     width: int, row_id: int, col_offset: int, mat_w: int, *, top_or_bottom: bool = False
 ) -> str:
+    # 4.1.0: read the cached theme name instead of querying the manager on
+    # every felt-row call. The cache is refreshed by `_refresh_theme_name_cache`
+    # registered against `theme_manager.register_callback` above.
     return _felt_segment_cached(
         width, row_id, col_offset, mat_w,
-        theme_manager.current_name, TERMINAL.has_utf8, top_or_bottom,
+        _cached_theme_name, TERMINAL.has_utf8, top_or_bottom,
     )
 
 
@@ -1102,19 +1133,24 @@ def render(
     # (and other strict emulators) don't auto-blank cells when an empty string
     # passes through, so any debris from external writes (announcements, etc.)
     # would remain visible. The cost is one extra 3-byte escape per row.
-    rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
-    # 3.9.3 Phase 6: stash the per-row list so display() can diff against the
+    rendered_lines: tuple[str, ...] = tuple(
+        line + clear_to_eol() for line in lines[:term_h]
+    )
+    # 3.9.3 Phase 6: stash the per-row tuple so display() can diff against the
     # previous frame and skip emitting unchanged rows. Layout changes are
     # already reflected via `prefix_clear` above + the cache invalidation in
     # display(); theme changes invalidate via the theme_manager callback.
+    # 4.1.0: switched from list to tuple — the side-channel is read-only by
+    # design and tuples avoid the per-frame list allocation.
     global _pending_rendered_lines
     _pending_rendered_lines = rendered_lines
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
 
 
-# 3.9.3 Phase 6: side channel from render() → display(). Holds the line list
+# 3.9.3 Phase 6: side channel from render() → display(). Holds the line tuple
 # from the most recent render() call so display() can diff without re-rendering.
-_pending_rendered_lines: list[str] | None = None
+# 4.1.0: typed as tuple — see render() for the rationale.
+_pending_rendered_lines: tuple[str, ...] | None = None
 
 
 # Set by render() so patch_trick_card() can re-apply the same vertical-
@@ -1157,9 +1193,13 @@ def display(
     """
     import os as _os
 
+    # 4.1.0 (C6): pre-clear the side-channel so an exception escaping render()
+    # can't leave a stale tuple for a later display() call to diff against.
+    global _pending_rendered_lines, _last_emitted_lines
+    _pending_rendered_lines = None
+
     full_str = render(state, selection, show_north_hand, bid_selection=bid_selection)
 
-    global _last_emitted_lines
     use_diff = (
         not force
         and _last_emitted_lines is not None
@@ -1171,7 +1211,7 @@ def display(
     if not use_diff:
         sys.stdout.write(full_str)
         sys.stdout.flush()
-        _last_emitted_lines = list(_pending_rendered_lines or [])
+        _last_emitted_lines = _pending_rendered_lines or ()
         return
 
     # Diff path — _pending_rendered_lines was populated by render() above.
@@ -1184,11 +1224,15 @@ def display(
         if new_line != old_line:
             # Rows are 1-indexed in ANSI. Always prefix RESET so a stale
             # color SGR from the previous row can't bleed into this one.
-            parts.append(move(row_idx + 1, 1) + RESET + new_line)
+            # 4.1.0 (C4): append clear_to_eol so a row that shrunk (e.g.
+            # terminal narrowed mid-game) doesn't leave stale chars past
+            # the new line's end. Full-render rows already include this
+            # via the render() loop above; the diff path missed it pre-4.1.0.
+            parts.append(move(row_idx + 1, 1) + RESET + new_line + clear_to_eol())
     parts.append(show_cursor())
     sys.stdout.write("".join(parts))
     sys.stdout.flush()
-    _last_emitted_lines = list(new_lines)
+    _last_emitted_lines = new_lines
 
 
 def _calculate_base_row(term_h: int, rendered_lines: int = 0) -> int:

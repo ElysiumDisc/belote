@@ -22,6 +22,9 @@ class CoincheStack(Joker):
     rarity = Rarity.COMMON
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        # Re-emit short-circuit (4.1.0 defensive).
+        if getattr(event, "re_emit", False):
+            return None
         if event.coinche_level <= 0:
             return None
         if event.breakdown.is_failed:
@@ -47,6 +50,10 @@ class ToutStreak(Joker):
     rarity = Rarity.UNCOMMON
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        # Re-emit short-circuit (4.1.0): streak counter must not double-advance
+        # if a future replay path re-emits the round-end event.
+        if getattr(event, "re_emit", False):
+            return None
         streak_key = f"{self.id}_streak"
         streak: int = int(state.get(streak_key, 0))
 

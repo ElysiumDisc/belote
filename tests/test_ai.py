@@ -355,3 +355,69 @@ def test_hard_ai_does_not_bid_ta_when_jacks_zero_suppresses_jacks() -> None:
         "AI must not bid Tout Atout when jacks_zero suppresses the entire "
         "TA strength signal — pre-3.9.3 it ignored the boss flag and overbid."
     )
+
+
+# ── 4.1.0: AI legal-cards safety net ───────────────────────────────────────
+
+
+def test_hard_ai_avoids_clubs_bid_under_ban_clubs() -> None:
+    """4.1.0 audit: under LesClubsBannis (BossModifiers.ban_clubs=True) all
+    clubs score 0, so the AI's `_hard_bid` must NOT pick clubs even when the
+    hand is club-heavy. The fix relies on `card_points_with_modifiers`
+    returning 0 for any clubs card under the flag — the bid heuristic
+    inherits the suppression automatically. This test pins that pipeline.
+    """
+    # Club-heavy hand that would normally score very well at Clubs trump:
+    # Jack/Nine/Ace of Clubs (the three honors).
+    hand = (
+        Card(Suit.CLUBS, Rank.JACK),
+        Card(Suit.CLUBS, Rank.NINE),
+        Card(Suit.CLUBS, Rank.ACE),
+        Card(Suit.CLUBS, Rank.TEN),
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.HEARTS, Rank.EIGHT),
+        Card(Suit.DIAMONDS, Rank.SEVEN),
+        Card(Suit.SPADES, Rank.SEVEN),
+    )
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    state = GameState(
+        hands=((), hand, (), ()),
+        up_card=Card(Suit.SPADES, Rank.NINE),
+        bidding_round=2,
+        bidder_index=2,
+        dealer=Seat.SOUTH,
+        boss_modifiers=BossModifiers(ban_clubs=True),
+    )
+    bid = player.decide_bid(state)
+    assert bid != Suit.CLUBS, (
+        "AI must not bid Clubs under LesClubsBannis — `ban_clubs` zeros all "
+        "club card points, so Clubs is the worst possible trump choice."
+    )
+
+
+def test_ai_legal_cards_empty_raises() -> None:
+    """4.1.0 fix: when `legal_cards` returns an empty tuple mid-play (only
+    possible if there's a dealing or legal-cards regression), the AI must
+    raise rather than silently fall back to the full hand. Pre-4.1.0 the
+    silent fallback let illegal-card bugs slip past the AI; the assertion
+    surfaces them at decision time.
+
+    We force the regression by monkey-patching `legal_cards` to return ().
+    """
+    import unittest.mock
+
+    import pytest
+
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    hand = (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.ACE))
+    state = GameState(
+        hands=(hand, (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=Suit.HEARTS,
+    )
+    with (
+        unittest.mock.patch("belote.ai.legal_cards", return_value=()),
+        pytest.raises(AssertionError, match="legal_cards empty"),
+    ):
+        player.decide_card(state)

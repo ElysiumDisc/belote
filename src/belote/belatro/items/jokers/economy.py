@@ -15,6 +15,11 @@ class LeBanquier(Joker):
     cost = 7
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
+        # Re-emit short-circuit: cash payouts must fire once per round even if
+        # a future replay/UI layer re-emits RoundEndEvent. Pattern mirrors the
+        # `re_emit` gating on BidMadeEvent. 4.1.0.
+        if getattr(event, "re_emit", False):
+            return None
         # Description: "Earn $1 for every 10 card points you score above the
         # Blind target." That framing presumes NS won the contract — under a
         # chute the points aren't "scored" in the meaningful sense, so the

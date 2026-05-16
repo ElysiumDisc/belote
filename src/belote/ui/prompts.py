@@ -371,98 +371,122 @@ def set_history_override(renderer: Callable[[KeyReader], None] | None) -> None:
     _history_override = renderer
 
 
+def _build_history_lines(state: GameState, term_w: int) -> list[str]:
+    """Build the static line list for the history overlay.
+
+    Extracted so `show_history` can cache the result across scroll-loop
+    iterations — pre-4.1.0 the same lines were rebuilt on every keystroke,
+    which on 60+ round games was the dominant per-input cost in the modal.
+    Rebuild keyed only on (term_w, len(state.score_history)).
+    """
+    lines: list[str] = []
+    lines.append(f"{BOLD}{gold_fg()}GAME HISTORY{RESET}")
+    lines.append("=" * 12)
+    lines.append("")
+
+    if not state.score_history:
+        lines.append(f"{DIM}No rounds completed yet.{RESET}")
+        lines.append("")
+        lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
+        return lines
+
+    wide = term_w >= 78
+    if wide:
+        # Single-row layout. Column widths sum to ~76 with separators.
+        w_rd, w_tkr, w_con, w_trk, w_decl, w_ns, w_ew, w_st = 3, 7, 8, 7, 16, 5, 5, 7
+        header_cells = [
+            _ljust_visible("RD", w_rd),
+            _ljust_visible("TAKER", w_tkr),
+            _ljust_visible("CONTRACT", w_con),
+            _ljust_visible("TRICKS", w_trk),
+            _ljust_visible("DECLARATIONS", w_decl),
+            _ljust_visible("NS", w_ns),
+            _ljust_visible("EW", w_ew),
+            _ljust_visible("STATUS", w_st),
+        ]
+        header = " │ ".join(header_cells)
+        lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
+        lines.append("─" * visible_len(header))
+
+        for i, rs in enumerate(state.score_history):
+            rd = f"{i + 1:02d}"
+            taker = _hist_taker_label(rs)
+            contract = _hist_contract_label(rs)
+            tricks = f"{rs.tricks_ns} / {rs.tricks_ew}"
+            decl_ns = _hist_decl_str(rs.decl_summary_ns, w_decl // 2 - 1)
+            decl_ew = _hist_decl_str(rs.decl_summary_ew, w_decl // 2 - 1)
+            if rs.decl_summary_ns and rs.decl_summary_ew:
+                decls = f"{decl_ns} / {decl_ew}"
+            elif rs.decl_summary_ns:
+                decls = decl_ns
+            elif rs.decl_summary_ew:
+                decls = decl_ew
+            else:
+                decls = "─"
+            if visible_len(decls) > w_decl:
+                decls = decls[: w_decl - 1] + "…"
+            ns = f"{BOLD}{rs.ns_total}{RESET}"
+            ew = f"{BOLD}{rs.ew_total}{RESET}"
+            status = _hist_status(rs)
+
+            row_cells = [
+                _ljust_visible(rd, w_rd),
+                _ljust_visible(taker, w_tkr),
+                _ljust_visible(contract, w_con),
+                _ljust_visible(tricks, w_trk),
+                _ljust_visible(decls, w_decl),
+                _ljust_visible(ns, w_ns),
+                _ljust_visible(ew, w_ew),
+                _ljust_visible(status, w_st),
+            ]
+            lines.append(" │ ".join(row_cells))
+    else:
+        # Compact two-line-per-round layout for narrow terminals.
+        lines.append(f"{BOLD}{white_fg()}{'RD':<3} {'TAKER':<7} {'CON':<8} {'TRICKS':<7} STATUS{RESET}")
+        lines.append("─" * 40)
+        for i, rs in enumerate(state.score_history):
+            rd = f"{i + 1:02d}"
+            taker = _hist_taker_label(rs)
+            contract = _hist_contract_label(rs)
+            tricks = f"{rs.tricks_ns}/{rs.tricks_ew}"
+            status = _hist_status(rs)
+            lines.append(
+                f"{rd:<3} {_ljust_visible(taker, 7)} {contract:<8} {tricks:<7} {status}"
+            )
+            decl_n = _hist_decl_str(rs.decl_summary_ns, 14)
+            decl_e = _hist_decl_str(rs.decl_summary_ew, 14)
+            lines.append(
+                f"   NS:{BOLD}{rs.ns_total:>4}{RESET}  EW:{BOLD}{rs.ew_total:>4}{RESET}  "
+                f"decl: {decl_n} / {decl_e}"
+            )
+            lines.append("")
+
+    lines.append("")
+    lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
+    return lines
+
+
 def show_history(state: GameState, reader: KeyReader) -> None:
     """Display a scrollable overlay of round-by-round scores."""
     if _history_override is not None:
         _history_override(reader)
         return
     scroll = 0
+    # 4.1.0 (C5): cache the line list across scroll iterations. Rebuild only
+    # when the cache key changes (term_w toggles between wide/narrow layout,
+    # or new rounds get added). State is immutable during the modal so this
+    # is safe and shaves the dominant per-keystroke cost.
+    cache_key: tuple[int, int] | None = None
+    cached_lines: list[str] = []
 
     while True:
         term_w, term_h = get_term_size()
+        key = (term_w, len(state.score_history))
+        if key != cache_key:
+            cached_lines = _build_history_lines(state, term_w)
+            cache_key = key
 
-        lines: list[str] = []
-        lines.append(f"{BOLD}{gold_fg()}GAME HISTORY{RESET}")
-        lines.append("=" * 12)
-        lines.append("")
-
-        if not state.score_history:
-            lines.append(f"{DIM}No rounds completed yet.{RESET}")
-        else:
-            wide = term_w >= 78
-            if wide:
-                # Single-row layout. Column widths sum to ~76 with separators.
-                w_rd, w_tkr, w_con, w_trk, w_decl, w_ns, w_ew, w_st = 3, 7, 8, 7, 16, 5, 5, 7
-                header_cells = [
-                    _ljust_visible("RD", w_rd),
-                    _ljust_visible("TAKER", w_tkr),
-                    _ljust_visible("CONTRACT", w_con),
-                    _ljust_visible("TRICKS", w_trk),
-                    _ljust_visible("DECLARATIONS", w_decl),
-                    _ljust_visible("NS", w_ns),
-                    _ljust_visible("EW", w_ew),
-                    _ljust_visible("STATUS", w_st),
-                ]
-                header = " │ ".join(header_cells)
-                lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
-                lines.append("─" * visible_len(header))
-
-                for i, rs in enumerate(state.score_history):
-                    rd = f"{i + 1:02d}"
-                    taker = _hist_taker_label(rs)
-                    contract = _hist_contract_label(rs)
-                    tricks = f"{rs.tricks_ns} / {rs.tricks_ew}"
-                    decl_ns = _hist_decl_str(rs.decl_summary_ns, w_decl // 2 - 1)
-                    decl_ew = _hist_decl_str(rs.decl_summary_ew, w_decl // 2 - 1)
-                    if rs.decl_summary_ns and rs.decl_summary_ew:
-                        decls = f"{decl_ns} / {decl_ew}"
-                    elif rs.decl_summary_ns:
-                        decls = decl_ns
-                    elif rs.decl_summary_ew:
-                        decls = decl_ew
-                    else:
-                        decls = "─"
-                    if visible_len(decls) > w_decl:
-                        decls = decls[: w_decl - 1] + "…"
-                    ns = f"{BOLD}{rs.ns_total}{RESET}"
-                    ew = f"{BOLD}{rs.ew_total}{RESET}"
-                    status = _hist_status(rs)
-
-                    row_cells = [
-                        _ljust_visible(rd, w_rd),
-                        _ljust_visible(taker, w_tkr),
-                        _ljust_visible(contract, w_con),
-                        _ljust_visible(tricks, w_trk),
-                        _ljust_visible(decls, w_decl),
-                        _ljust_visible(ns, w_ns),
-                        _ljust_visible(ew, w_ew),
-                        _ljust_visible(status, w_st),
-                    ]
-                    lines.append(" │ ".join(row_cells))
-            else:
-                # Compact two-line-per-round layout for narrow terminals.
-                lines.append(f"{BOLD}{white_fg()}{'RD':<3} {'TAKER':<7} {'CON':<8} {'TRICKS':<7} STATUS{RESET}")
-                lines.append("─" * 40)
-                for i, rs in enumerate(state.score_history):
-                    rd = f"{i + 1:02d}"
-                    taker = _hist_taker_label(rs)
-                    contract = _hist_contract_label(rs)
-                    tricks = f"{rs.tricks_ns}/{rs.tricks_ew}"
-                    status = _hist_status(rs)
-                    lines.append(
-                        f"{rd:<3} {_ljust_visible(taker, 7)} {contract:<8} {tricks:<7} {status}"
-                    )
-                    decl_n = _hist_decl_str(rs.decl_summary_ns, 14)
-                    decl_e = _hist_decl_str(rs.decl_summary_ew, 14)
-                    lines.append(
-                        f"   NS:{BOLD}{rs.ns_total:>4}{RESET}  EW:{BOLD}{rs.ew_total:>4}{RESET}  "
-                        f"decl: {decl_n} / {decl_e}"
-                    )
-                    lines.append("")
-
-        lines.append("")
-        lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
-
+        lines = cached_lines
         view_h = term_h - 4
         max_scroll = max(0, len(lines) - view_h)
         scroll = max(0, min(scroll, max_scroll))
