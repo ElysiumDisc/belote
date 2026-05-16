@@ -62,6 +62,16 @@ SIDE_COL_W = STANDARD.side_col_w
 _last_render_key: tuple[int, int, str] | None = None
 
 
+# 3.9.3 (Phase 6): diff-based render. `_last_emitted_lines` holds the last
+# `rendered_lines` (post-vcenter, with clear_to_eol per row) that `display()`
+# committed to the terminal. `display()` diffs the next frame against it and
+# emits only the rows that actually changed — same byte count for the first
+# frame, near-zero for an idle re-render (e.g. polling for input between
+# keystrokes). Set to None to force a full redraw (theme change, layout
+# change, explicit `force=True`, env-var bypass).
+_last_emitted_lines: list[str] | None = None
+
+
 def _trick_row_offsets(layout: LayoutPreset) -> dict[Seat, int]:
     """Where each compass card lives inside the trick mat, given a layout.
 
@@ -290,8 +300,16 @@ def _get_card_face(
 
 
 def clear_card_cache() -> None:
-    """Clear the card face render cache. Call after changing the active theme."""
+    """Clear the card face render cache. Call after changing the active theme.
+
+    3.9.3: also invalidates the render-diff baseline (Phase 6) so the next
+    full render() emits every row — otherwise rows containing card faces
+    would skip the diff and keep their old theme's escape sequences.
+    """
     _card_face_internal.cache_clear()
+    _card_back.cache_clear()
+    global _last_emitted_lines
+    _last_emitted_lines = None
 
 
 # Register callback to clear cache when theme changes
@@ -796,11 +814,15 @@ def render(
 
     # If the size or layout flavour changed since the last render, prefix a
     # full screen clear so we don't leak artifacts from the previous layout.
-    global _last_render_key
+    # 3.9.3 (Phase 6): also invalidate the diff baseline so display() falls
+    # back to a full emit — the diff would otherwise compare against rows
+    # painted under the old layout.
+    global _last_render_key, _last_emitted_lines
     key = (term_w, term_h, layout.name)
     prefix_clear = ""
     if _last_render_key is not None and _last_render_key != key:
         prefix_clear = _clear_screen()
+        _last_emitted_lines = None
     _last_render_key = key
 
     out = prefix_clear + move(1, 1) + hide_cursor()
@@ -903,7 +925,18 @@ def render(
     # passes through, so any debris from external writes (announcements, etc.)
     # would remain visible. The cost is one extra 3-byte escape per row.
     rendered_lines = [line + clear_to_eol() for line in lines[:term_h]]
+    # 3.9.3 Phase 6: stash the per-row list so display() can diff against the
+    # previous frame and skip emitting unchanged rows. Layout changes are
+    # already reflected via `prefix_clear` above + the cache invalidation in
+    # display(); theme changes invalidate via the theme_manager callback.
+    global _pending_rendered_lines
+    _pending_rendered_lines = rendered_lines
     return "".join([out, "\r\n".join(rendered_lines), show_cursor()])
+
+
+# 3.9.3 Phase 6: side channel from render() → display(). Holds the line list
+# from the most recent render() call so display() can diff without re-rendering.
+_pending_rendered_lines: list[str] | None = None
 
 
 # Set by render() so patch_trick_card() can re-apply the same vertical-
@@ -925,9 +958,59 @@ def display(
     selection: int | None = None,
     show_north_hand: bool = False,
     bid_selection: int | None = None,
+    force: bool = False,
 ) -> None:
-    sys.stdout.write(render(state, selection, show_north_hand, bid_selection=bid_selection))
+    """Emit the rendered frame to stdout.
+
+    3.9.3 (Phase 6) — diff-based emit. When `_last_emitted_lines` is set
+    and we're not forced into a full redraw, only rows that actually
+    changed are written. The terminal's prior contents on unchanged rows
+    are reused, so an idle re-render (e.g. polling input between
+    keystrokes) reduces from ~28 row writes to zero.
+
+    Bypass via:
+    * `force=True` — caller knows the screen is dirty (post-clear, after
+      menu/scene transition, on layout boundaries).
+    * env var `BELOTE_NO_DIFF=1` — escape hatch for debugging artifact
+      complaints. Mirrors the existing `NO_COLOR` style.
+
+    Layout/theme changes invalidate the baseline automatically (render()
+    + the theme_manager callback both set `_last_emitted_lines = None`).
+    """
+    import os as _os
+
+    full_str = render(state, selection, show_north_hand, bid_selection=bid_selection)
+
+    global _last_emitted_lines
+    use_diff = (
+        not force
+        and _last_emitted_lines is not None
+        and _pending_rendered_lines is not None
+        and len(_pending_rendered_lines) == len(_last_emitted_lines)
+        and _os.environ.get("BELOTE_NO_DIFF") != "1"
+    )
+
+    if not use_diff:
+        sys.stdout.write(full_str)
+        sys.stdout.flush()
+        _last_emitted_lines = list(_pending_rendered_lines or [])
+        return
+
+    # Diff path — _pending_rendered_lines was populated by render() above.
+    assert _pending_rendered_lines is not None
+    new_lines = _pending_rendered_lines
+    old_lines = _last_emitted_lines
+    assert old_lines is not None
+    parts: list[str] = [hide_cursor()]
+    for row_idx, (new_line, old_line) in enumerate(zip(new_lines, old_lines, strict=True)):
+        if new_line != old_line:
+            # Rows are 1-indexed in ANSI. Always prefix RESET so a stale
+            # color SGR from the previous row can't bleed into this one.
+            parts.append(move(row_idx + 1, 1) + RESET + new_line)
+    parts.append(show_cursor())
+    sys.stdout.write("".join(parts))
     sys.stdout.flush()
+    _last_emitted_lines = list(new_lines)
 
 
 def _calculate_base_row(term_h: int, rendered_lines: int = 0) -> int:

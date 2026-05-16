@@ -158,3 +158,93 @@ def test_tout_atout_win_by_opponents_does_not_unlock() -> None:
 
     assert profile.stats["tout_atout_wins"] == 0
     assert not profile.is_unlocked("le_fanatique")
+
+
+# ── 3.9.3 Phase 8: Quinte Royale unlock + save corruption recovery ─────────
+
+
+def test_quinte_declaration_unlocks_quinte_royale() -> None:
+    """3.9.3 Phase 8 regression: Quinte Royale was marked is_unlockable but
+    had no path to unlock — pre-3.9.3 the joker was unreachable. NS
+    announcing a Quinte (sequence ≥ 100 pts) now grants the unlock."""
+    from belote.belatro.engine.event_bus import DeclarationScoredEvent
+
+    profile = Profile()
+    save = MagicMock()
+    tracker = UnlockTracker(profile, save)
+    assert not profile.is_unlocked("quinte_royale")
+
+    tracker.on_event(
+        DeclarationScoredEvent(
+            seat=Seat.SOUTH, declaration_type="sequence", points=100
+        )
+    )
+    assert profile.is_unlocked("quinte_royale")
+    save.save_profile.assert_called()
+    assert any("Quinte Royale" in msg for msg in tracker.pending_announcements)
+
+
+def test_quinte_short_sequence_does_not_unlock() -> None:
+    """A Tierce (20 pts) or Quarte (50 pts) must NOT unlock Quinte Royale —
+    the gate is strictly ≥ 100 points (Quinte threshold)."""
+    from belote.belatro.engine.event_bus import DeclarationScoredEvent
+
+    profile = Profile()
+    tracker = UnlockTracker(profile, MagicMock())
+    tracker.on_event(
+        DeclarationScoredEvent(seat=Seat.SOUTH, declaration_type="sequence", points=50)
+    )
+    assert not profile.is_unlocked("quinte_royale")
+
+
+def test_quinte_by_opponents_does_not_unlock() -> None:
+    """Opponent (EW) Quinte must NOT unlock NS's Quinte Royale."""
+    from belote.belatro.engine.event_bus import DeclarationScoredEvent
+
+    profile = Profile()
+    tracker = UnlockTracker(profile, MagicMock())
+    tracker.on_event(
+        DeclarationScoredEvent(seat=Seat.EAST, declaration_type="sequence", points=100)
+    )
+    assert not profile.is_unlocked("quinte_royale")
+
+
+def test_save_corruption_recovery_returns_fresh_profile(tmp_path) -> None:
+    """A corrupted profile.json must not crash the menu — SaveManager.load
+    catches JSONDecodeError and returns a fresh Profile so the user can
+    keep playing (losing only the corrupted save)."""
+    from belote.belatro.progression.save import SaveManager
+
+    # Point SaveManager at a tmpdir, write garbage to the profile file.
+    mgr = SaveManager()
+    mgr._save_path = tmp_path / "profile.json"
+    mgr._save_path.write_text("{not valid json at all", encoding="utf-8")
+
+    profile = mgr.load_profile()
+    # Fresh defaults — starter unlocks restored.
+    assert "le_classique" in profile.unlocked_ids
+    assert profile.stats["runs_won"] == 0
+
+
+def test_save_missing_file_returns_fresh_profile(tmp_path) -> None:
+    from belote.belatro.progression.save import SaveManager
+
+    mgr = SaveManager()
+    mgr._save_path = tmp_path / "nonexistent.json"
+    profile = mgr.load_profile()
+    assert "le_classique" in profile.unlocked_ids
+
+
+def test_save_atomic_write_creates_no_orphan_tmpfile(tmp_path) -> None:
+    """Atomic write via NamedTemporaryFile + os.replace must leave the
+    target directory containing exactly one file (the final profile.json)
+    after a successful save — no orphan .tmp leftover."""
+    from belote.belatro.progression.save import Profile, SaveManager
+
+    mgr = SaveManager()
+    mgr._save_path = tmp_path / "profile.json"
+    mgr.save_profile(Profile())
+    assert mgr._save_path.exists()
+    # No orphan tmp file from the NamedTemporaryFile dance.
+    tmp_files = [p for p in tmp_path.iterdir() if p.name.startswith(".profile-")]
+    assert tmp_files == [], f"orphan tmpfile(s) left behind: {tmp_files}"

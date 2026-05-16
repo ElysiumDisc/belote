@@ -84,16 +84,26 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (661 tests expected)
+# Full test suite (691 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (3.9.0):
+Current baseline (3.9.3):
 
-- **661 tests** passing (3.8.2 had 655; +6 in 3.9.0: yes_no EOF, NO_COLOR ×4, benchmark smoke).
-- 3.9.0 ships a clean three-agent audit pass (classic engine / BelAtro engine / items+UI). Confirmed bugs: one (LOW) — `BelAtroAnnounce.yes_no()` hung on `Key.EOF`, fixed in `src/belote/belatro/ui/announce.py:98`. New feature: `NO_COLOR` env-var support in `src/belote/ansi.py`. Cosmetic: deduped seat-order computation in `scoring.py` tie-break helpers. Tooling: `scripts/benchmark.py` gains an end-to-end `drive_round` rounds/sec probe and a `--smoke` flag pinned by `tests/test_benchmark_smoke.py`. Performance verdict: no measured hotspot — prior L1/L2/L3/D-pass audits already addressed the obvious paths. All 21 boss modifiers, 36 jokers, 8 planets, 12 tarots, 12 vouchers wired end-to-end. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-wise-puzzle.md`.
+- **691 tests** passing (3.9.0 had 661; +30 in 3.9.3 across R1/R2/R4/R5 regressions + 3 new test files: `test_render_diff.py`, `test_endless.py`, expanded `test_progression.py` / `test_undo.py` / `test_voucher_idempotency.py` / `test_phase2_content.py`).
+- 3.9.3 ships a multi-agent audit pass (six Explore agents — three broad-sweep + three targeted deep-dives on AI, scoring edge cases, per-joker mechanics, endless mode, meta-progression). **8 false positives caught and documented** (corrupted-joker seat semantics intentional, ToutStreak persistence working via `card_enhancements`, `_card_back` LRU theme-keyed, etc.). **Six real fixes (R1–R7)** plus three larger phases (render-diff layer, endless boss-variety guard, Quinte Royale unlock). **Rematch removed** at user request — game-over screen now `[Enter/Q] Menu  [H] History` only. Headline changes:
+  - **R1 — AI bidding zero-rank awareness** (`src/belote/ai.py::_hard_special` / `_hard_bid`): new public `scoring.card_points_with_modifiers(card, trump, bm)` helper threads the same canonical zero-rank logic the live HUD uses into the AI's bid evaluation; AI no longer overbids Tout Atout on jack-heavy hands under Le Sauvage. Honor-counting in regular-suit branch also boss-aware.
+  - **R2 — L'Anarchie rebelote preservation** (`src/belote/game.py:919-920` + new `GameState.belote_trump: Suit | None` field): rebelote check matches against the captured belote trump, not `state.trump`, so a K-trump in trick 2 + Q in trick 3 still fires rebelote across the post-trick-2 rotation.
+  - **R5 — voucher idempotency relocated to `Voucher.apply()`** (`src/belote/belatro/items/base.py`): subclasses now implement `_apply_once(run)`; the base wrapper consults `run._applied_voucher_ids` so any future caller (replay, save/load) gets idempotency, not just the shop.
+  - **Phase 6 — diff-based render emit** (`src/belote/ui/render.py::display`): idle re-renders drop from ~28 row writes to zero by diffing the post-vcenter line list against `_last_emitted_lines`. Layout/theme changes invalidate the baseline automatically. `BELOTE_NO_DIFF=1` escape hatch.
+  - **Phase 5 — endless boss-variety guard** (`belatro/main.py:285+`): in endless, reroll if the picked boss is in the last-2 window (`run._recent_boss_ids`).
+  - **Phase 7b — undo improvements** (`gameflow.py::_undo_pop_to_south`): `Z` now pops past AI snapshots to the player's actual prior decision point and displays a 0.8 s "↶ Undo" banner so the action is visible.
+  - **Phase 8 — Quinte Royale unlock** (`belatro/progression/unlocks.py::_handle_declaration`): the Legendary joker was marked `is_unlockable` but had no path to actually unlock; `UnlockTracker.on_event` now dispatches `DeclarationScoredEvent` and grants on NS sequence ≥ 100 pts.
+  Performance verdict: 203–235 rounds/sec end-to-end (unchanged); render-diff idle byte count < 25% of full frame. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-mutable-blanket.md`.
 
 Past baselines:
+
+- 3.9.0 shipped a clean three-agent audit pass (classic engine / BelAtro engine / items+UI). One LOW bug — `BelAtroAnnounce.yes_no()` hung on `Key.EOF`. Added `NO_COLOR` env-var support and the `--smoke` benchmark flag. Plan file at `/home/mrrobot/.claude/plans/bug-hunt-code-performance-wise-puzzle.md`.
 
 - 3.8.2 completes the five-agent audit pass. Final hardening includes Tout Atout streak persistence in BelAtro, Quinte trigger refinement, belote-pair timing fixes for jokers, and declaration scoring correctness for carrés and long sequences.
 - Performance: test suite speed increased by mocking `interruptible_sleep`.

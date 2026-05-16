@@ -144,6 +144,19 @@ class Tarot(ABC):
 
 
 class Voucher(ABC):
+    """Permanent run-level upgrade.
+
+    Subclasses implement `_apply_once(run)` for the actual effect. The base
+    class wraps it with `apply(run)` which consults `run._applied_voucher_ids`
+    to guarantee a no-op on a second invocation — important for vouchers that
+    use `+=` semantics (LaTelescope's `+=` on joker_slots, LeCouteau's `+=`
+    on consumable_slots, etc.) that would silently double-stack on a future
+    save/load or replay round-trip.
+
+    3.9.3 — guard relocated here from `Shop._apply_item` so any future
+    caller of `voucher.apply()` (replays, deck-builder previews, etc.)
+    inherits the same protection.
+    """
     id: str
     name: str
     description: str
@@ -151,9 +164,16 @@ class Voucher(ABC):
     rarity: Rarity = Rarity.COMMON
     purchased: bool = False
 
-    @abstractmethod
     def apply(self, run: BelAtroRun) -> None:
-        """Apply permanent effect to the run."""
+        """Idempotent wrapper. Calls `_apply_once` only the first time per run."""
+        if self.id in run._applied_voucher_ids:
+            return
+        run._applied_voucher_ids.add(self.id)
+        self._apply_once(run)
+
+    @abstractmethod
+    def _apply_once(self, run: BelAtroRun) -> None:
+        """Subclass-defined permanent effect. Called exactly once per run."""
         ...
 
 

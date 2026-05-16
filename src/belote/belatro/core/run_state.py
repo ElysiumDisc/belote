@@ -99,12 +99,17 @@ class BelAtroRun:
 
     # ── Idempotency guard for voucher.apply() ──────────────
     # Several vouchers (LaTelescope, LaDoubleDonne, LesCartesDorees, LeCouteau)
-    # use `+=` against run-level counters in their `apply()`. Today the only
-    # call site is `Shop.buy_item`, which fires apply() exactly once per
-    # purchase. This set lets the shop short-circuit re-application if a
-    # future save/load path ever re-invokes apply() on a voucher already in
-    # `vouchers` — preventing silent double-stacking.
+    # use `+=` against run-level counters in their `apply()`. The guard now
+    # lives on `Voucher.apply()` (3.9.3 R5) so any caller — shop, replay, a
+    # future save/load round-trip — gets the same protection automatically.
     _applied_voucher_ids: set[str] = field(default_factory=set)
+
+    # ── Recent-boss tracker (3.9.3 Phase 5) ────────────────
+    # Used by the BelAtro main loop to suppress immediate boss repeats in
+    # endless mode. The deque holds at most 2 recent boss ids; the selector
+    # rerolls if its pick is in this window. Empty by default — bounded so
+    # the run-state JSON snapshot stays small.
+    _recent_boss_ids: list[str] = field(default_factory=list)
 
     def consume(self, item: Any, context: object = None) -> None:
         """Centralised consumable activation.

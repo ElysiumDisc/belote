@@ -1000,3 +1000,85 @@ def test_package_version_matches_pyproject() -> None:
         "Bump src/belote/__init__.py in lockstep with pyproject.toml — both --version flags "
         "read from __init__.py."
     )
+
+
+# ---------------------------------------------------------------------------
+# 3.9.3 R2: L'Anarchie preserves rebelote across mid-belote trump rotation
+# ---------------------------------------------------------------------------
+
+
+def test_anarchie_rebelote_survives_cross_rotation_play() -> None:
+    """3.9.3 R2 regression: under `dynamic_trump` (L'Anarchie) the trump
+    rotates after every 2 completed tricks. If South played K-trump in
+    trick 2 and Q-of-original-trump in trick 3 (after the rotation), the
+    pre-3.9.3 code compared `card.suit == current_trump` and silently
+    dropped the rebelote. The fix captures `belote_trump` at first-belote
+    and matches the Q against the captured suit.
+    """
+    from belote.game import BossModifiers, _PlayContext, _record_belote_announcement
+
+    # Construct a state mid-round where:
+    #   - belote_tracker = (True, False) — belote already announced
+    #   - belote_announcer = Seat.SOUTH
+    #   - belote_trump = HEARTS (captured at K♥ play)
+    #   - state.trump = SPADES (rotated post-belote, pre-Q play)
+    #   - belote_holders[HEARTS] = SOUTH
+    south_seat = Seat.SOUTH
+    state = GameState(
+        hands=((Card(Suit.HEARTS, Rank.QUEEN),), (), (), ()),
+        turn=south_seat,
+        phase=Phase.PLAYING,
+        trump=Suit.SPADES,  # post-rotation
+        belote_holders={Suit.HEARTS: south_seat},
+        belote_tracker=(True, False),
+        belote_announcer=south_seat,
+        belote_trump=Suit.HEARTS,
+        boss_modifiers=BossModifiers(dynamic_trump=True),
+    )
+    ctx = _PlayContext(
+        state=state,
+        trump=state.trump,
+        is_sa=False,
+        se_trump=False,
+    )
+    tracker, announcer, blt_trump, announced = _record_belote_announcement(
+        ctx, Card(Suit.HEARTS, Rank.QUEEN)
+    )
+    assert tracker == [True, True], (
+        f"rebelote did not fire across trump rotation: tracker={tracker}, "
+        f"belote_trump={blt_trump}, current_trump={state.trump}"
+    )
+    assert announcer == south_seat
+    assert blt_trump == Suit.HEARTS
+    assert announced == "Rebelote!"
+
+
+def test_anarchie_normal_belote_still_works_without_rotation() -> None:
+    """Sanity check: when trump has NOT rotated, the rebelote path uses
+    the current trump (which equals belote_trump). Pre-3.9.3 behavior
+    must remain unchanged in the no-rotation case."""
+    from belote.game import BossModifiers, _PlayContext, _record_belote_announcement
+
+    south_seat = Seat.SOUTH
+    state = GameState(
+        hands=((Card(Suit.HEARTS, Rank.QUEEN),), (), (), ()),
+        turn=south_seat,
+        phase=Phase.PLAYING,
+        trump=Suit.HEARTS,  # no rotation
+        belote_holders={Suit.HEARTS: south_seat},
+        belote_tracker=(True, False),
+        belote_announcer=south_seat,
+        belote_trump=Suit.HEARTS,
+        boss_modifiers=BossModifiers(),
+    )
+    ctx = _PlayContext(
+        state=state,
+        trump=state.trump,
+        is_sa=False,
+        se_trump=False,
+    )
+    tracker, _, _, announced = _record_belote_announcement(
+        ctx, Card(Suit.HEARTS, Rank.QUEEN)
+    )
+    assert tracker == [True, True]
+    assert announced == "Rebelote!"

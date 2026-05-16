@@ -16,6 +16,7 @@ from .game import (
     legal_cards,
     partner,
 )
+from .scoring import card_points_with_modifiers
 
 # trick_rank(Card(trump, Rank.NINE), trump) == 8 + 6 == 14 for any trump
 _NINE_TRUMP_RANK = 14
@@ -249,12 +250,25 @@ class AIPlayer:
         TA: every card scores on the trump scale; threshold against the average
             taker total (~62 raw). Plus a Jack-count bonus.
         SA: every card scores on the non-trump scale; flat-Aces hand favored.
+
+        3.9.3: card values are evaluated through `card_points_with_modifiers`
+        so active zero-rank bosses (jacks_zero / aces_zero / kings_zero /
+        tens_zero / ban_clubs) suppress those ranks in the bid heuristic.
+        Pre-3.9.3 the raw `card_points` totals made the AI overbid TA on a
+        jack-heavy hand under Le Sauvage even though those jacks would score
+        zero in actual play.
         """
-        ta_pts = sum(card_points_fn(c, Suit.TOUT_ATOUT) for c in hand)
-        jack_bonus = sum(1 for c in hand if c.rank == Rank.JACK) * 6  # Jacks dominate TA
+        bm = state.boss_modifiers
+        ta_pts = sum(card_points_with_modifiers(c, Suit.TOUT_ATOUT, bm) for c in hand)
+        # The Jack-count bonus is the AI's TA strength signal — drop it if
+        # jacks are suppressed.
+        jack_bonus = (
+            0 if bm.jacks_zero
+            else sum(1 for c in hand if c.rank == Rank.JACK) * 6
+        )
         ta_score = ta_pts + jack_bonus
 
-        sa_pts = sum(card_points_fn(c, None) for c in hand)
+        sa_pts = sum(card_points_with_modifiers(c, None, bm) for c in hand)
         # Long suits are bad under SA — opponents won't follow your suit.
         long_suit_penalty = sum(max(0, n - 3) ** 2 for n in lengths.values()) * 4
         sa_score = sa_pts - long_suit_penalty
@@ -487,10 +501,19 @@ class AIPlayer:
             if c.suit in suit_cards:
                 suit_cards[c.suit].append(c)
 
+        bm = state.boss_modifiers
         for suit in card_suits:
             trump_cards = suit_cards[suit]
-            honor_count = sum(1 for c in trump_cards if c.rank in (Rank.JACK, Rank.NINE, Rank.ACE))
-            point_total = sum(card_points_fn(c, suit, self._se) for c in trump_cards)
+            # Honors are J/9/A; drop a rank from the count if it's zeroed by a
+            # boss flag (3.9.3 — honor-counting was previously boss-blind).
+            def _is_honor(c: Card) -> bool:
+                if c.rank == Rank.JACK and bm.jacks_zero:
+                    return False
+                if c.rank == Rank.ACE and bm.aces_zero:
+                    return False
+                return c.rank in (Rank.JACK, Rank.NINE, Rank.ACE)
+            honor_count = sum(1 for c in trump_cards if _is_honor(c))
+            point_total = sum(card_points_with_modifiers(c, suit, bm) for c in trump_cards)
 
             suit_scores[suit] = point_total * 0.5 + honor_count * 3
 
@@ -601,7 +624,10 @@ class AIPlayer:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
         points = card_points_fn(card, trump, self._se)
-        # Base: card point value (prefer keeping high value cards if not winning)
+        # Small per-card tiebreaker: when win/loss heuristics are otherwise
+        # equal, slightly bias toward playing the higher-value card. The
+        # 0.1 coefficient keeps this strictly subordinate to the win/loss
+        # bonuses (~+5 to ~-9) below.
         score += points * 0.1
 
         if not trick:

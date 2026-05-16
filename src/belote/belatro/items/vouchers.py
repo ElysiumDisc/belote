@@ -13,7 +13,7 @@ class LaTelescope(Voucher):
     name = "La Télescope"
     description = "Permanent: Earn +$1 bonus after each round."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.economy.bonus_per_round += 1
 
 
@@ -22,7 +22,7 @@ class LaVoute(Voucher):
     name = "La Voûte"
     description = "Earn $1 per $5 held at round end, max $5/round."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         # Use max() rather than `=` so LaVoute can't wipe additive bonuses
         # already granted by LesCartesDorees (which is `+=` against the same
         # fields). LaVoute defines a floor of (rate=1, cap=5).
@@ -35,7 +35,7 @@ class LeGrimoire(Voucher):
     name = "Le Grimoire"
     description = "Shop always stocks at least one Tarot card. Permanent."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.guarantee_tarot_in_shop = True
 
 
@@ -44,7 +44,7 @@ class LaDoubleDonne(Voucher):
     name = "La Double Donne"
     description = "Gain one extra Joker slot (default 5 → 6)."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.joker_slots += 1
 
 
@@ -53,7 +53,7 @@ class LEncyclopedie(Voucher):
     name = "L'Encyclopédie"
     description = "Know your AI partner's bidding tendency before each round. Permanent."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.show_partner_bid_tendency = True
 
 
@@ -62,7 +62,7 @@ class LesCartesDorees(Voucher):
     name = "Les Cartes Dorées"
     description = "Permanently gain +1 interest rate and +5 interest cap."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.economy.interest_rate += 1
         run.economy.max_interest += 5
 
@@ -72,7 +72,7 @@ class LeCouteau(Voucher):
     name = "Le Couteau"
     description = "Gain one extra consumable slot."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.consumable_slots += 1
 
 
@@ -81,7 +81,7 @@ class LaBalance(Voucher):
     name = "La Balance"
     description = "If both teams tie in card points, your team wins the round automatically."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.tie_breaks_for_taker = True
 
 
@@ -91,7 +91,7 @@ class LaSurcoinche(Voucher):
     description = "Unlocks the Surcoinche contract (AI may surcoinche when you coinche)."
     is_unlockable = True
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.surcoinche_unlocked = True
 
 
@@ -100,7 +100,7 @@ class LeCarnet(Voucher):
     name = "Le Carnet"
     description = "You see partner's full hand. +1 Mult each time YOU (South) win a trick."
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.show_north_hand = True
 
 
@@ -110,7 +110,7 @@ class CapotInsurance(Voucher):
     description = "One-shot: if you chute next round, the cash penalty is halved."
     cost = 8
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         run.capot_insurance = True
 
 
@@ -120,7 +120,7 @@ class TierceForge(Voucher):
     description = "Spend 3 Tierce charges in the shop to level up a Planet contract for free."
     cost = 6
 
-    def apply(self, run: BelAtroRun) -> None:
+    def _apply_once(self, run: BelAtroRun) -> None:
         # No-op at apply time. Owning the voucher enables `run.forge_tierce`
         # which the shop UI calls when the player chooses to spend charges.
         pass

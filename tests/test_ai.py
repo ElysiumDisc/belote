@@ -4,7 +4,7 @@ import unittest.mock
 
 from belote.ai import AIPlayer, Difficulty
 from belote.deck import Card, Rank, Suit
-from belote.game import GameState, Phase, Seat, TrickCard
+from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
 
 
 def test_ai_easy_play() -> None:
@@ -297,3 +297,61 @@ def test_opp_trumps_under_tout_atout_uses_32_total() -> None:
     assert my == 2, f"expected my_trumps=2 (all hand cards under TA), got {my}"
     # 32 total - 2 mine - 4 played (1 from current_trick + 3 planted) - 1 partner = 25.
     assert opp == 25, f"expected opp_trumps=25, got {opp}"
+
+
+# ── 3.9.3 R1: AI bid heuristics honor zero-rank boss flags ─────────────────
+
+
+def _ta_jack_heavy_hand() -> tuple[Card, ...]:
+    """8-card hand that's strong-for-TA: 3 Jacks across 3 suits + Aces.
+
+    Under normal scoring this passes _hard_special's TA threshold (~50).
+    Under `jacks_zero` (Le Sauvage) the Jacks score 0 and the hand should
+    fall below threshold — the AI must NOT bid Tout Atout in that world.
+    """
+    return (
+        Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.HEARTS, Rank.JACK),
+        Card(Suit.DIAMONDS, Rank.JACK),
+        Card(Suit.CLUBS, Rank.NINE),
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.HEARTS, Rank.ACE),
+        Card(Suit.DIAMONDS, Rank.SEVEN),
+        Card(Suit.CLUBS, Rank.EIGHT),
+    )
+
+
+def test_hard_ai_bids_ta_on_jack_heavy_hand_under_normal_scoring() -> None:
+    """Baseline: under normal scoring the heuristic picks Tout Atout."""
+    hand = _ta_jack_heavy_hand()
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    state = GameState(
+        hands=((), hand, (), ()),
+        up_card=Card(Suit.CLUBS, Rank.SEVEN),
+        bidding_round=2,
+        bidder_index=2,
+        dealer=Seat.SOUTH,
+        boss_modifiers=BossModifiers(),
+    )
+    bid = player.decide_bid(state)
+    assert bid == Suit.TOUT_ATOUT
+
+
+def test_hard_ai_does_not_bid_ta_when_jacks_zero_suppresses_jacks() -> None:
+    """3.9.3 R1 regression: under `jacks_zero` the Jacks score 0, so the
+    Jack-heavy hand is no longer TA-worthy and the AI should pass on TA."""
+    hand = _ta_jack_heavy_hand()
+    player = AIPlayer(Seat.EAST, Difficulty.HARD)
+    state = GameState(
+        hands=((), hand, (), ()),
+        up_card=Card(Suit.CLUBS, Rank.SEVEN),
+        bidding_round=2,
+        bidder_index=2,
+        dealer=Seat.SOUTH,
+        boss_modifiers=BossModifiers(jacks_zero=True),
+    )
+    bid = player.decide_bid(state)
+    assert bid != Suit.TOUT_ATOUT, (
+        "AI must not bid Tout Atout when jacks_zero suppresses the entire "
+        "TA strength signal — pre-3.9.3 it ignored the boss flag and overbid."
+    )

@@ -62,6 +62,27 @@ def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
 
 
+def _undo_pop_to_south(
+    history_stack: list[GameState], stack_base: int
+) -> GameState | None:
+    """Pop snapshots until the next state to act on is South's turn.
+
+    `history_stack` is populated with the state captured BEFORE each
+    `play_card` / `process_bid` (one push per move, AI moves included). A naive
+    single pop after an AI sequence lands the user back inside that AI
+    sequence, replaying it deterministically — visually the undo did nothing.
+    Pop until the *restored* state's `turn` is SOUTH so the user lands on
+    their own previous decision point. Returns None if `stack_base` is hit
+    first (the caller restarts the round with a fresh deal).
+    """
+    restored: GameState | None = None
+    while len(history_stack) > stack_base:
+        restored = history_stack.pop()
+        if restored.turn == Seat.SOUTH:
+            return restored
+    return None
+
+
 def _bid_label(bid: BidValue) -> str:
     """Human-readable label for an AI bid. `BidValue` is `Suit | str | None`;
     this handles each shape so the AI announcement line doesn't crash when the
@@ -337,12 +358,16 @@ def run_round(
             # an earlier GameState, those tuples may again be live — flush so
             # we never serve a stale cached entry from before the undo.
             clear_legal_cards_cache()
-            if len(history_stack) > stack_base:
-                current = history_stack.pop()
+            restored = _undo_pop_to_south(history_stack, stack_base)
+            if restored is not None:
+                current = restored
+                announce("↶ Undo", duration=0.8, reader=reader)
+                display(current, None)
                 continue
             # Nothing left to undo in this round — restart with a fresh deal
             del history_stack[stack_base:]
             current = start_round(state, rng)
+            announce("↶ Undo — fresh deal", duration=0.8, reader=reader)
             continue
         current = res_bid  # type: ignore[assignment]
 
@@ -363,13 +388,17 @@ def run_round(
             # actually finished the round, not the rewound branch.
             if replay_decisions is not None:
                 replay_decisions.clear()
-            if len(history_stack) > stack_base:
-                current = history_stack.pop()
+            restored = _undo_pop_to_south(history_stack, stack_base)
+            if restored is not None:
+                current = restored
+                announce("↶ Undo", duration=0.8, reader=reader)
+                display(current, None)
                 # If we undo into BIDDING, we continue the outer loop
                 continue
             # Nothing left to undo in this round — restart with a fresh deal
             del history_stack[stack_base:]
             current = start_round(state, rng)
+            announce("↶ Undo — fresh deal", duration=0.8, reader=reader)
             continue
         current = res_play  # type: ignore[assignment]
 

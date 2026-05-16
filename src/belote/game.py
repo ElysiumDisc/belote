@@ -224,6 +224,12 @@ class GameState:
     # the wrong seat (or None) for a belote that was announced on the
     # original trump.
     belote_announcer: Seat | None = None
+    # Captured at the same moment as `belote_announcer` — the trump suit at
+    # the time belote was first announced. Under L'Anarchie (`dynamic_trump`)
+    # `state.trump` rotates every 2 tricks, so the K/Q played second may not
+    # match the *current* trump when scoring fires; we match against the
+    # captured original trump instead. None outside a belote window.
+    belote_trump: Suit | None = None
     first_trick_done: bool = False
     litige_points: int = 0
 
@@ -267,6 +273,7 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "announced": None,
         "belote_tracker": (False, False),
         "belote_announcer": None,
+        "belote_trump": None,
         "first_trick_done": False,
         "boss_modifiers": BossModifiers(),
     }
@@ -870,35 +877,52 @@ class _PlayContext:
 
 def _record_belote_announcement(
     ctx: _PlayContext, card: Card
-) -> tuple[list[bool], Seat | None, str | None]:
-    """Update belote_tracker / belote_announcer if the played card triggers it.
+) -> tuple[list[bool], Seat | None, Suit | None, str | None]:
+    """Update belote_tracker / belote_announcer / belote_trump if the played
+    card triggers a belote or rebelote announcement.
 
-    Returns (belote_tracker, belote_announcer, announced_message).
+    Returns (belote_tracker, belote_announcer, belote_trump, announced_message).
+
+    L'Anarchie note (3.9.3): `belote_trump` locks in the trump suit *at the
+    moment of the first announcement*. The rebelote half then matches the K/Q
+    play against that captured suit, not against the rotated `ctx.trump`.
+    Without this, playing K-trump in trick 2 and Q-old-trump in trick 3 (after
+    L'Anarchie rotates trump at tricks_count % 2 == 0) would silently drop
+    the rebelote.
     """
     state = ctx.state
     belote_tracker = list(state.belote_tracker)
     belote_announcer = state.belote_announcer
+    belote_trump = state.belote_trump
     announced: str | None = None
 
-    trump = ctx.trump
+    # Once first-belote has fired we lock onto `belote_trump`; otherwise track
+    # the current trump (which is also what belote_holders is keyed by at
+    # round start, before any rotation).
+    effective_trump = belote_trump if belote_tracker[0] else ctx.trump
+
     if (
-        trump
-        and state.belote_holders.get(trump) == state.turn
+        effective_trump
+        and state.belote_holders.get(effective_trump) == state.turn
         and not state.boss_modifiers.no_belote
     ):
-        is_k_q = card.rank in (Rank.KING, Rank.QUEEN) and card.suit == trump
+        is_k_q = (
+            card.rank in (Rank.KING, Rank.QUEEN)
+            and card.suit == effective_trump
+        )
         if is_k_q:
             if not belote_tracker[0]:
                 belote_tracker[0] = True
-                # Capture the announcing seat — needed so scoring doesn't lose
-                # the announcement when L'Anarchie rotates state.trump later
-                # in the round.
+                # Capture the announcing seat *and* the trump at that moment.
+                # The seat survives L'Anarchie rotation via belote_announcer;
+                # the trump survives via belote_trump (3.9.3).
                 belote_announcer = state.turn
+                belote_trump = effective_trump
                 announced = "Belote!"
             elif not belote_tracker[1]:
                 belote_tracker[1] = True
                 announced = "Rebelote!"
-    return belote_tracker, belote_announcer, announced
+    return belote_tracker, belote_announcer, belote_trump, announced
 
 
 def _resolve_trick_winner(
@@ -1023,7 +1047,9 @@ def play_card(state: GameState, card: Card) -> GameState:
 
     # Belote/Rebelote announcement; resets the announced popup each play so it
     # fires exactly once per Belote-or-Rebelote event.
-    belote_tracker, belote_announcer, announced = _record_belote_announcement(ctx, card)
+    belote_tracker, belote_announcer, belote_trump, announced = (
+        _record_belote_announcement(ctx, card)
+    )
 
     # Mid-trick: just advance the turn.
     if len(new_trick) != 4:
@@ -1036,6 +1062,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             announced=announced,
             belote_tracker=(belote_tracker[0], belote_tracker[1]),
             belote_announcer=belote_announcer,
+            belote_trump=belote_trump,
         )
 
     # Trick complete: resolve winner (honouring La Rupture override).
@@ -1061,6 +1088,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             announced=announced,
             belote_tracker=(belote_tracker[0], belote_tracker[1]),
             belote_announcer=belote_announcer,
+            belote_trump=belote_trump,
             first_trick_done=True,
             current_round_points=new_round_points,
             trump=current_trump,
@@ -1080,6 +1108,7 @@ def play_card(state: GameState, card: Card) -> GameState:
         announced=announced,
         belote_tracker=(belote_tracker[0], belote_tracker[1]),
         belote_announcer=belote_announcer,
+        belote_trump=belote_trump,
         first_trick_done=first_trick_done,
         current_round_points=new_round_points,
         trump=current_trump,

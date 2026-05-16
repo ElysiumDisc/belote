@@ -147,37 +147,34 @@ def main() -> None:
                 Seat.WEST: args.difficulty,
             }
 
-            rematch = False
             while True:
-                if not rematch:
-                    choice, diffs_map, target, speed = show_main_menu(
-                        reader, diffs_map, target, speed
-                    )
+                choice, diffs_map, target, speed = show_main_menu(
+                    reader, diffs_map, target, speed
+                )
 
-                    if choice == "Quit":
-                        flush_stats()
-                        break
+                if choice == "Quit":
+                    flush_stats()
+                    break
 
-                    if choice == "Rules & History":
-                        show_rules(reader)
-                        continue
+                if choice == "Rules & History":
+                    show_rules(reader)
+                    continue
 
-                    if choice == "Statistics":
-                        show_stats(reader)
-                        continue
+                if choice == "Statistics":
+                    show_stats(reader)
+                    continue
 
-                    if choice == "BelAtro":
-                        from .belatro.main import BelAtroGame
+                if choice == "BelAtro":
+                    from .belatro.main import BelAtroGame
 
-                        game = BelAtroGame()
-                        game.start(reader)
-                        continue
+                    game = BelAtroGame()
+                    game.start(reader)
+                    continue
 
-                    if choice != "Start Game":
-                        continue
+                if choice != "Start Game":
+                    continue
 
-                # Start Game / Rematch — already in alt-screen, just clear.
-                rematch = False
+                # Start Game — already in alt-screen, just clear.
                 ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[speed]
                 sys.stdout.write(clear_screen() + hide_cursor())
                 sys.stdout.flush()
@@ -236,32 +233,24 @@ def main() -> None:
                     # Show final screen
                     show_final_screen(state)
 
-                    # Wait for Enter/R/Q/T
                     sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                     sys.stdout.write(
-                        f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [H] History{RESET} "
+                        f"\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
                     )
                     sys.stdout.flush()
 
                     while True:
                         ev = reader.read()
-                        if ev.key == Key.CHAR and ev.char and ev.char.lower() == "r":
-                            rematch = True
-                            break
                         if ev.key == Key.HIST:
                             show_history(state, reader)
                             show_final_screen(state)
                             sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                             sys.stdout.write(
-                                f"\n  {white_fg()}[Enter/Q] Menu  [R] Rematch  [H] History{RESET} "
+                                f"\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
                             )
                             sys.stdout.flush()
-                        if ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
-                            rematch = False
+                        elif ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
                             break
-
-                    if rematch:
-                        continue
 
                 # Back to menu — stay in alt-screen, just clear before the menu
                 # loop starts redrawing.

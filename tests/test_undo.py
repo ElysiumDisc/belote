@@ -14,6 +14,7 @@ import random
 from belote.game import (
     GameState,
     Phase,
+    Seat,
     legal_cards,
     new_game,
     place_bid,
@@ -79,6 +80,70 @@ def test_undo_stack_base_marks_round_boundary() -> None:
     # Boundary reached: pop count equals snapshots; further UNDO must restart.
     assert len(history) == stack_base
     assert not (len(history) > stack_base)
+
+
+# ── 3.9.3 Phase 7b: undo pops past AI moves to the prior South turn ────────
+
+
+def test_undo_pop_to_south_skips_intermediate_ai_states() -> None:
+    """3.9.3 Phase 7b regression: pressing Z at South's turn should land
+    the user on their PRIOR decision point, not on an interleaved AI state
+    in the middle of the previous trick. The helper pops repeatedly until
+    the popped state has `turn == SOUTH`.
+
+    Pre-3.9.3 a single pop returned an AI mid-trick state; the outer loop
+    re-played the AI deterministically and the user saw nothing visible
+    change. The helper now skips past those AI snapshots.
+    """
+    from belote.game import Phase
+    from belote.gameflow import _undo_pop_to_south
+
+    south_state = GameState(hands=((), (), (), ()), turn=Seat.SOUTH, phase=Phase.PLAYING)
+    east_state = GameState(hands=((), (), (), ()), turn=Seat.EAST, phase=Phase.PLAYING)
+    north_state = GameState(hands=((), (), (), ()), turn=Seat.NORTH, phase=Phase.PLAYING)
+    west_state = GameState(hands=((), (), (), ()), turn=Seat.WEST, phase=Phase.PLAYING)
+
+    # Push the stack as gameflow does: state-before-each-play, mixing seats.
+    history: list[GameState] = [
+        south_state,  # South's previous turn (the desired landing point)
+        east_state,
+        north_state,
+        west_state,
+    ]
+    restored = _undo_pop_to_south(history, stack_base=0)
+    assert restored is not None
+    assert restored.turn == Seat.SOUTH, (
+        "_undo_pop_to_south must skip past AI snapshots and land on South's "
+        "decision point. Got turn=" + str(restored.turn)
+    )
+    # All three AI snapshots plus the South snapshot were consumed.
+    assert history == []
+
+
+def test_undo_pop_to_south_returns_none_at_round_base() -> None:
+    """When all snapshots in the current round have been popped, the helper
+    returns None and the caller restarts the round with a fresh deal."""
+    from belote.gameflow import _undo_pop_to_south
+
+    history: list[GameState] = []
+    assert _undo_pop_to_south(history, stack_base=0) is None
+
+
+def test_undo_pop_to_south_respects_stack_base() -> None:
+    """`stack_base` bounds the undo to the current round — popping past it
+    would leak prior-round state."""
+    from belote.game import Phase
+    from belote.gameflow import _undo_pop_to_south
+
+    prior_round_state = GameState(
+        hands=((), (), (), ()), turn=Seat.SOUTH, phase=Phase.SCORING
+    )
+    history: list[GameState] = [prior_round_state]
+    # stack_base = 1 marks "this round starts above index 0"; popping must
+    # return None even though index 0 is a South-turn state.
+    assert _undo_pop_to_south(history, stack_base=1) is None
+    # Prior-round state was not popped.
+    assert history == [prior_round_state]
 
 
 def test_undo_stack_isolates_rounds() -> None:

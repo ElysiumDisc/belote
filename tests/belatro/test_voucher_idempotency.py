@@ -128,3 +128,46 @@ def test_registry_still_lists_all_four_vouchers() -> None:
     register_all_items()
     for vid in ("la_telescope", "la_double_donne", "les_cartes_dorees", "le_couteau"):
         assert vid in registry.vouchers, f"{vid} missing from registry.vouchers"
+
+
+# ── 3.9.3 R5: idempotency guard relocated into Voucher.apply() ─────────────
+
+
+def test_direct_voucher_apply_is_idempotent_without_shop() -> None:
+    """3.9.3 R5 regression: calling `voucher.apply(run)` *directly* (not via
+    the shop) must also be idempotent. Pre-3.9.3 the guard lived only in
+    `Shop._apply_item`, so any future caller (replay reconstruction,
+    deck-builder preview) would silently double-stack `+=` semantics."""
+    register_all_items()
+    run = BelAtroRun()
+    starting_slots = run.joker_slots
+
+    voucher = LaDoubleDonne()  # apply() does `run.joker_slots += 1`
+    voucher.apply(run)
+    assert run.joker_slots == starting_slots + 1
+    assert "la_double_donne" in run._applied_voucher_ids
+
+    # A second direct call must be a no-op — the base wrapper sees the id
+    # in `_applied_voucher_ids` and skips `_apply_once`. Pre-3.9.3 this
+    # double-bumped joker_slots.
+    voucher.apply(run)
+    assert run.joker_slots == starting_slots + 1, (
+        "Voucher.apply() was not idempotent — joker_slots double-stacked. "
+        "The guard must live on the Voucher base, not just on the shop."
+    )
+
+    # Even a fresh instance of the same voucher class must be guarded.
+    voucher2 = LaDoubleDonne()
+    voucher2.apply(run)
+    assert run.joker_slots == starting_slots + 1
+
+
+def test_direct_voucher_apply_protects_telescope_bonus_per_round() -> None:
+    register_all_items()
+    run = BelAtroRun()
+    starting_bonus = run.economy.bonus_per_round
+    voucher = LaTelescope()
+    voucher.apply(run)
+    voucher.apply(run)  # double call
+    voucher.apply(run)  # triple call
+    assert run.economy.bonus_per_round == starting_bonus + 1

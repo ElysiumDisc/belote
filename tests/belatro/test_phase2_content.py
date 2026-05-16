@@ -54,6 +54,73 @@ def _round_end(
     )
 
 
+# ── 3.9.3 R4: LeBanquier suppresses bonus on chute ──────────────────────────
+
+
+def test_le_banquier_pays_nothing_when_round_failed() -> None:
+    """3.9.3 R4 regression: LeBanquier's description says 'Earn $1 for every
+    10 card points you score above the Blind target'. Pre-3.9.3 the joker
+    paid out unconditionally — even on chute, where points 'scored' don't
+    reflect a successful contract. The fix gates on `breakdown.is_failed`.
+    """
+    from belote.belatro.items.jokers.economy import LeBanquier
+
+    class _FailedBdHigh:
+        is_failed = True
+        taker_total = 200  # would have been $12 of bonus pre-3.9.3
+        defender_total = 100
+
+    event = RoundEndEvent(
+        breakdown=_FailedBdHigh(),
+        taker_seat=Seat.SOUTH,
+        trump=Suit.HEARTS,
+        capot=False,
+    )
+    result = LeBanquier().on_round_end(event, {"target_score": 80})
+    assert result is None, "LeBanquier must not pay out on a failed round"
+
+
+def test_le_banquier_pays_only_when_ns_was_taker() -> None:
+    """LeBanquier's 'score above target' framing only makes sense for the
+    taker team — defender chute totals shouldn't trigger the bonus."""
+    from belote.belatro.items.jokers.economy import LeBanquier
+
+    class _OkBd:
+        is_failed = False
+        taker_total = 200
+        defender_total = 200
+
+    # EW is taker → LeBanquier on NS side gets no bonus.
+    event = RoundEndEvent(
+        breakdown=_OkBd(),
+        taker_seat=Seat.EAST,
+        trump=Suit.HEARTS,
+        capot=False,
+    )
+    result = LeBanquier().on_round_end(event, {"target_score": 80})
+    assert result is None
+
+
+def test_le_banquier_pays_on_ns_win() -> None:
+    """Happy path unchanged: NS taker, contract held, points above target."""
+    from belote.belatro.items.jokers.economy import LeBanquier
+
+    class _OkBd:
+        is_failed = False
+        taker_total = 150  # 70 above an 80 threshold → $7
+        defender_total = 50
+
+    event = RoundEndEvent(
+        breakdown=_OkBd(),
+        taker_seat=Seat.SOUTH,
+        trump=Suit.HEARTS,
+        capot=False,
+    )
+    result = LeBanquier().on_round_end(event, {"target_score": 80})
+    assert result is not None
+    assert result.add_money == 7
+
+
 def test_coinche_stack_only_fires_when_coinched_and_won() -> None:
     j = CoincheStack()
     assert j.on_round_end(_round_end(coinche_level=0), {}) is None

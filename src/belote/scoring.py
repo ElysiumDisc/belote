@@ -487,6 +487,18 @@ def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: object) -> 
     return card_points_fn(card, trump, getattr(bm, "seven_eight_trump", False))
 
 
+def card_points_with_modifiers(card: Card, trump: Suit | None, bm: object) -> int:
+    """Public helper: per-card point value with active zero-rank boss flags.
+
+    Mirrors `trick_card_points` (per-trick canonical helper) at the per-card
+    level. Bidding heuristics (`ai.py`) call this to honor zero-rank bosses
+    when evaluating Tout Atout / Sans Atout / regular-suit bid strength —
+    pre-3.9.3 the AI used raw `card_points` and overbid on rank-suppressed
+    hands.
+    """
+    return _card_points_with_zero_ranks(card, trump, bm)
+
+
 def _trick_points_with_modifiers(
     trick: tuple[TrickCard, ...], trump: Suit | None, bm: object
 ) -> int:

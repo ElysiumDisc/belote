@@ -217,7 +217,6 @@ def show_help(reader: KeyReader) -> None:
         "  [1-4]       Bid suit (S/H/D/C)",
         "",
         f"{white_fg()}Menus:{RESET}",
-        "  [R]         Rematch (Game Over)",
         "  [H]         View Game History",
         "",
         f"{DIM}Press [Any Key] to Return{RESET}",

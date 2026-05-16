@@ -288,8 +288,24 @@ class BelAtroGame:
                 # determinism fix the 3.2.0 release applied to shop generation
                 # and the three RNG-using tarots. Boss assignment was the last
                 # unseeded RNG site in the BelAtro round flow.
-                boss_cls = self.run._get_rng().choice(ALL_BOSS_MODIFIERS)
+                #
+                # 3.9.3 (Phase 5): in endless mode, suppress immediate boss
+                # repeats by rejecting a pick that's in the last-2 window.
+                # We cap the reroll attempts so we never loop on a degenerate
+                # pool (e.g. tests that monkeypatch a single boss).
+                rng = self.run._get_rng()
+                recent = self.run._recent_boss_ids
+                boss_cls = rng.choice(ALL_BOSS_MODIFIERS)
+                if self.run.endless and len(ALL_BOSS_MODIFIERS) > 3:
+                    attempts = 0
+                    while boss_cls().id in recent and attempts < 8:
+                        boss_cls = rng.choice(ALL_BOSS_MODIFIERS)
+                        attempts += 1
                 boss = boss_cls()
+                # Update the recent-boss window (keep last 2).
+                recent.append(boss.id)
+                if len(recent) > 2:
+                    del recent[: len(recent) - 2]
                 BelAtroAnnounce.boss_reveal(boss, self.reader)
 
         # Boss-specific pre-round setup, driven by boss_modifiers flags rather

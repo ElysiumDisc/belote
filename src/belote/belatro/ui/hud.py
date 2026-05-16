@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -121,10 +122,11 @@ class BelAtroHUD:
             return
 
         # Standard / verbose path (current behaviour, with a small mood glyph
-        # appended to the row-2 left).
+        # appended to the row-2 left). 3.9.3: collected into a single
+        # write+flush so the BelAtro HUD lays down all rows in one syscall.
         target_str = str(run.target_score)
         mood = _MOOD_GLYPH.get(run.partner_mood, "○")
-        print(
+        parts: list[str] = [
             move(2, 2)
             + white_fg()
             + "Ante: "
@@ -151,25 +153,38 @@ class BelAtroHUD:
             + DIM
             + f"Partner: {mood}"
             + RESET
-        )
+            + "\n"
+        ]
 
-        # Row 3: Score (hidden by Le Brouillard boss)
+        # Row 3: Score (hidden by Le Brouillard boss). Also suppressed under
+        # La Compétition (`separate_scoring`) because the live running total
+        # adds trick points sequentially while the final score takes the
+        # per-seat max — the two diverge, so showing a misleading running
+        # total during play would confuse the player. 3.9.3.
         if not state.boss_modifiers.hide_hud:
-            score_str = f"{state._chips} x {state._mult:.1f} = {acc.get_total(state)}"
-            score_col = max(2, term_w - len(score_str) - 2)
-            print(move(3, score_col) + red_fg() + BOLD + score_str + RESET)
+            if state.boss_modifiers.separate_scoring:
+                disclaimer = "[Compétition: score par siège — total final caché]"
+                col = max(2, term_w - len(disclaimer) - 2)
+                parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
+            else:
+                score_str = f"{state._chips} x {state._mult:.1f} = {acc.get_total(state)}"
+                score_col = max(2, term_w - len(score_str) - 2)
+                parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
 
         # Show jokers on row 2 right side as compact list (full names at standard,
         # truncated names at compact widths).
         if run.jokers:
             names = "  ".join(j.name for j in run.jokers)
-            print(move(2, max(2, term_w // 2)) + gold_fg() + names[: term_w // 2 - 2] + RESET)
+            parts.append(move(2, max(2, term_w // 2)) + gold_fg() + names[: term_w // 2 - 2] + RESET + "\n")
             # 3.0.0: synergy badge — render below the joker line if any pair
             # matches. Cheap O(N) per render; the table is short.
             synergies = detect_synergies(list(run.jokers))
             if synergies:
                 badge = f"{gold_fg()}{BOLD}★ SYN×{len(synergies)}{RESET}"
-                print(move(4, max(2, term_w // 2)) + badge)
+                parts.append(move(4, max(2, term_w // 2)) + badge + "\n")
+
+        sys.stdout.write("".join(parts))
+        sys.stdout.flush()
 
     def _render_compact(self, acc: ScoreAccumulator, state: GameState, term_w: int) -> None:
         """Compact HUD: single-line summary, joker count instead of names.
@@ -191,16 +206,29 @@ class BelAtroHUD:
         else:
             joker_label = f"{DIM}J:0/{run.joker_slots}{RESET}"
 
-        # Compose both halves on row 2
-        print(move(2, 2) + left)
+        # Compose both halves on row 2. 3.9.3: batched into a single
+        # write/flush so the compact HUD lays down all rows atomically.
         right_col = max(2, term_w - visible_len(joker_label) - 1)
-        print(move(2, right_col) + joker_label)
+        parts: list[str] = [
+            move(2, 2) + left + "\n",
+            move(2, right_col) + joker_label + "\n",
+        ]
 
-        # Row 3: chips × mult on the right (hidden by Le Brouillard)
+        # Row 3: chips × mult on the right (hidden by Le Brouillard, also
+        # suppressed under La Compétition since the running total diverges
+        # from the per-seat-max final score — 3.9.3).
         if not state.boss_modifiers.hide_hud:
-            score_str = f"{state._chips}×{state._mult:.1f}={acc.get_total(state)}"
-            score_col = max(2, term_w - len(score_str) - 2)
-            print(move(3, score_col) + red_fg() + BOLD + score_str + RESET)
+            if state.boss_modifiers.separate_scoring:
+                disclaimer = "[Compétition]"
+                col = max(2, term_w - len(disclaimer) - 2)
+                parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
+            else:
+                score_str = f"{state._chips}×{state._mult:.1f}={acc.get_total(state)}"
+                score_col = max(2, term_w - len(score_str) - 2)
+                parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
+
+        sys.stdout.write("".join(parts))
+        sys.stdout.flush()
 
 
 # ── 3.4.0: joker pip strip + synergy tooltip ────────────────────────────────
@@ -268,8 +296,9 @@ def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
             parts.append(f"{DIM}[··]{RESET}")
     strip = "".join(parts)
     # Center is overkill; anchor at col 2 so it doesn't fight the score line
-    # on the right of row 2.
-    print(move(row, 2) + strip)
+    # on the right of row 2. 3.9.3: single write+flush.
+    sys.stdout.write(move(row, 2) + strip + "\n")
+    sys.stdout.flush()
 
 
 def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -> None:
@@ -282,14 +311,18 @@ def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) 
     if not pairs:
         return
     # Show up to two synergies; further ones are summarised as "+N more".
+    # 3.9.3: batched single write/flush.
     max_w = max(20, term_w - 4)
+    out: list[str] = []
     for i, (_a, _b, desc) in enumerate(pairs[:2]):
         line = f"{green_fg()}♦{RESET} {white_fg()}{desc}{RESET}"
         if visible_len(line) > max_w:
             # crude trim — fall back to plain ASCII to make ansi-stripping
             # unnecessary (we never split mid-escape).
             line = desc[: max_w - 2] + ".."
-        print(move(row + i, 2) + line)
+        out.append(move(row + i, 2) + line + "\n")
     if len(pairs) > 2:
         extra = f"{DIM}+{len(pairs) - 2} more synergies{RESET}"
-        print(move(row + 2, 2) + extra)
+        out.append(move(row + 2, 2) + extra + "\n")
+    sys.stdout.write("".join(out))
+    sys.stdout.flush()

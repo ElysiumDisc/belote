@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from belote.game import Seat
 
-from ..engine.event_bus import RoundEndEvent
+from ..engine.event_bus import DeclarationScoredEvent, RoundEndEvent
 from .save import Profile, SaveManager
 
 if TYPE_CHECKING:
@@ -40,11 +40,29 @@ class UnlockTracker:
 
         if isinstance(event, RoundEndEvent):
             dirty |= self._handle_round_end(event)
-
-        # Potentially more event handlers (e.g. for specific trick-based unlocks)
+        elif isinstance(event, DeclarationScoredEvent):
+            dirty |= self._handle_declaration(event)
 
         if dirty:
             self.save_manager.save_profile(self.profile)
+
+    def _handle_declaration(self, event: DeclarationScoredEvent) -> bool:
+        """3.9.3 Phase 8: unlock Quinte Royale (legendary joker) when NS
+        announces a Quinte. Pre-3.9.3 the joker was marked `is_unlockable`
+        but had no path to actually unlock, leaving it unreachable in the
+        shop pool.
+        """
+        if (
+            event.seat in (Seat.SOUTH, Seat.NORTH)
+            and event.declaration_type == "sequence"
+            and event.points >= 100
+            and self.profile.unlock("quinte_royale")
+        ):
+            self.pending_announcements.append(
+                "UNLOCKED: Quinte Royale (Legendary — announced a Quinte)"
+            )
+            return True
+        return False
 
     def _handle_round_end(self, event: RoundEndEvent) -> bool:
         dirty = False

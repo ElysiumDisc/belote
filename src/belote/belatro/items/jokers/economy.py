@@ -15,11 +15,18 @@ class LeBanquier(Joker):
     cost = 7
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        points = (
-            event.breakdown.taker_total
-            if event.taker_seat in (Seat.SOUTH, Seat.NORTH)
-            else event.breakdown.defender_total
-        )
+        # Description: "Earn $1 for every 10 card points you score above the
+        # Blind target." That framing presumes NS won the contract — under a
+        # chute the points aren't "scored" in the meaningful sense, so the
+        # bonus doesn't apply. 3.9.3.
+        if event.breakdown.is_failed:
+            return None
+        # Bonus only makes sense when NS held the contract — defender points
+        # under chute are computed differently and don't represent "above
+        # target" score.
+        if event.taker_seat not in (Seat.SOUTH, Seat.NORTH):
+            return None
+        points = event.breakdown.taker_total
         # Use a dynamic threshold from state or default to 80
         threshold = state.get("target_score", 80)
         bonus = max(0, (points - threshold) // 10)
