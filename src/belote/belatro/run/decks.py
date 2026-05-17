@@ -167,7 +167,7 @@ STARTING_DECKS: list[StartingDeck] = [
     StartingDeck(
         id="architecte",
         name="L'Architecte",
-        description="Pay $10 in bidding to choose the contract yourself. Tricks containing a declared Annonce pay +$2.",
+        description="Pay $10 in bidding to choose the contract yourself. NS-won tricks containing a declared Annonce pay +$2.",
         initial_money=8,
         deck_modifications={"buy_contract": True, "annonce_cash_x2": True},
         ascii_art=(

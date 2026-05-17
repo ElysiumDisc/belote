@@ -88,10 +88,16 @@ ruff check src/ tests/
 PYTHONPATH=src pytest
 ```
 
-Current baseline (4.5.0):
+Current baseline (4.6.1):
 
-- **790 tests** passing (4.1.1 had 751; +39 in 4.5.0: 7 in `tests/test_input_wasd.py` (WASD reader aliases + bid quick-key remap regression pins), 15 in `tests/belatro/test_decks_4_5.py` (L'Infiltré ghost_lead consumer happy-path / four non-trigger cases / deck registration; L'Architecte annonce_cash_x2 + round-cache eviction; buy_contract_picker UI: chosen suit / SA sentinel / Esc cancel / EOF cancel), 17 in `tests/belatro/test_jokers_4_5.py` (one happy-path + one non-trigger per joker plus a registry pin and the on_round_start→accumulator plumbing pin for LePrêteur)).
-- 4.5.0 is a feature release: WASD nav at the reader source layer (`src/belote/input.py`), bid quick-keys remapped A→X and S→N (`src/belote/ui/prompts.py::prompt_bid`), two new starting decks (L'Infiltré, L'Architecte) registered in `src/belote/belatro/run/decks.py` with consumers in `src/belote/belatro/core/scoring.py`, six new "Conditional Engine" jokers spread across `trick_timing.py` / `annonces.py` / `economy.py`. `ScoreAccumulator.trigger_round_start` now applies `JokerResult` returns from `on_round_start` (was: silently discarded; backward-compatible because existing jokers all returned None).
+- **790 tests** passing (4.6.0 had 787; +3 in 4.6.1: `test_show_main_menu_invalidates_diff_on_exit`, `test_show_theme_selector_invalidates_diff_on_exit`, `test_shop_render_writes_once_per_frame` — all appended to `tests/test_render_diff.py`).
+- 4.6.1 is a third audit / hardening pass over 4.6.0. Two real changes: `src/belote/ui/menu.py` now calls `invalidate_diff()` on every exit path of `show_theme_selector`, `show_ai_config`, `show_main_menu`, and `show_final_screen` — closing the same overlay-bypass diff-skip class of bug that 4.0.0 fixed for `show_help`/`show_history`/`show_rules` (latent because all four menu paths run before/after the gameplay `display()` loop and the failure mode only surfaces on the second game of a session). `src/belote/belatro/ui/shop.py::_render` now batches its ~16 per-frame `print()` calls into a single `sys.stdout.write` + `flush`, matching the single-write convention used in `belatro/ui/hud.py`, `announce.py`, and `prompts.py::show_help`. No mechanic behaviour changes. The audit verified-clean a long list of previously-flagged candidates (boss-modifier per-round reset by design, L'Infiltré seat-walking correct, LeCollectionneur re_emit guard already added in 4.5.1, `_architecte_ns_annonce_cards` live-read by L'Architecte's `annonce_cash_x2` branch, zero-rank flag three-site consistency, render diff layer, voucher idempotency, A11y, WASD reader aliasing).
+
+Previous baselines:
+
+- 4.6.0 (787 tests): removed the Grimaud `card_detail` overlay — module, `Key.CARD_DETAIL` enum value + `f` binding, prompt-card / prompt-bid case arms, the help-screen `[F]` entry, the `tests/test_card_detail.py` suite (5 tests), and the `GRIMAUD Standard Playing-Cards-1898.png` reference image. `render.invalidate_diff()` preserved (still used by `show_help`/`show_history`/`show_rules`).
+- 4.5.1 (792 tests): audit / hardening pass over 4.5.0. `LeCollectionneur.on_trick_won` re_emit guard, L'Architecte deck description NS-won qualifier, `_record_belote_announcement` returns `tuple[bool, bool]` directly. Two clarifying comments (L'Infiltré TOUT_ATOUT degeneracy, LePrêteur snapshot semantics).
+- 4.5.0 (790 tests): WASD nav at the reader source layer, bid quick-keys remapped A→X and S→N, two new starting decks (L'Infiltré, L'Architecte), six new "Conditional Engine" jokers. `ScoreAccumulator.trigger_round_start` now applies `JokerResult` returns from `on_round_start`.
 
 Run all gates before committing:
 

@@ -1044,7 +1044,7 @@ def test_anarchie_rebelote_survives_cross_rotation_play() -> None:
     tracker, announcer, blt_trump, announced = _record_belote_announcement(
         ctx, Card(Suit.HEARTS, Rank.QUEEN)
     )
-    assert tracker == [True, True], (
+    assert tracker == (True, True), (
         f"rebelote did not fire across trump rotation: tracker={tracker}, "
         f"belote_trump={blt_trump}, current_trump={state.trump}"
     )
@@ -1080,5 +1080,5 @@ def test_anarchie_normal_belote_still_works_without_rotation() -> None:
     tracker, _, _, announced = _record_belote_announcement(
         ctx, Card(Suit.HEARTS, Rank.QUEEN)
     )
-    assert tracker == [True, True]
+    assert tracker == (True, True)
     assert announced == "Rebelote!"

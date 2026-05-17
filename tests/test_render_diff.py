@@ -259,3 +259,119 @@ def test_pending_rendered_lines_is_tuple(monkeypatch: pytest.MonkeyPatch) -> Non
     assert render_mod._pending_rendered_lines is None or isinstance(
         render_mod._pending_rendered_lines, tuple
     )
+
+
+# ── 4.6.1 audit-pass pins ──────────────────────────────────────────────────
+
+
+def test_show_main_menu_invalidates_diff_on_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4.6.1: `show_main_menu` writes to stdout directly (bypassing `display()`)
+    and must reset `_last_emitted_lines` before returning, else the first
+    `display()` after game-start in a second-play-of-session would diff
+    against the stale post-prior-game frame → first-frame artifacts.
+
+    Same convention as `show_help`/`show_history`/`show_rules` (4.0.0) and
+    `show_card_detail` (4.0.0, removed in 4.6.0).
+    """
+    from belote.game import Seat
+    from belote.input import Key, KeyEvent
+    from belote.ui import menu as menu_mod
+
+    class _QuitReader:
+        def read(self) -> KeyEvent:
+            return KeyEvent(Key.QUIT)
+
+        def read_timeout(self, _t: float) -> KeyEvent | None:
+            return KeyEvent(Key.QUIT)
+
+    # Stamp a stale baseline so a missing invalidate_diff() is observable.
+    render_mod._last_emitted_lines = ("stale post-prior-game row",)
+
+    buf = io.StringIO()
+    monkeypatch.setattr(menu_mod.sys, "stdout", buf)
+    monkeypatch.setattr(menu_mod, "get_term_size", lambda: (120, 40))
+
+    diffs = {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}
+    choice, _, _, _ = menu_mod.show_main_menu(
+        _QuitReader(),  # type: ignore[arg-type]
+        diffs,
+        target=1000,
+        speed="normal",
+    )
+    assert choice == "Quit"
+    assert render_mod._last_emitted_lines is None, (
+        "show_main_menu must invalidate_diff() on exit so a subsequent "
+        "display() emits a full frame (4.6.1 audit fix)"
+    )
+
+
+def test_show_theme_selector_invalidates_diff_on_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same overlay-bypass contract as show_main_menu — pinned independently
+    so a future refactor of one path can't silently drop the guard on the other.
+    """
+    from belote.input import Key, KeyEvent
+    from belote.ui import menu as menu_mod
+
+    class _EscReader:
+        def read(self) -> KeyEvent:
+            return KeyEvent(Key.ESC)
+
+    render_mod._last_emitted_lines = ("stale row",)
+
+    buf = io.StringIO()
+    monkeypatch.setattr(menu_mod.sys, "stdout", buf)
+    monkeypatch.setattr(menu_mod, "get_term_size", lambda: (120, 40))
+
+    menu_mod.show_theme_selector(_EscReader())  # type: ignore[arg-type]
+    assert render_mod._last_emitted_lines is None
+
+
+def test_shop_render_writes_once_per_frame(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4.6.1: `ShopScreen._render` must batch its entire frame into one
+    `sys.stdout.write` call. Pre-4.6.1 the method used ~16 bare `print()`
+    calls per redraw — each a separate syscall. Same single-write convention
+    as `belatro/ui/hud.py::_render` and `prompts.py::show_help`.
+    """
+    from belote.belatro.core.run_state import BelAtroRun
+    from belote.belatro.items.registry import register_all_items
+    from belote.belatro.run.shop import Shop
+    from belote.belatro.ui import shop as shop_mod
+    from belote.belatro.ui.shop import ShopScreen
+
+    register_all_items()
+    run = BelAtroRun(seed=42)
+    run.economy.money = 100
+    shop = Shop(run)
+    shop.generate_inventory()
+
+    class _NopReader:
+        def read(self) -> object:
+            raise AssertionError("reader.read should not be called by _render alone")
+
+    screen = ShopScreen(shop, _NopReader())  # type: ignore[arg-type]
+
+    # Count direct write calls during _render. The fit_guard's `require_minimum`
+    # short-circuits when the terminal is already large enough, so it doesn't
+    # add writes on the happy path.
+    class _CountingBuf(io.StringIO):
+        write_count = 0
+
+        def write(self, s: str) -> int:  # type: ignore[override]
+            self.write_count += 1
+            return super().write(s)
+
+    buf = _CountingBuf()
+    monkeypatch.setattr(shop_mod.sys, "stdout", buf)
+    # Force a comfortable terminal size so require_minimum doesn't trip and
+    # the shop layout has room. `get_term_size` is imported locally inside
+    # `_render` from the render module (which __init__ shadows as a function),
+    # so patch on the module object via sys.modules.
+    render_module = _sys.modules["belote.ui.render"]
+    monkeypatch.setattr(render_module, "get_term_size", lambda: (120, 40))
+
+    screen._render()
+
+    assert buf.write_count == 1, (
+        f"ShopScreen._render must batch into one write; got {buf.write_count}. "
+        f"Pre-4.6.1 this was ~16 due to per-card print() calls."
+    )

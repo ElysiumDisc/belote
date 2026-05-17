@@ -174,55 +174,65 @@ class ShopScreen:
         # cards at this width anyway.
         return 2 + i * card_w
 
-    def _render_planet_card(self, item: object, row: int, col: int, is_sel: bool) -> None:
-        from belote.ansi import move
-
+    def _render_planet_card(self, item: object, row: int, col: int, is_sel: bool) -> list[str]:
         bc = REVERSE if is_sel else ""
         ac = RESET
         lv = getattr(item, "level", 0)
         art = getattr(item, "ascii_art", ("", "", ""))
         shop_lines = getattr(item, "shop_lines", ("              ", "              "))
         level_inner = f"  Lv.{lv} → {lv + 1}"
-        print(move(row, col) + bc + "╔══════════════╗" + ac)
+        parts: list[str] = [move(row, col) + bc + "╔══════════════╗" + ac + "\n"]
         for i, art_line in enumerate(art):
-            print(move(row + 1 + i, col) + bc + f"│{menu_art_fg()}{art_line:<14}{RESET}{bc}│" + ac)
-        print(
+            parts.append(
+                move(row + 1 + i, col) + bc + f"│{menu_art_fg()}{art_line:<14}{RESET}{bc}│" + ac
+                + "\n"
+            )
+        parts.append(
             move(row + 1 + len(art), col) + bc + f"│{white_fg()}{level_inner:<14}{RESET}{bc}│" + ac
+            + "\n"
         )
         for i, sl in enumerate(shop_lines):
-            print(
+            parts.append(
                 move(row + 2 + len(art) + i, col) + bc + f"│{white_fg()}{sl:<14}{RESET}{bc}│" + ac
+                + "\n"
             )
         cost = getattr(item, "cost", 0)
-        print(
+        parts.append(
             move(row + 2 + len(art) + len(shop_lines), col)
             + bc
             + f"╚══════════════╝ {gold_fg()}${cost}{RESET}"
             + ac
+            + "\n"
         )
+        return parts
 
-    def _render_item_card(self, item: object, row: int, col: int, is_sel: bool) -> None:
+    def _render_item_card(self, item: object, row: int, col: int, is_sel: bool) -> list[str]:
         bc = REVERSE if is_sel else ""
         ac = RESET
         name = getattr(item, "name", "?")
         cost = getattr(item, "cost", 0)
-        print(move(row, col) + bc + "┌────────────────┐" + ac)
-        print(move(row + 1, col) + bc + f"│{gold_fg()}{name:^14}{RESET}{bc}│" + ac)
-        print(move(row + 2, col) + bc + "│" + " " * 14 + "│" + ac)
-        print(move(row + 3, col) + bc + f"│{white_fg()}{'$' + str(cost):^14}{RESET}{bc}│" + ac)
-        print(move(row + 4, col) + bc + "└────────────────┘" + ac)
+        return [
+            move(row, col) + bc + "┌────────────────┐" + ac + "\n",
+            move(row + 1, col) + bc + f"│{gold_fg()}{name:^14}{RESET}{bc}│" + ac + "\n",
+            move(row + 2, col) + bc + "│" + " " * 14 + "│" + ac + "\n",
+            move(row + 3, col) + bc + f"│{white_fg()}{'$' + str(cost):^14}{RESET}{bc}│" + ac + "\n",
+            move(row + 4, col) + bc + "└────────────────┘" + ac + "\n",
+        ]
 
     def _render(self) -> None:
         from belote.ui.fit_guard import require_minimum
-        from belote.ui.render import get_term_size
+        from belote.ui.render import get_term_size, invalidate_diff
 
         from ..items.base import Planet
 
         require_minimum(self.reader)
         term_w, term_h = get_term_size()
 
-        sys.stdout.write(clear_screen())
-        sys.stdout.flush()
+        # Accumulate the entire frame into one buffer so it lands as a single
+        # `sys.stdout.write` + `flush`. Pre-4.6.1 used ~16 bare `print()` calls
+        # per redraw — each its own syscall. Same batched-write convention as
+        # `belatro/ui/hud.py::_render` and `prompts.py::show_help`.
+        parts: list[str] = [clear_screen()]
 
         # Vertical layout (centered for the planet-card worst case of 9 rows):
         #   title / blank / money / blank / cards (9) / blank / actions /
@@ -237,16 +247,18 @@ class ShopScreen:
         desc_row = top + 16
         hint_row = top + 18
 
-        print(
+        parts.append(
             move(title_row, 1)
             + ansi_center(gold_fg() + BOLD + "=== THE SHOP ===" + RESET, term_w)
+            + "\n"
         )
-        print(
+        parts.append(
             move(money_row, 1)
             + ansi_center(
                 white_fg() + "Money: " + green_fg() + f"${self.shop.run.economy.money}" + RESET,
                 term_w,
             )
+            + "\n"
         )
 
         num_items = len(self.shop.inventory)
@@ -255,9 +267,9 @@ class ShopScreen:
             col = self._card_col(i, num_items, term_w)
             is_sel = i == self.selected
             if isinstance(item, Planet):
-                self._render_planet_card(item, card_row, col, is_sel)
+                parts.extend(self._render_planet_card(item, card_row, col, is_sel))
             else:
-                self._render_item_card(item, card_row, col, is_sel)
+                parts.extend(self._render_item_card(item, card_row, col, is_sel))
 
         # Action buttons (reroll, forge) render on their own row BELOW the
         # cards. Pre-3.7.2 these sat inline mid-card, which overflowed 80-col
@@ -282,28 +294,37 @@ class ShopScreen:
         cursor = start_col
         for _, lbl, sel in actions:
             bc = REVERSE if sel else ""
-            print(move(actions_row, cursor) + bc + lbl + RESET)
+            parts.append(move(actions_row, cursor) + bc + lbl + RESET + "\n")
             cursor += len(lbl) + gap
 
         # Selected item description
         if self.selected < num_items:
             item = self.shop.inventory[self.selected]
             desc = getattr(item, "description", "")
-            print(move(desc_row, 1) + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w))
+            parts.append(
+                move(desc_row, 1)
+                + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w)
+                + "\n"
+            )
         elif forge_idx >= 0 and self.selected == forge_idx:
-            print(
+            parts.append(
                 move(desc_row, 1)
                 + ansi_center(
                     white_fg() + "Spend 3 Tierce charges to level up a Planet contract."
                     + RESET,
                     term_w,
                 )
+                + "\n"
             )
 
         consumable_count = len(self.shop.run.consumables)
         hint = (
             f"← → Navigate   Enter: Buy   C: Consumables ({consumable_count})   Esc: Continue"
         )
-        print(move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w))
-        from belote.ui.render import invalidate_diff
+        parts.append(
+            move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w) + "\n"
+        )
+
+        sys.stdout.write("".join(parts))
+        sys.stdout.flush()
         invalidate_diff()

@@ -350,8 +350,8 @@ def invalidate_diff() -> None:
     behind a partial redraw.
 
     Cheaper than `clear_card_cache()` (no card-cache flush). Used by
-    `show_card_detail` (4.0.0) and the `show_help` / `show_history` /
-    `show_rules` overlays where the same diff-skip would otherwise apply.
+    the `show_help` / `show_history` / `show_rules` overlays where the
+    same diff-skip would otherwise apply.
     """
     global _last_emitted_lines
     _last_emitted_lines = None

@@ -27,7 +27,6 @@ class Key(Enum):
     THEME = "THEME"
     HIST = "HIST"
     OVERLAY = "OVERLAY"
-    CARD_DETAIL = "CARD_DETAIL"
     # End-of-file on stdin (closed pipe, headless harness, Ctrl-D on a real
     # tty). Distinct from ESC so the outermost game loops can recognise a
     # closed input stream and exit cleanly instead of spinning through
@@ -179,8 +178,6 @@ class _UnixKeyReader:
                 return KeyEvent(Key.SORT)
             if ch.lower() == "i" or ch.lower() == "v":
                 return KeyEvent(Key.OVERLAY)
-            if ch.lower() == "f":
-                return KeyEvent(Key.CARD_DETAIL)
 
             return KeyEvent(Key.CHAR, ch)
         except (ValueError, UnicodeDecodeError):
@@ -317,8 +314,6 @@ if os.name == "nt":
                 return KeyEvent(Key.SORT)
             if ch.lower() in (b"i", b"v"):
                 return KeyEvent(Key.OVERLAY)
-            if ch.lower() == b"f":
-                return KeyEvent(Key.CARD_DETAIL)
 
             try:
                 char = ch.decode("utf-8")

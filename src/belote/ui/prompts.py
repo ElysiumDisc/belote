@@ -27,7 +27,6 @@ from ..game import (
 from ..input import Key, KeyReader
 from ..rules import RULES_CONTENT, RulesPage
 from ..themes import THEMES, theme_manager
-from .card_detail import show_card_detail
 from .render import display, get_term_size, invalidate_diff
 
 
@@ -107,10 +106,6 @@ def prompt_card(
                 continue
             case Key.OVERLAY:
                 return "OVERLAY", state
-            case Key.CARD_DETAIL:
-                if hand and 0 <= sel < len(hand):
-                    show_card_detail(hand[sel], reader)
-                continue
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
@@ -178,10 +173,6 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 continue
             case Key.OVERLAY:
                 return "OVERLAY"
-            case Key.CARD_DETAIL:
-                if state.up_card is not None:
-                    show_card_detail(state.up_card, reader)
-                continue
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
@@ -226,7 +217,6 @@ def show_help(reader: KeyReader) -> None:
         "  [O]         Sort hand by suit/rank",
         "  [Space]     Skip animations",
         "  [H]         View Game History",
-        "  [F]         View card detail (Grimaud art)",
         "  [Z]         Undo last move",
         "",
         f"{white_fg()}Bidding:{RESET}",

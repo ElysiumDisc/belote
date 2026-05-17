@@ -123,6 +123,11 @@ class LeCollectionneur(Joker):
     def on_trick_won(
         self, event: TrickWonEvent, state: dict[str, Any]
     ) -> JokerResult | None:
+        # Pay-out is per qualifying card; guard against TrickWonEvent re-emits
+        # so a replay can't double-credit. Matches the 4.1.0 convention applied
+        # to every other state-mutating on_trick_won handler.
+        if getattr(event, "re_emit", False):
+            return None
         if event.trick_number == 1 or not event.cards:
             return None
         annonce_cards: frozenset[tuple[str, str]] = state.get(

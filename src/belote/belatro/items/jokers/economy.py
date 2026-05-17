@@ -80,8 +80,11 @@ class LePreteur(Joker):
     - If wallet is >$50, pay $5 to roll the round at ×1.2 Mult (skim off the
       top to lever up).
 
-    Reads `current_money` from joker_state — the round driver injects it via
-    `card_enhancements` at round-start from `BelAtroRun.economy.money`.
+    Reads `current_money` from joker_state — `belatro/main.py` stamps it
+    once into `round_flags` at the *pre-round* moment, so the threshold check
+    sees the wallet before any on_round_start payout (this joker's own +$15
+    won't loop back to defeat the $0 branch, and another joker's payout in
+    the same round won't shift this joker's $50 gate). Intentional.
     """
 
     id = "le_preteur"

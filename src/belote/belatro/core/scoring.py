@@ -275,6 +275,9 @@ class ScoreAccumulator:
                 # +2 Mult, +$1.
                 if joker_state.get("ghost_lead") and event.trump is not None:
                     lead_suit = event.cards[0].suit if event.cards else None
+                    # Under TOUT_ATOUT every card is trump, so no play can be
+                    # "void of the led suit" — is_trump_lead resolves to True
+                    # and the bonus is correctly gated off.
                     is_trump_lead = (
                         lead_suit == event.trump
                         or event.trump == Suit.TOUT_ATOUT

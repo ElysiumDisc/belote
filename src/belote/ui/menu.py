@@ -20,7 +20,7 @@ from ..game import GameState, Seat
 from ..input import Key, KeyReader
 from ..themes import THEMES, theme_manager
 from .prompts import show_help
-from .render import get_term_size
+from .render import get_term_size, invalidate_diff
 
 
 def get_cards_art() -> list[str]:
@@ -158,6 +158,7 @@ def show_theme_selector(reader: KeyReader) -> None:
         event = reader.read()
         match event.key:
             case Key.QUIT | Key.ESC | Key.ENTER | Key.EOF:
+                invalidate_diff()
                 return
             case Key.UP:
                 sel = (sel - 1) % len(themes_list)
@@ -194,6 +195,7 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
         event = reader.read()
         match event.key:
             case Key.QUIT | Key.ESC | Key.EOF:
+                invalidate_diff()
                 return current_diffs
             case Key.HELP:
                 show_help(reader)
@@ -212,6 +214,7 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
                 except ValueError:
                     current_diffs[s] = "medium"
             case Key.ENTER:
+                invalidate_diff()
                 return current_diffs
 
 
@@ -276,6 +279,7 @@ def show_main_menu(
 
         match event.key:
             case Key.QUIT:
+                invalidate_diff()
                 return "Quit", curr_diffs, curr_target, curr_speed
             case Key.HELP:
                 show_help(reader)
@@ -328,6 +332,7 @@ def show_main_menu(
                     show_theme_selector(reader)
                     continue
                 if choice in ("BelAtro", "Start Game", "Quit", "Rules & History", "Statistics"):
+                    invalidate_diff()
                     return choice, curr_diffs, curr_target, curr_speed
                 # For settings, Enter can also toggle forward
                 if sel == 3:
@@ -362,3 +367,4 @@ def show_final_screen(state: GameState) -> None:
     sys.stdout.write(clear_screen())
     sys.stdout.write("\n".join(lines))
     sys.stdout.flush()
+    invalidate_diff()

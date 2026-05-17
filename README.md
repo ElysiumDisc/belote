@@ -151,7 +151,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `Enter`: Confirm card/bid
 - `1`-`8`: Direct card selection (or `1`-`4` for bids)
 - `O`: Re-sort hand by suit and rank (hand auto-sorts on every play turn since 3.9.4 — this key is now a manual re-sort, kept for muscle memory)
-- `F`: View card detail (full-screen Grimaud-style zoomed view of the selected card; press any key to dismiss). Also works on the up-card during bidding.
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
 - During bidding round 2: `P` = Pass, `X` = Tout Atout, `N` = Sans Atout *(remapped from A/S in 4.5.0 to make room for WASD nav)*
@@ -168,7 +167,6 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Customizable Themes:** Switch between eleven color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind, Forest Night, Moonlit Tavern, Royal Purple, Emerald Isle) using the `T` key during gameplay.
 - **Polished Felt Mat (3.9.4):** The trick mat now has a subtle vignette at its edges, a faint deterministic braille pip-dot texture (fabric-weave feel without intrusive glyphs), and — at standard/spacious terminal sizes — a decorative `╔═══◆═══...═══◆═══╗` outer frame with corner ornaments.
 - **Selection HUD (3.9.4):** Selecting a card in hand now paints a highlighted bar under it AND a centered `► A♠ — Trump ◄` readout below, color-coded by suit / trump / legality.
-- **Grimaud Card Detail (4.0.0):** Press `F` while a card is under the cursor (or during bidding to inspect the up-card) to open a full-screen zoomed view rendered with the half-block pixel trick (2× vertical density). All twelve face cards (J/Q/K × four suits) have hand-drawn illustrations loosely inspired by the *Grimaud Standard 1898* plate — distinct palettes, headwear, and held objects per (rank, suit). Non-face cards get a scaled-up pip layout. Any key dismisses.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
 - **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
 - **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
@@ -221,8 +219,7 @@ belote/
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
 ├── CHANGELOG.md        # History of changes
-├── DEVELOPMENT.md      # Detailed setup and dev guide
-└── GRIMAUD Standard Playing-Cards-1898.png # Reference art for card faces
+└── DEVELOPMENT.md      # Detailed setup and dev guide
 ```
 
 ## Running Tests
@@ -232,7 +229,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **790 tests** passing with 100% coverage on game-logic modules (4.5.0).
+Currently **790 tests** passing with 100% coverage on game-logic modules (4.6.1).
 
 ## Technical Integrity
 

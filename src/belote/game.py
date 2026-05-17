@@ -877,7 +877,7 @@ class _PlayContext:
 
 def _record_belote_announcement(
     ctx: _PlayContext, card: Card
-) -> tuple[list[bool], Seat | None, Suit | None, str | None]:
+) -> tuple[tuple[bool, bool], Seat | None, Suit | None, str | None]:
     """Update belote_tracker / belote_announcer / belote_trump if the played
     card triggers a belote or rebelote announcement.
 
@@ -922,7 +922,7 @@ def _record_belote_announcement(
             elif not belote_tracker[1]:
                 belote_tracker[1] = True
                 announced = "Rebelote!"
-    return belote_tracker, belote_announcer, belote_trump, announced
+    return (belote_tracker[0], belote_tracker[1]), belote_announcer, belote_trump, announced
 
 
 def _resolve_trick_winner(
@@ -1060,7 +1060,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             current_trick=new_trick,
             turn=next_turn,
             announced=announced,
-            belote_tracker=(belote_tracker[0], belote_tracker[1]),
+            belote_tracker=belote_tracker,
             belote_announcer=belote_announcer,
             belote_trump=belote_trump,
         )
@@ -1086,7 +1086,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             turn=winner,
             phase=Phase.SCORING,
             announced=announced,
-            belote_tracker=(belote_tracker[0], belote_tracker[1]),
+            belote_tracker=belote_tracker,
             belote_announcer=belote_announcer,
             belote_trump=belote_trump,
             first_trick_done=True,
@@ -1106,7 +1106,7 @@ def play_card(state: GameState, card: Card) -> GameState:
         turn=winner,
         phase=Phase.PLAYING,
         announced=announced,
-        belote_tracker=(belote_tracker[0], belote_tracker[1]),
+        belote_tracker=belote_tracker,
         belote_announcer=belote_announcer,
         belote_trump=belote_trump,
         first_trick_done=first_trick_done,

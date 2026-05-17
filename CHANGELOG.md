@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.6.1] - 2026-05-17
+
+Third audit / hardening pass — this one against the freshly-trimmed 4.6.0 baseline. Three parallel Explore agents (classic engine, BelAtro roguelite layer, UI/render layer) walked the codebase looking for bugs, mechanic gaps, and perf hot paths. Most flagged items resolved as **false positives** or **already-fixed in 4.5.1** once verified against current code; this release lands the two genuine findings and bumps the test count from 787 → 790. All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 790/790.
+
+### Fixed
+
+- **`src/belote/ui/menu.py` — `invalidate_diff()` on every overlay-bypass exit path**. Four classic-menu screens (`show_theme_selector`, `show_ai_config`, `show_main_menu`, `show_final_screen`) write directly to `sys.stdout` with `clear_screen() + sys.stdout.write(...) + flush()` and were not invalidating the render diff baseline (`render._last_emitted_lines`) before returning. The same overlay-bypass diff-skip class of bug that 4.0.0 fixed for `show_help`/`show_history`/`show_rules` (and that 4.6.0 preserved when it removed `show_card_detail`). The failure mode is latent because all four paths run before/after the gameplay `display()` loop, but it surfaces on **second-game-in-session** play: game-over → menu → start-game → the first `display()` of the second game diffs against the stale post-prior-game frame and emits only changed rows → first-frame artifacts. Now consistent with the rest of the codebase; the BelAtro overlays (`belatro/ui/menu.py:123`, `shop.py:309`, `consumables.py:70`, etc) already followed this pattern.
+
+### Performance
+
+- **`src/belote/belatro/ui/shop.py::ShopScreen._render` now batches its full frame into a single `sys.stdout.write` + `flush`** (was ~16 bare `print()` calls per redraw, each its own syscall). `_render_planet_card` and `_render_item_card` were refactored to return `list[str]` instead of emitting directly; `_render` accumulates everything (clear-screen prefix, title, money line, every card frame, action strip, description, hint row) into one `parts: list[str]` and writes once at the end. Mirrors the single-write convention used in `belatro/ui/hud.py::_render`, `belote/ui/announce.py`, and `prompts.py::show_help`. Not user-visible at terminal speeds — this is a consistency / convention fix.
+
+### Internal
+
+- **Tests**: 787 → 790. Three regression tests appended to `tests/test_render_diff.py`:
+  - `test_show_main_menu_invalidates_diff_on_exit` — stamps a stale baseline, drives `show_main_menu` to its `Quit` exit via a `_QuitReader` stub, asserts `render._last_emitted_lines is None` afterward.
+  - `test_show_theme_selector_invalidates_diff_on_exit` — same contract pinned independently so a future refactor of one path can't silently drop the other's guard.
+  - `test_shop_render_writes_once_per_frame` — instantiates `ShopScreen` over a real `Shop(BelAtroRun(seed=42))`, wraps `sys.stdout` in a write-counting `StringIO`, asserts `_render()` produces exactly one write call (pre-4.6.1 this was ~16).
+- **Version markers bumped**: `pyproject.toml` (`4.5.1` → `4.6.1`), `src/belote/__init__.py` (`4.5.1` → `4.6.1`).
+- **Documentation accuracy sweep**: `README.md` — removed the `GRIMAUD Standard Playing-Cards-1898.png` entry from the file-tree block (image was deleted in 4.6.0 but the doc reference lingered), updated stale `792 tests` / `(4.5.1)` markers to `790 tests` / `(4.6.1)`. `DEVELOPMENT.md` — rewrote the *Current baseline* section to lead with 4.6.1, demoted 4.5.x / 4.6.0 to a *Previous baselines* list.
+- **Audit verified healthy** (no change required — pinned here so the next audit pass doesn't re-flag them):
+  - `game.py:278` `reset_round_fields` resetting `boss_modifiers` to defaults — by design. BelAtro applies boss flags AFTER `start_round` via `PatchedGameState.patch()` → `dataclasses.replace`. Classic mode doesn't use boss flags.
+  - `LeCollectionneur` `re_emit` guard — already added in 4.5.1 (`annonces.py:129`).
+  - L'Infiltré ghost-lead seat-walking loop (`core/scoring.py:285-295`) — correct as-is. Seat is walked from `event.leader_seat.next_seat()` per card; winner-check fires only when the iterating seat equals `event.winner` and the card is trump.
+  - `_architecte_ns_annonce_cards` "dead pop" — not dead. Read live at `core/scoring.py:303` by the `annonce_cash_x2` branch.
+  - `_card_points_with_zero_ranks` three-site consistency — covered by 3.9.3 + 4.1.0 wiring; flags flow through `card_points_with_modifiers` / `trick_card_points` uniformly. Zero changes needed in `ai.py` when a new zero-rank flag lands.
+  - Voucher idempotency, render diff layer, theme palette caching, AI memo keys (`last_voids_key` / `last_partner_hand_key`), planet stacking, belote/rebelote under L'Anarchie, WASD reader aliasing.
+- **Plan file**: `/home/mrrobot/.claude/plans/bug-hunt-code-performance-synthetic-pearl.md`.
+
+## [4.6.0] - 2026-05-16
+
+The **Grimaud Card Detail** feature shipped in 4.0.0 has been removed. The `F` key no longer opens a full-screen zoomed card view; the hand-drawn pixel-art module is gone. Other overlays (`?` help, `H` history, rules, theme cycle, `I`/`V` overlay) are unchanged.
+
+### Removed
+
+- **`src/belote/ui/card_detail.py`** — entire module deleted (silhouette templates, per-(rank, suit) palettes, held-object overlays, `_FACE_DESIGNS`, `_compile_art`, `_render_card`, public `show_card_detail`).
+- **`Key.CARD_DETAIL` enum value + `f` binding** in `src/belote/input.py` (both Unix and Windows readers). The `f` key now falls through as a `Key.CHAR` and is unhandled by any prompt — a no-op.
+- **`Key.CARD_DETAIL` case arms** in `prompt_card` and `prompt_bid` (`src/belote/ui/prompts.py`).
+- **`[F]` help-screen entry** in `show_help` (`src/belote/ui/prompts.py`).
+- **`tests/test_card_detail.py`** — all 5 tests deleted (shape, distinctness, key enum, dismiss, diff-baseline regression). Test count drops by 5 from the 4.5.1 baseline.
+- **README mentions** of the `F` keybind and the Grimaud feature paragraph.
+
+### Preserved (intentionally)
+
+- **`render.invalidate_diff()`** stays — it is still used by `show_help`, `show_history`, and `show_rules` to fix the same latent diff-skip overlay bug. Only the docstring was updated to drop the `show_card_detail` reference.
+
+## [4.5.1] - 2026-05-16
+
+Audit-and-hardening pass over the fresh 4.5.0 baseline. Three parallel Explore agents reviewed the classic engine + uncommitted hot spots, the BelAtro 4.5 mechanics (L'Infiltré / L'Architecte + the six Conditional Engine jokers), and performance/caching paths. **No critical bugs found** — the 4.5.0 release ships clean. This release lands three convention-consistency fixes, a tiny allocation cleanup, two clarifying comments, and the missing prompt-bid integration test. **+2 regression tests** (790 → 792). All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 792/792.
+
+### Fixed
+
+- **`LeCollectionneur.on_trick_won` now short-circuits on the `re_emit` convention** (`src/belote/belatro/items/jokers/annonces.py:108-138`). Every other state-mutating `on_*` handler in the codebase guards on `getattr(event, "re_emit", False)` — see `annonces.py:62, 96`, `coinche.py:26, 55`, `economy.py:21` — so a re-emitted event can't double-credit money or mult. `TrickWonEvent` doesn't carry the field today (only `BidMadeEvent` does, see 4.1.0 notes), so the guard is a no-op at runtime; the value is forward-compat — if a future event type starts re-emitting, the joker is already armoured. This was a 4.5.0 omission, not a live bug.
+- **L'Architecte deck description updated to spell out the "NS-won" qualifier** (`src/belote/belatro/run/decks.py:170`). Previous: `"Tricks containing a declared Annonce pay +$2."` Now: `"NS-won tricks containing a declared Annonce pay +$2."` The scoring code at `src/belote/belatro/core/scoring.py:298-307` only credits NS-team wins; the README at line 34 already said "NS-won tricks" so this aligns the in-game deck-pick screen with the README and the actual code.
+- **`_record_belote_announcement` now returns `tuple[bool, bool]` directly** (`src/belote/game.py:878-925`). Pre-4.5.1 the helper returned a mutable `list[bool]` and each of the three `play_card` continuation branches re-packed it as `belote_tracker=(belote_tracker[0], belote_tracker[1])` to satisfy the frozen `GameState.belote_tracker: tuple[bool, bool]` field. Now the helper does the pack once at its return statement, and the three call sites (mid-trick / round-complete / next-trick at `game.py:1063, 1089, 1109`) pass the tuple through as `belote_tracker=belote_tracker`. Three tuple allocations per card play collapse to one; the type signature now matches what the dataclass field actually wants.
+
+### Changed
+
+- **Clarifying comment on the L'Infiltré ghost-lead TOUT_ATOUT branch** (`src/belote/belatro/core/scoring.py` around line 278). Under TOUT_ATOUT every card is a trump, so no play can be "void of the led suit" — `is_trump_lead` resolves to `True` and the +2 Mult / +$1 bonus is correctly gated off. The branch was already correct; the comment now spells out why.
+- **LePrêteur docstring spells out the snapshot semantics** (`src/belote/belatro/items/jokers/economy.py`). The `current_money` value is read from a *pre-round* snapshot stamped by `belatro/main.py` into `round_flags`. That snapshot is intentional: it means this joker's own +$15 / -$5 swing can't loop back to defeat its own threshold check, *and* another joker's on-round-start payout in the same round won't shift this joker's gates. The docstring now says so out loud.
+
+### Internal
+
+- **Tests**: 790 → 792. Two new `prompt_bid` integration tests appended to `tests/test_input_wasd.py`:
+  - `test_prompt_bid_x_returns_tout_atout_in_round_2` — pins the round-2 routing of `Key.CHAR(char='x')` to `Suit.TOUT_ATOUT`.
+  - `test_prompt_bid_n_returns_sans_atout_in_round_2` — pins the round-2 routing of `Key.CHAR(char='n')` to `SANS_ATOUT_BID`.
+  The pre-4.5.1 suite covered the reader-layer aliasing but had no test exercising the `prompt_bid` consumer's `char == "x"` / `char == "n"` branches. A capitalised typo (`char == "X"`) would have passed every test in the suite.
+- **Test fixture updates**: two `_record_belote_announcement` assertions in `tests/test_belote.py` changed from `tracker == [True, True]` to `tracker == (True, True)` to match the new tuple return type. No behaviour change.
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Audit verified healthy** (no change required): L'Infiltré "void of lead" inference (relies on the Belote rule that you cannot trump while holding the led suit — `legal_cards` enforces it), L'Architecte $10 deduction (only fires after a non-None contract pick; Esc/EOF/Q cancel paths return None and skip deduction), WASD migration (zero remaining `char == "a"` or `char == "s"` consumers across `src/` and `tests/` — shop, consumables, rules, fit-guard use disjoint letters), render diff layer, theme palette caching, AI memo keys (`last_voids_key` / `last_partner_hand_key`), planet stacking, voucher idempotency (base-class `_apply_once`), zero-rank boss flag propagation, belote/rebelote under L'Anarchie. Performance: turn-based card game, no measurable hotspots beyond the now-removed `belote_tracker` repack.
+- **Plan file**: `/home/mrrobot/.claude/plans/bug-hunt-code-performance-hidden-meerkat.md`.
+
+
 ## [4.5.0] - 2026-05-16
 
 Feature release: WASD nav across every selection screen, two new BelAtro starting decks (L'Infiltré, L'Architecte) and six new "Conditional Engine" jokers that hook into the existing event bus. **+39 regression tests** (751 → 790). All baselines green: `pytest` 790/790.

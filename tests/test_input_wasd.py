@@ -12,9 +12,13 @@ moved to X/N to make room for WASD.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from dataclasses import replace
+from unittest.mock import MagicMock, patch
 
-from belote.input import Key, _UnixKeyReader
+from belote.deck import Suit
+from belote.game import SANS_ATOUT_BID, new_game, start_round
+from belote.input import Key, KeyEvent, _UnixKeyReader
+from belote.ui import prompts as prompts_module
 
 
 def _make_reader() -> _UnixKeyReader:
@@ -95,3 +99,41 @@ def test_n_still_returns_char_for_bid() -> None:
         ev = reader.read()
     assert ev.key is Key.CHAR
     assert ev.char == "n"
+
+
+# ── prompt_bid integration: X/N route to the right contracts ────────────────
+
+
+def _bidding_round_2_state() -> object:
+    """Build a state in bidding round 2 — the only round where TA/SA are
+    legal contracts and the X/N quick-keys are wired up in prompt_bid."""
+    import random
+
+    state = new_game()
+    state = start_round(state, random.Random(0))
+    return replace(state, bidding_round=2)
+
+
+def test_prompt_bid_x_returns_tout_atout_in_round_2() -> None:
+    """4.5.0 regression-pin: in round 2, pressing `x` returns Suit.TOUT_ATOUT.
+    Reader-layer aliasing leaves `x` as Key.CHAR; the prompt consumer routes
+    it through the `char == "x"` branch."""
+    state = _bidding_round_2_state()
+    reader = MagicMock()
+    reader.read.return_value = KeyEvent(Key.CHAR, "x")
+
+    result = prompts_module.prompt_bid(state, reader)
+    assert result is Suit.TOUT_ATOUT
+    assert reader.read.call_count == 1
+
+
+def test_prompt_bid_n_returns_sans_atout_in_round_2() -> None:
+    """4.5.0 regression-pin: in round 2, pressing `n` returns SANS_ATOUT_BID
+    (the string sentinel that GameState consumes for the no-trump contract)."""
+    state = _bidding_round_2_state()
+    reader = MagicMock()
+    reader.read.return_value = KeyEvent(Key.CHAR, "n")
+
+    result = prompts_module.prompt_bid(state, reader)
+    assert result == SANS_ATOUT_BID
+    assert reader.read.call_count == 1
