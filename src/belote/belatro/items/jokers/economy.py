@@ -67,3 +67,32 @@ class LeNotaire(Joker):
         if event.seat == Seat.SOUTH and event.is_rebelote:
             return JokerResult(add_chips=-20, add_money=5)
         return None
+
+
+# ── 4.5.0 Conditional Engines ──────────────────────────────────────────────
+
+
+class LePreteur(Joker):
+    """Catch-up / scaling money mechanic.
+
+    On round start:
+    - If wallet is $0, gain +$15 (the moneylender bails you out).
+    - If wallet is >$50, pay $5 to roll the round at ×1.2 Mult (skim off the
+      top to lever up).
+
+    Reads `current_money` from joker_state — the round driver injects it via
+    `card_enhancements` at round-start from `BelAtroRun.economy.money`.
+    """
+
+    id = "le_preteur"
+    name = "Le Prêteur"
+    description = "Round start: $0 → +$15. $50+ → spend $5 for ×1.2 Mult."
+    cost = 7
+
+    def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
+        money = state.get("current_money", 0)
+        if money == 0:
+            return JokerResult(add_money=15)
+        if money > 50:
+            return JokerResult(add_money=-5, times_mult=1.2)
+        return None

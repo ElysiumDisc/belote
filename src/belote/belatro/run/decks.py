@@ -151,4 +151,31 @@ STARTING_DECKS: list[StartingDeck] = [
             "   Pre-coinched rounds  ",
         ),
     ),
+    StartingDeck(
+        id="infiltre",
+        name="L'Infiltré",
+        description="Ghost Lead: win a trick by playing a Trump on a suit you have ZERO of → +2 Mult, +$1.",
+        deck_modifications={"ghost_lead": True},
+        ascii_art=(
+            "    ░░  GHOST  LEAD  ░░ ",
+            "  ┌──┐  ╔══╗   void →    ",
+            "  │A♥│  ║J♠║   atout!    ",
+            "  └──┘  ╚══╝             ",
+            "   +2 Mult  +$1 / void   ",
+        ),
+    ),
+    StartingDeck(
+        id="architecte",
+        name="L'Architecte",
+        description="Pay $10 in bidding to choose the contract yourself. Tricks containing a declared Annonce pay +$2.",
+        initial_money=8,
+        deck_modifications={"buy_contract": True, "annonce_cash_x2": True},
+        ascii_art=(
+            "    ┌──────────────┐    ",
+            "    │ BUY CONTRACT │    ",
+            "    │     $10      │    ",
+            "    └──────────────┘    ",
+            "   Annonce tricks +$2   ",
+        ),
+    ),
 ]

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from belote.deck import Suit
 from belote.game import team_of
 
 from ...engine.event_bus import TrickWonEvent
-from ..base import Joker, JokerResult
+from ..base import Joker, JokerResult, Rarity
 
 
 class LePremierSang(Joker):
@@ -81,5 +82,58 @@ class LExecuteur(Joker):
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.is_last and team_of(event.winner) == 0:
             return JokerResult(add_chips=40, times_mult=1.5)
+        return None
+
+
+# ── 4.5.0 Conditional Engines ──────────────────────────────────────────────
+
+
+def _winning_card(event: TrickWonEvent) -> Any:
+    """Find the card the trick winner played by walking the seat order."""
+    seat = event.leader_seat
+    for card in event.cards:
+        if seat == event.winner:
+            return card
+        seat = seat.next_seat()
+    return None
+
+
+class LeCavalierNoir(Joker):
+    """Crossing suits — rewards taking a Heart-led trick with a Spade."""
+
+    id = "le_cavalier_noir"
+    name = "Le Cavalier Noir"
+    description = "Win a Heart-led trick with a Spade: ×3 Mult."
+    cost = 7
+    rarity = Rarity.UNCOMMON
+
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        if team_of(event.winner) != 0 or not event.cards:
+            return None
+        if event.cards[0].suit != Suit.HEARTS:
+            return None
+        winning = _winning_card(event)
+        if winning is not None and winning.suit == Suit.SPADES:
+            return JokerResult(times_mult=3.0)
+        return None
+
+
+class LArcEnCiel(Joker):
+    """Chaos jester — every trick won by a suit different from the lead suit
+    adds +2 Mult. The +2s accumulate naturally across the round."""
+
+    id = "l_arc_en_ciel"
+    name = "L'Arc-en-Ciel"
+    description = "Each NS trick whose winning card's suit ≠ lead suit: +2 Mult."
+    cost = 8
+    rarity = Rarity.UNCOMMON
+
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
+        if team_of(event.winner) != 0 or len(event.cards) < 2:
+            return None
+        lead_suit = event.cards[0].suit
+        winning = _winning_card(event)
+        if winning is not None and winning.suit != lead_suit:
+            return JokerResult(add_mult=2.0)
         return None
 

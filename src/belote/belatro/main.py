@@ -190,6 +190,7 @@ class BelAtroGame:
         hud = BelAtroHUD(self.run)
         trust_bar = TrustBar(self.run.partner.trust)
         show_north = self.run.show_north_hand or self.run.partner.trust.shares_void_info
+        run = self.run  # captured for UICallbacks closure (see prompt_bid)
 
         last_display_state: list[GameState | None] = [None]  # mutable cell for closure
 
@@ -213,6 +214,29 @@ class BelAtroGame:
 
             def prompt_bid(self, state: GameState) -> object:
                 from ..ui.prompts import prompt_bid
+
+                # L'Architecte (4.5.0): offer to buy the contract for $10
+                # before showing the normal bid UI. We re-check eligibility
+                # each time prompt_bid is called (the loop may come around to
+                # SOUTH again after a pass) — money has to be high enough at
+                # the moment of purchase. `run` is the BelAtroRun captured in
+                # the enclosing closure.
+                if (
+                    run.card_enhancements.get("buy_contract")
+                    and run.economy.money >= 10
+                    and BelAtroAnnounce.yes_no(
+                        "L'Architecte: buy the contract for $10?", self.reader
+                    )
+                ):
+                    chosen = BelAtroAnnounce.buy_contract_picker(self.reader)
+                    if chosen is not None:
+                        run.economy.money -= 10
+                        BelAtroAnnounce.banner(
+                            "Contract bought — $10 spent",
+                            self.reader,
+                            hold=0.8,
+                        )
+                        return chosen
 
                 while True:
                     res = prompt_bid(state, self.reader)
@@ -332,6 +356,10 @@ class BelAtroGame:
         # Surface dead voucher flags + deck mods into the round so scoring/legal_cards
         # can honor them. Empty dict if nothing relevant — round_driver no-ops.
         round_flags: dict[str, object] = dict(self.run.card_enhancements)
+        # 4.5.0: LePrêteur reads this at on_round_start to gate its $0/$50
+        # branches. Snapshotted PRE-round so the joker's own payout doesn't
+        # feed back into its own threshold.
+        round_flags["current_money"] = self.run.economy.money
         if self.run.tie_breaks_for_taker:
             round_flags["tie_breaks_for_taker"] = True
         if self.run.show_partner_bid_tendency:

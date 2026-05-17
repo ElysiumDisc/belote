@@ -127,9 +127,11 @@ def prompt_card(
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
     """Interactive bid selection. Returns 'QUIT' if QUIT is pressed.
 
-    Round 2 offers Tout Atout (TA) and Sans Atout (SA) in addition to the
-    three remaining card suits. Per FFBelote rules, round 1 is "take the
-    up-card suit at the standard contract" only — TA/SA aren't offered there.
+    Round 2 offers Tout Atout (TA, quick-key X) and Sans Atout (SA, quick-key
+    N) in addition to the three remaining card suits. Per FFBelote rules,
+    round 1 is "take the up-card suit at the standard contract" only — TA/SA
+    aren't offered there. 4.5.0 moved the TA/SA quick keys off `a`/`s`
+    because those are now WASD nav aliases at the reader layer.
 
     The selector UI is painted by render() (via display(..., bid_selection=sel))
     so each frame is a single in-place repaint. Writing additional lines after
@@ -187,12 +189,13 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                         return "UNDO"
                     if char == "p":
                         return None
-                    # Round-2-only quick keys for the new contracts. `a` = All
-                    # trump (Tout Atout), `s` = Sans Atout. Silently ignored in
-                    # round 1 since those contracts aren't legal there.
-                    if char == "a" and Suit.TOUT_ATOUT in options:
+                    # Round-2-only quick keys for the new contracts. `x` =
+                    # tout-atout (X-tra trump everywhere), `n` = sans-atout
+                    # (No trump). 4.5.0: moved off a/s — those are now WASD
+                    # nav aliases at the reader level (input.py).
+                    if char == "x" and Suit.TOUT_ATOUT in options:
                         return Suit.TOUT_ATOUT
-                    if char == "s" and SANS_ATOUT_BID in options:
+                    if char == "n" and SANS_ATOUT_BID in options:
                         return SANS_ATOUT_BID
                     try:
                         idx = int(char) - 1
@@ -217,7 +220,7 @@ def show_help(reader: KeyReader) -> None:
         "  [Esc]       Cancel / Back",
         "",
         f"{white_fg()}Gameplay:{RESET}",
-        "  [←↑→↓]      Move selection",
+        "  [←↑→↓/WASD] Move selection",
         "  [Enter]     Confirm selection",
         "  [1-8]       Quick card select",
         "  [O]         Sort hand by suit/rank",
@@ -229,6 +232,8 @@ def show_help(reader: KeyReader) -> None:
         f"{white_fg()}Bidding:{RESET}",
         "  [P]         Pass",
         "  [1-4]       Bid suit (S/H/D/C)",
+        "  [X]         Tout Atout (round 2)",
+        "  [N]         Sans Atout (round 2)",
         "",
         f"{white_fg()}Menus:{RESET}",
         "  [H]         View Game History",

@@ -84,14 +84,14 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (751 tests expected)
+# Full test suite (790 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (4.1.1):
+Current baseline (4.5.0):
 
-- **751 tests** passing (4.1.0 had 742; +9 in 4.1.1: 4 in `tests/test_ai.py` (`test_ai_no_raw_card_points_import` structural pin, `test_hard_ai_play_score_uses_jacks_zero` + `_ban_clubs` discarding-strategy delta pins, `test_medium_ai_discard_consults_boss_modifier_helper` wrap pin), 3 in `tests/test_alt_screen_scroll.py` (`test_require_minimum_invalidates_diff_on_return`, `test_require_minimum_does_not_invalidate_if_never_paints`, `test_classic_ui_overlays_invalidate_diff` static check), 2 in `tests/test_announce_stats.py` (`test_show_stats_invalidates_diff`, `test_show_stats_builds_lines_once_across_keystrokes`)).
-- 4.1.1 is a second audit pass over 4.1.0. The BelAtro layer came back clean; the classic engine + UI surfaced two real bugs and one P2 architectural fragility. **Verified bug fixes**: Hard / Medium AI *play* heuristics now route every card valuation through `scoring.card_points_with_modifiers` instead of raw `card_points` (4.1.0 fixed the bid path but missed `_medium_play:418/441`, `_score_card_play:640`, `_score_leading_strategy:668`) — without the fix, the AI evaluated cards at their pre-boss point value when scoring discards or probes under `aces_zero` / `kings_zero` / `jacks_zero` / `tens_zero` / `declarations_zero` / `ban_clubs`. `fit_guard.require_minimum` now invalidates the render-diff baseline before returning (closes the same overlay-residue family that 4.0.1 fixed across BelAtro overlays — the "Terminal too small" overlay was leaking the baseline). `show_stats` modal does the same on exit. **Performance**: `show_stats` line-list build hoisted out of the read loop (`load_stats()` + `SaveManager().load_profile()` now called once per modal invocation instead of per keystroke), with centered rendering cached per terminal width. Plan file at `/home/mrrobot/.claude/plans/foamy-plotting-wand.md`.
+- **790 tests** passing (4.1.1 had 751; +39 in 4.5.0: 7 in `tests/test_input_wasd.py` (WASD reader aliases + bid quick-key remap regression pins), 15 in `tests/belatro/test_decks_4_5.py` (L'Infiltré ghost_lead consumer happy-path / four non-trigger cases / deck registration; L'Architecte annonce_cash_x2 + round-cache eviction; buy_contract_picker UI: chosen suit / SA sentinel / Esc cancel / EOF cancel), 17 in `tests/belatro/test_jokers_4_5.py` (one happy-path + one non-trigger per joker plus a registry pin and the on_round_start→accumulator plumbing pin for LePrêteur)).
+- 4.5.0 is a feature release: WASD nav at the reader source layer (`src/belote/input.py`), bid quick-keys remapped A→X and S→N (`src/belote/ui/prompts.py::prompt_bid`), two new starting decks (L'Infiltré, L'Architecte) registered in `src/belote/belatro/run/decks.py` with consumers in `src/belote/belatro/core/scoring.py`, six new "Conditional Engine" jokers spread across `trick_timing.py` / `annonces.py` / `economy.py`. `ScoreAccumulator.trigger_round_start` now applies `JokerResult` returns from `on_round_start` (was: silently discarded; backward-compatible because existing jokers all returned None).
 
 Run all gates before committing:
 

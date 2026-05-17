@@ -156,6 +156,17 @@ class _UnixKeyReader:
         # Printable character
         try:
             ch = chr(byte)
+            # WASD nav aliases (4.5.0). Mapped at the reader so every selection
+            # screen inherits them without per-consumer edits. A/S were bid
+            # quick-keys pre-4.5.0; the bid prompt's quick keys moved to X/N.
+            if ch.lower() == "w":
+                return KeyEvent(Key.UP)
+            if ch.lower() == "a":
+                return KeyEvent(Key.LEFT)
+            if ch.lower() == "s":
+                return KeyEvent(Key.DOWN)
+            if ch.lower() == "d":
+                return KeyEvent(Key.RIGHT)
             if ch.lower() == "q":
                 return KeyEvent(Key.QUIT)
             if ch == "?":
@@ -285,6 +296,15 @@ if os.name == "nt":
                 return KeyEvent(Key.TAB)
             if ch == b" ":
                 return KeyEvent(Key.SPACE)
+            # WASD nav aliases (4.5.0) — see _UnixKeyReader.read for rationale.
+            if ch.lower() == b"w":
+                return KeyEvent(Key.UP)
+            if ch.lower() == b"a":
+                return KeyEvent(Key.LEFT)
+            if ch.lower() == b"s":
+                return KeyEvent(Key.DOWN)
+            if ch.lower() == b"d":
+                return KeyEvent(Key.RIGHT)
             if ch.lower() == b"q":
                 return KeyEvent(Key.QUIT)
             if ch == b"?":

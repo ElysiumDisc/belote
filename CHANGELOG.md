@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.5.0] - 2026-05-16
+
+Feature release: WASD nav across every selection screen, two new BelAtro starting decks (L'Infiltré, L'Architecte) and six new "Conditional Engine" jokers that hook into the existing event bus. **+39 regression tests** (751 → 790). All baselines green: `pytest` 790/790.
+
+### Added
+
+- **WASD navigation** (`src/belote/input.py` — both `_UnixKeyReader.read` and `_WindowsKeyReader.read`). `W`/`A`/`S`/`D` (lower or upper case) alias to `Key.UP`/`Key.LEFT`/`Key.DOWN`/`Key.RIGHT` at the reader source. Every selection consumer already pattern-matches `case Key.LEFT | Key.UP:` so the alias propagates to every screen — card picker, bidding, menus, shop, collection, history, rules — without per-consumer edits. Pinned by 7 tests in `tests/test_input_wasd.py`.
+- **L'Infiltré starting deck** ("Void Specialist"). Sets the `ghost_lead` flag in `card_enhancements`; consumed in `belatro/core/scoring.py`'s `TrickWonEvent` branch — when NS wins a trick by playing a Trump on a non-trump lead, the winner must have been void of the lead suit (Belote's strict suit-follow rule forbids trumping while holding lead), so +2 Mult and +$1 are paid. Pinned by 5 tests in `tests/belatro/test_decks_4_5.py`.
+- **L'Architecte starting deck** ("Contract Architect"). Two flags: `buy_contract` lets the player pay $10 in bidding to force the contract (UI hook in `belatro/main.py::UICallbacks.prompt_bid` → new `BelAtroAnnounce.buy_contract_picker` helper); `annonce_cash_x2` pays +$2 on every NS-won trick that contains a card from a declared NS Annonce (consumed in scoring on the `TrickWonEvent` path, with the NS-annonce card-set harvested from `state.declarations` in the `DeclarationScoredEvent` branch). Pinned by 7 tests in `tests/belatro/test_decks_4_5.py` (including 4 tests for the buy-contract picker UI).
+- **Six Conditional Engine jokers** (auto-registered via the existing module scanner):
+  - **`LeCavalierNoir`** (trick_timing.py) — win a Hearts-led trick with a Spade: ×3 Mult.
+  - **`LArcEnCiel`** (trick_timing.py) — each NS trick where winning suit ≠ lead suit: +2 Mult (stacks per trick across the round).
+  - **`LeCollectionneur`** (annonces.py) — each NS Annonce card played in trick 2+: +$2 and +5 Mult per card. Reads the shared `_ns_annonce_cards` frozenset.
+  - **`LeMathematicien`** (annonces.py) — each NS Annonce whose score is a multiple of 5: ×2 Mult.
+  - **`LEclat`** (annonces.py) — win a trick that contains the trump K or Q (the Belote cards): triple that trick's chips (`add_chips = 2 × event.card_points`, since the base trick chips were already added).
+  - **`LePreteur`** (economy.py) — at round start: $0 → +$15 (catch-up); $50+ → spend $5 for ×1.2 Mult (scale-up). Reads `current_money` from `joker_state` (injected via `card_enhancements` in `belatro/main.py`).
+- 17 jokers tests in `tests/belatro/test_jokers_4_5.py` plus a registry pin.
+
+### Changed
+
+- **Bid quick-keys remapped: `A` → `X` (Tout Atout), `S` → `N` (Sans Atout)** (`src/belote/ui/prompts.py::prompt_bid`). The 2.9.0 affordance bound `a`/`s` to the new contracts; with WASD landing in 4.5.0 those letters are now nav aliases, so the contract quick-keys moved to mnemonic `X` (e**X**tra trump) and `N` (**N**o trump). Round-2 only as before; arrow-key navigation + digit shortcuts still work. Help text and docstring updated.
+- **`ScoreAccumulator.trigger_round_start` now honors `JokerResult` returns from `on_round_start`** (`src/belote/belatro/core/scoring.py`). Pre-4.5.0 the return was silently discarded — existing jokers (LePremierSang, LeSergent, LaSentinelle, ...) all returned `None` from `on_round_start` so this is backward-compatible. LePrêteur is the first consumer; without this change its $15 / $5 swings would never reach the wallet.
+- **Annonce card-set harvested into `joker_state["_ns_annonce_cards"]`** on every `DeclarationScoredEvent` (was: gated behind L'Architecte's `annonce_cash_x2` flag). Now shared by L'Architecte AND LeCollectionneur. Frozenset of `(suit.name, rank.name)` tuples for hashability + scalar-only `joker_state` invariant. Cleared on `trigger_round_start` alongside the existing L'Architecte key.
+
+### Internal
+
+- **Tests**: 751 → 790 (+39: 7 input-WASD, 15 decks-4.5, 17 jokers-4.5).
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`.
+- **Joker count**: 36 → 42; deck count: 10 → 12. Planets / Tarots / Vouchers unchanged (8 / 12 / 12).
+- **Plan file**: `/home/mrrobot/.claude/plans/i-want-to-add-joyful-melody.md`.
+
+
 ## [4.1.1] - 2026-05-16
 
 Second audit pass over the 4.1.0 baseline. Three parallel Explore agents (classic engine, BelAtro layer, UI/render) — the BelAtro layer came back clean, the classic engine + UI surfaced two real bugs plus one P2 architectural fragility. **+9 regression tests** (742 → 751). All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 751/751, `tests/test_perf_regression.py` 5/5 within tolerance.

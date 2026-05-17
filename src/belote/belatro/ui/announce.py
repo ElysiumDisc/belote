@@ -80,6 +80,60 @@ class BelAtroAnnounce:
         invalidate_diff()
 
     @staticmethod
+    def buy_contract_picker(reader: KeyReader) -> object:
+        """L'Architecte buy-contract picker.
+
+        Returns a contract value compatible with `process_bid`:
+        - `Suit.SPADES` / `HEARTS` / `DIAMONDS` / `CLUBS` for normal contracts
+        - `Suit.TOUT_ATOUT` for Tout Atout
+        - the `SANS_ATOUT_BID` string sentinel for Sans Atout
+        - `None` if the user cancels (Esc / Q / EOF)
+
+        4.5.0 — UI lives here (not `belote/ui/prompts.py`) because the buy is
+        a BelAtro-only deck rule.
+        """
+        from belote.deck import Suit
+        from belote.game import SANS_ATOUT_BID
+        from belote.ui.render import get_term_size
+
+        options: list[tuple[str, object]] = [
+            ("♠ Spades", Suit.SPADES),
+            ("♥ Hearts", Suit.HEARTS),
+            ("♦ Diamonds", Suit.DIAMONDS),
+            ("♣ Clubs", Suit.CLUBS),
+            ("Tout Atout", Suit.TOUT_ATOUT),
+            ("Sans Atout", SANS_ATOUT_BID),
+        ]
+        sel = 0
+        term_w, term_h = get_term_size()
+        row = max(1, term_h // 2 - 1)
+
+        try:
+            while True:
+                print(clear_screen(), end="")
+                title = gold_fg() + BOLD + "L'Architecte — Pick a contract ($10)" + RESET
+                print(move(row, 1) + ansi_center(title, term_w))
+                for i, (label, _) in enumerate(options):
+                    marker = "▶ " if i == sel else "  "
+                    color = gold_fg() if i == sel else white_fg()
+                    line = color + marker + label + RESET
+                    print(move(row + 2 + i, 1) + ansi_center(line, term_w))
+                hint = white_fg() + "[←↑→↓/WASD] move  [Enter] confirm  [Esc] cancel" + RESET
+                print(move(row + 2 + len(options) + 1, 1) + ansi_center(hint, term_w), flush=True)
+
+                event = reader.read()
+                if event.key in (Key.UP, Key.LEFT):
+                    sel = (sel - 1) % len(options)
+                elif event.key in (Key.DOWN, Key.RIGHT):
+                    sel = (sel + 1) % len(options)
+                elif event.key is Key.ENTER:
+                    return options[sel][1]
+                elif event.key in (Key.ESC, Key.QUIT, Key.EOF):
+                    return None
+        finally:
+            invalidate_diff()
+
+    @staticmethod
     def yes_no(prompt: str, reader: KeyReader) -> bool:
         """Centered Y/N prompt. Returns True on Y/Enter, False on N/Esc/Q/EOF.
 

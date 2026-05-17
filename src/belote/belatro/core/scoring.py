@@ -83,15 +83,46 @@ class ScoreAccumulator:
         # Inject round context so jokers can read it via state.get(...)
         joker_state["no_dix_de_der"] = state.boss_modifiers.no_dix_de_der
         joker_state["target_score"] = self.target_score
-
-        for joker in self._jokers:
-            joker.on_round_start(joker_state)
+        # 4.5.0: drop any leftover annonce-card sets from a prior round
+        # before this round's DeclarationScoredEvents rebuild them. Read by
+        # L'Architecte (deck rule) and LeCollectionneur (joker).
+        joker_state.pop("_architecte_ns_annonce_cards", None)
+        joker_state.pop("_ns_annonce_cards", None)
 
         # Apply permanent bonuses from Tarot cards
         new_chips = state._chips + self.permanent_chips
         new_mult = state._mult * self.permanent_mult if self.permanent_mult != 1.0 else state._mult
+        new_money = state._bonus_money
 
-        return replace(state, _joker_state=joker_state, _chips=new_chips, _mult=new_mult)
+        # 4.5.0: on_round_start jokers can now return a JokerResult that
+        # adjusts chips/mult/money at round-start. Pre-4.5.0 the return was
+        # silently discarded — existing jokers (LePremierSang, LeSergent,
+        # LaSentinelle, etc.) all returned None from on_round_start so this
+        # is backward-compatible. LePrêteur is the first consumer.
+        for joker in self._jokers:
+            result = joker.on_round_start(joker_state)
+            if result is None:
+                continue
+            if result.add_chips:
+                new_chips += result.add_chips
+                self._log.append(f"{joker.name}: +{result.add_chips} chips")
+            if result.add_mult:
+                new_mult += result.add_mult
+                self._log.append(f"{joker.name}: +{result.add_mult} Mult")
+            if result.times_mult:
+                new_mult *= result.times_mult
+                self._log.append(f"{joker.name}: ×{result.times_mult} Mult")
+            if result.add_money:
+                new_money += result.add_money
+                self._log.append(f"{joker.name}: +${result.add_money}")
+
+        return replace(
+            state,
+            _joker_state=joker_state,
+            _chips=new_chips,
+            _mult=new_mult,
+            _bonus_money=new_money,
+        )
 
     def update_state(self, state: GameState, event: object) -> GameState:
         """Process an event and return an updated GameState with new score/joker state.
@@ -235,6 +266,46 @@ class ScoreAccumulator:
                             f"Le Soleil: +{sun_mult} Mult (trick #{event.trick_number})"
                         )
 
+            # 4.5.0 deck rules — separate from planets (`self.contract_levels`
+            # is empty on a fresh run, so these can't share the gate above).
+            if event.winner in _NS_TEAM:
+                # L'Infiltré: Ghost Lead. When NS wins a trick by playing a
+                # Trump on a non-trump lead, the winner must have been void
+                # of lead (legal_cards forbids trumping while holding lead).
+                # +2 Mult, +$1.
+                if joker_state.get("ghost_lead") and event.trump is not None:
+                    lead_suit = event.cards[0].suit if event.cards else None
+                    is_trump_lead = (
+                        lead_suit == event.trump
+                        or event.trump == Suit.TOUT_ATOUT
+                    )
+                    if lead_suit is not None and not is_trump_lead:
+                        seat = event.leader_seat
+                        for card in event.cards:
+                            if seat == event.winner and card.suit == event.trump:
+                                new_mult += 2.0
+                                new_money += 1
+                                self._log.append(
+                                    "L'Infiltré: +2 Mult, +$1 (ghost lead)"
+                                )
+                                break
+                            seat = seat.next_seat()
+
+                # L'Architecte: +$2 on NS-won tricks that contain any card
+                # from a declared NS Annonce. The Annonce card-set is
+                # stamped into joker_state by the DeclarationScoredEvent
+                # branch; we look it up here.
+                if joker_state.get("annonce_cash_x2"):
+                    ns_annonce_cards = joker_state.get(
+                        "_architecte_ns_annonce_cards", frozenset()
+                    )
+                    if ns_annonce_cards and any(
+                        (c.suit.name, c.rank.name) in ns_annonce_cards
+                        for c in event.cards
+                    ):
+                        new_money += 2
+                        self._log.append("L'Architecte: +$2 (Annonce trick)")
+
             # Fire all Joker triggers
             _fire_jokers("on_trick_won", event)
 
@@ -243,6 +314,25 @@ class ScoreAccumulator:
 
         elif isinstance(event, DeclarationScoredEvent):
             new_chips += event.points
+            # Harvest the NS-team Annonce card-set so downstream consumers
+            # (L'Architecte deck rule, LeCollectionneur joker) can check
+            # trick membership in O(1) on later TrickWonEvents. Rebuilt from
+            # state.declarations on each event — declarations all fire on
+            # trick 1 so the cost is paid once. Frozenset of (suit, rank)
+            # tuples for hashability and joker_state scalar-only invariant.
+            ns_cards: set[tuple[str, str]] = set()
+            for d in state.declarations:
+                if d.seat not in _NS_TEAM:
+                    continue
+                detail = d.detail
+                cards = getattr(detail, "cards", ()) if detail else ()
+                for c in cards:
+                    ns_cards.add((c.suit.name, c.rank.name))
+            frozen_ns_cards = frozenset(ns_cards)
+            # L'Architecte's key is kept for backwards-compat with the deck
+            # test that pins it; new consumers read `_ns_annonce_cards`.
+            joker_state["_architecte_ns_annonce_cards"] = frozen_ns_cards
+            joker_state["_ns_annonce_cards"] = frozen_ns_cards
             _fire_jokers("on_declaration", event)
 
         elif isinstance(event, RoundEndEvent):

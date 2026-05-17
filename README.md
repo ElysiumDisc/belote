@@ -30,6 +30,8 @@ belatro
 | L'Anarchiste | Start $19 — Corrupted pool visible |
 | **Le Marseillais** | Annonces (Tierce / Quarte / Quinte) score ×2. Belote / Rebelote disabled |
 | **Le Coincheur** | Every round starts pre-coinched. +50 starting Chips, $8 starting cash |
+| **L'Infiltré** *(4.5.0)* | Ghost Lead — winning a trick by playing Trump on a suit you have ZERO of grants +2 Mult and +$1 |
+| **L'Architecte** *(4.5.0)* | Pay $10 in bidding to choose the contract yourself. NS-won tricks containing a declared Annonce card pay +$2 |
 
 ### Notable Vouchers
 | Voucher | Effect |
@@ -145,18 +147,18 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `C`: Open the Consumables tray in the Shop (use Tarots / Planets you've purchased)
 
 **Gameplay:**
-- `←` `→` or `↑` `↓`: Move selection
+- `←` `→` or `↑` `↓` or **`W` `A` `S` `D`** *(4.5.0)*: Move selection
 - `Enter`: Confirm card/bid
 - `1`-`8`: Direct card selection (or `1`-`4` for bids)
 - `O`: Re-sort hand by suit and rank (hand auto-sorts on every play turn since 3.9.4 — this key is now a manual re-sort, kept for muscle memory)
 - `F`: View card detail (full-screen Grimaud-style zoomed view of the selected card; press any key to dismiss). Also works on the up-card during bidding.
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
-- During bidding round 2: `P` = Pass, `A` = Tout Atout, `S` = Sans Atout
+- During bidding round 2: `P` = Pass, `X` = Tout Atout, `N` = Sans Atout *(remapped from A/S in 4.5.0 to make room for WASD nav)*
 
 ## Features
 
-- **BelAtro Roguelite Mode:** A massive expansion featuring 36 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
+- **BelAtro Roguelite Mode:** A massive expansion featuring 42 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
 - **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
@@ -175,7 +177,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Alternate Screen Buffer:** Both classic Belote and BelAtro run in a dedicated terminal buffer for a clean, non-overlapping interface — your shell scrollback stays untouched after you quit.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
 - **Live HUD:** Real-time round scoring displays points won during the current round, with a smooth "rolling" numerical animation for total scores.
-- **High Fidelity:** Implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", contract-aware **Capot** (252 normal / 220 Sans Atout / 348 Tout Atout), and "Litige" (tie-break). All six contracts are bidable in round 2: the four card suits, **Tout Atout** (every suit acts as trump within its own led-suit group; press `a`), and **Sans Atout** (no trump, lead-suit highest wins; press `s`).
+- **High Fidelity:** Implementation of French Belote rules according to the [official rules of the Fédération Française de Belote](https://www.ffbelote.org/regles-officielle-belote/), including a two-round bidding system, "Dix de Der", contract-aware **Capot** (252 normal / 220 Sans Atout / 348 Tout Atout), and "Litige" (tie-break). All six contracts are bidable in round 2: the four card suits, **Tout Atout** (every suit acts as trump within its own led-suit group; press `x`), and **Sans Atout** (no trump, lead-suit highest wins; press `n`).
 - **Rules & History Viewer:** A scrollable, bilingual (English/French) in-game reference for the game's heritage and mechanics.
 
 ## AI
@@ -214,7 +216,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (751 tests)
+├── tests/             # Comprehensive test suite (790 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -230,14 +232,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **751 tests** passing with 100% coverage on game-logic modules (4.1.1).
+Currently **790 tests** passing with 100% coverage on game-logic modules (4.5.0).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 751/751 passed
+- **pytest**: 790/790 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

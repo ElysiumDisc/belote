@@ -197,6 +197,20 @@ class BelAtroRun:
             if self.deck_id == "republicain":
                 # 7s/8s are wild; legal_cards reads this flag from _joker_state.
                 self.card_enhancements["republicain_wild"] = True
+            # 4.5.0 decks
+            if deck.deck_modifications.get("ghost_lead"):
+                # L'Infiltré: scoring.py reads this on TrickWonEvent and pays
+                # +2 mult / +$1 when NS wins a trick with a trump played by a
+                # seat that was void of the lead suit.
+                self.card_enhancements["ghost_lead"] = True
+            if deck.deck_modifications.get("buy_contract"):
+                # L'Architecte: BelAtro's bid UI offers a "buy contract for
+                # $10" option when this flag is set and run.money >= 10.
+                self.card_enhancements["buy_contract"] = True
+            if deck.deck_modifications.get("annonce_cash_x2"):
+                # L'Architecte: scoring.py pays +$2 on each NS-won trick that
+                # contains a card from a declared NS Annonce.
+                self.card_enhancements["annonce_cash_x2"] = True
 
     # ── Current blind target ───────────────────────────────
     @property
