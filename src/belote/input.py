@@ -276,6 +276,12 @@ if os.name == "nt":
             import msvcrt
 
             ch: bytes = msvcrt.getch()  # type: ignore[attr-defined]
+            # 4.6.5: empty bytes mean stdin is closed (EOF). Without this guard
+            # control fell through to `ch.decode("utf-8")` → KeyEvent(CHAR, "")
+            # and any prompt loop that ignores empty CHAR events would hot-spin.
+            # Matches `_UnixKeyReader.read` EOF behaviour.
+            if not ch:
+                return KeyEvent(Key.EOF)
             if ch in (b"\x00", b"\xe0"):
                 ch = msvcrt.getch()  # type: ignore[attr-defined]
                 match ch:

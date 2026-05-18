@@ -375,3 +375,42 @@ def test_shop_render_writes_once_per_frame(monkeypatch: pytest.MonkeyPatch) -> N
         f"ShopScreen._render must batch into one write; got {buf.write_count}. "
         f"Pre-4.6.1 this was ~16 due to per-card print() calls."
     )
+
+
+def test_animate_score_update_invalidates_diff_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """4.6.4 regression: `animate_score_update` paints HUD rows directly via
+    `display_hud`, bypassing the diff cache. Without the post-loop
+    `invalidate_diff()` the next `display()` may diff against the stale
+    pre-animation baseline and skip emitting rows that the animation
+    overwrote on screen.
+
+    Mirrors the architectural rule already enforced for the BelAtro
+    overlays — see `tests/test_alt_screen_scroll.py::
+    test_belatro_overlays_invalidate_diff`.
+    """
+    # `belote.ui.announce` is re-exported as the `announce` function by the
+    # package's __init__, so reach for the module directly via sys.modules
+    # (same pattern as test_card_detail.py).
+    import belote.ui.announce  # noqa: F401  — ensures the module is imported
+    announce_mod = _sys.modules["belote.ui.announce"]
+
+    # Seed a non-None diff baseline. If invalidate_diff() runs, this resets
+    # to None.
+    render_mod._last_emitted_lines = ("stale row",)
+
+    # Stub out the actual stdout writes and the sleep so the test is fast.
+    monkeypatch.setattr(
+        announce_mod, "display_hud", lambda _s, **_kw: None
+    )
+    monkeypatch.setattr(announce_mod.time, "sleep", lambda _d: None)
+
+    state = new_game()
+    announce_mod.animate_score_update(state, target_ns=20, target_ew=10, duration=0.0)
+
+    assert render_mod._last_emitted_lines is None, (
+        "animate_score_update must call invalidate_diff() after its "
+        "display_hud loop — pre-4.6.4 the diff cache held stale baselines "
+        "after the animation."
+    )

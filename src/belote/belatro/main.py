@@ -450,8 +450,16 @@ class BelAtroGame:
             payout = self.run.economy.process_round_end(total - self.run.target_score)
             if auto_coinche_active:
                 self.run.economy.add_money(payout * 2)  # L'Avocat: triple total payout
+            # JokerResult.add_money is signed: positive = credit, negative = debit.
+            # Pre-4.6.5 this branch was `> 0`, which silently dropped LePreteur's
+            # `-5` cost (and any other negative-add_money joker) while still
+            # applying the multiplier — free ×1.2 Mult on every $50+ round.
             if final_state._bonus_money > 0:
                 self.run.economy.add_money(final_state._bonus_money)
+            elif final_state._bonus_money < 0:
+                # Route through spend_money so the Economy negative guard fires
+                # if accumulated debit somehow exceeds wallet (caller's bug).
+                self.run.economy.spend_money(-final_state._bonus_money)
             if final_state._joker_state.get("puriste_triggered"):
                 extra = max(0, (total - self.run.target_score) // 10)
                 self.run.economy.add_money(extra)  # Le Puriste: double base payout

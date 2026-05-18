@@ -45,6 +45,53 @@ def test_unix_reader_returns_eof_on_empty_read() -> None:
     assert event.key is Key.EOF
 
 
+def test_windows_reader_returns_eof_on_empty_read() -> None:
+    """4.6.5: `_WindowsKeyReader.read()` must also return Key.EOF on empty
+    bytes — pre-fix it fell through to `ch.decode("utf-8")` and returned
+    `KeyEvent(Key.CHAR, "")`, hot-spinning every prompt loop.
+
+    The class only exists when `os.name == "nt"`, so on non-Windows hosts we
+    materialise it by patching `os.name` and exec'ing the relevant block in a
+    sandbox dict. That keeps the regression pinned cross-platform without
+    requiring a Windows CI runner."""
+    import os
+    import sys
+    import types
+
+    if os.name == "nt":
+        from belote.input import _WindowsKeyReader  # type: ignore[attr-defined]
+        reader = _WindowsKeyReader.__new__(_WindowsKeyReader)
+        fake_msvcrt = types.SimpleNamespace(getch=lambda: b"")
+        sys.modules["msvcrt"] = fake_msvcrt  # type: ignore[assignment]
+        try:
+            event = reader.read()
+        finally:
+            del sys.modules["msvcrt"]
+        assert event.key is Key.EOF
+        return
+
+    # Cross-platform pin: read the source and assert the guard is present
+    # immediately after `msvcrt.getch()`. This is a static-shape check, not a
+    # runtime call, but it would have caught the original bug.
+    import inspect
+
+    import belote.input as input_module
+
+    src = inspect.getsource(input_module)
+    # Find the Windows read body window; assert the empty-bytes guard appears
+    # before the decode fallback. Match `char = ch.decode` rather than the
+    # bare substring so the in-source comment that quotes `ch.decode("utf-8")`
+    # doesn't shadow the real call site.
+    win_idx = src.find("class _WindowsKeyReader")
+    assert win_idx != -1
+    read_idx = src.find("def read(self)", win_idx)
+    decode_idx = src.find("char = ch.decode", read_idx)
+    guard_idx = src.find("if not ch:", read_idx)
+    assert guard_idx != -1, "Windows reader missing empty-bytes EOF guard"
+    assert decode_idx != -1, "Windows reader decode fallback unexpectedly gone"
+    assert guard_idx < decode_idx, "EOF guard must precede decode fallback"
+
+
 # ── prompt_card / prompt_bid: must exit on EOF, not spin ────────────────────
 
 

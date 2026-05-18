@@ -600,3 +600,116 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
         "Boss flag was not applied before trigger_round_start — the joker "
         "state snapshot would see stale BossModifiers defaults."
     )
+
+
+def test_drive_round_emits_to_event_bus():
+    """4.6.4: drive_round must publish every event through the EventBus too.
+
+    Pre-4.6.4 `_emit()` only called `acc.process_event()` and never
+    `bus.emit()`. Consequence: the process-wide UnlockTracker subscribes to
+    the bus in `belatro/main.py` but received zero events from natural play,
+    silently breaking L'Exécuteur / L'Idéologue / Le Fanatique / Quinte
+    Royale unlocks. Tests in `test_contract_unlocks.py` passed because they
+    `bus.emit(...)` directly, bypassing `drive_round` entirely.
+
+    Pin the integration: at minimum one BidMadeEvent reaches a bus subscriber
+    after `drive_round` returns.
+    """
+    from belote.belatro.core.scoring import ScoreAccumulator
+    from belote.belatro.engine.event_bus import BidMadeEvent, EventBus
+    from belote.belatro.engine.round_driver import RoundUICallbacks, drive_round
+    from belote.belatro.partner.partner_state import PartnerState
+
+    class _PassAllUI(RoundUICallbacks):
+        def prompt_bid(self, state):  # type: ignore[no-untyped-def, override]
+            return None
+        def prompt_card(self, state):  # type: ignore[no-untyped-def, override]
+            return state.hands[state.turn.value][0], state
+        def on_card_played(self, state, seat, card) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+        def on_trick_end(self, state, winner, points) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+        def on_round_end(self, breakdown) -> None:  # type: ignore[no-untyped-def, override]
+            pass
+
+    bus = EventBus()
+    received: list[object] = []
+    bus.subscribe(received.append)
+    acc = ScoreAccumulator(target_score=80)
+
+    with patch("belote.ai.AIPlayer.decide_bid", return_value=None):
+        drive_round(
+            bus=bus,
+            partner=PartnerState(),
+            ui_callbacks=_PassAllUI(),
+            acc=acc,
+            boss=None,
+            target_score=80,
+            seed=42,
+        )
+
+    assert received, (
+        "drive_round did not publish any event through the EventBus — "
+        "UnlockTracker subscribers would receive nothing (regression of the "
+        "silently-broken-unlocks bug fixed in 4.6.4)."
+    )
+    assert any(isinstance(e, BidMadeEvent) for e in received), (
+        "Expected at least one BidMadeEvent (every pass during bidding emits "
+        f"one); only saw {[type(e).__name__ for e in received]}."
+    )
+
+
+def test_raising_joker_isolated_via_transactional(caplog):
+    """4.6.4: a joker handler that raises mid-dispatch must NOT leak partial
+    ledger mutations AND must NOT skip sibling jokers in the same event.
+
+    Pre-4.6.4 the RoundLedger.transactional() guard was defined but never
+    wired in: ScoreAccumulator.process_event() dispatched joker handlers
+    without any rollback or isolation. A buggy joker that wrote a few
+    chips/log lines then raised would leak those mutations and short-circuit
+    every other joker subscribed to the same event.
+
+    Lock the fix: a partial-then-raise joker leaves ledger.chips at the
+    pre-handler value and the sibling joker after it still applies.
+    """
+    import logging
+
+    class HalfThenRaise(Joker):
+        id = "half_then_raise"
+        name = "HalfThenRaise"
+        description = "test fixture"
+        def on_trick_won(self, event, state):
+            # The joker's *handler* mutation comes back via JokerResult, so
+            # raising before returning is the realistic shape. The accumulator
+            # rolls back any mutations applied DURING the handler call.
+            raise RuntimeError("simulated joker crash")
+
+    class AlwaysAdds(Joker):
+        id = "always_adds"
+        name = "AlwaysAdds"
+        description = "test fixture"
+        def on_trick_won(self, event, state):
+            return JokerResult(add_chips=42)
+
+    acc = ScoreAccumulator()
+    acc.attach_jokers([HalfThenRaise(), AlwaysAdds()])
+
+    state = GameState(hands=((), (), (), ()), _chips=0, _mult=1.0)
+    event = TrickWonEvent(
+        winner=Seat.SOUTH, cards=(), trick_number=1,
+        is_last=False, card_points=10, trump=None,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="belote.belatro.core.scoring"):
+        state = acc.update_state(state, event)
+
+    # 10 (base card pts) + 42 (AlwaysAdds) — HalfThenRaise contributed nothing.
+    assert state._chips == 52, (
+        f"Expected sibling joker to still fire after raising joker; got "
+        f"chips={state._chips} (10 base + 42 sibling expected)."
+    )
+    assert any(
+        "HalfThenRaise" in rec.message or
+        (rec.exc_info and "simulated joker crash" in str(rec.exc_info[1]))
+        for rec in caplog.records
+    ), "Expected the raising joker to be logged via logger.exception."

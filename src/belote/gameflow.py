@@ -363,6 +363,22 @@ def run_round(
             announce("All passed - Reshuffling!", duration=round_pause * 0.5, reader=reader)
             return current
 
+        # 4.6.5 a11y: announce the locked contract at bid→play transition.
+        # Without this, screen-reader users heard card plays and trick winners
+        # but never the trump / Tout Atout / Sans Atout context. Classic
+        # Belote has no coinche concept — that lives in BelAtro's
+        # `round_driver` only, so coinche_level defaults to 0 here.
+        if current.taker is not None:
+            if current.contract == "sans_atout":
+                _bid_word = "sans atout"
+            elif current.trump == Suit.TOUT_ATOUT:
+                _bid_word = "tout atout"
+            elif current.trump is not None:
+                _bid_word = a11y._suit_word(current.trump.symbol)
+            else:
+                _bid_word = "no trump"
+            a11y.announce_contract(current.taker, _bid_word)
+
         # Play Phase
         res_play = run_play(
             current, reader, ai_players, ai_delay, trick_pause, history_stack,
@@ -418,6 +434,25 @@ def run_round(
 
             if not skip_round_pause:
                 animate_score_update(current, target_ns, target_ew)
+
+            # 4.6.5 a11y: speak the round result. Helper existed since 3.0.0
+            # but had no caller; screen-reader users heard trick-by-trick
+            # results without a round-summary line.
+            _round_contract: str | None
+            if current.contract == "sans_atout":
+                _round_contract = "sans atout"
+            elif current.trump == Suit.TOUT_ATOUT:
+                _round_contract = "tout atout"
+            elif current.trump is not None:
+                _round_contract = a11y._suit_word(current.trump.symbol)
+            else:
+                _round_contract = None
+            a11y.announce_round_result(
+                breakdown.taker_total,
+                breakdown.defender_total,
+                "north-south" if breakdown.taker_team == 0 else "east-west",
+                contract=_round_contract,
+            )
 
             # Update global stats
             trump_sym = current.trump.symbol if current.trump else None

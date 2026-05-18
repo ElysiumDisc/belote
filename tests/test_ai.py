@@ -592,3 +592,56 @@ def test_medium_ai_discard_consults_boss_modifier_helper() -> None:
         "card_points_with_modifiers (4.1.1) — pre-fix it called raw "
         "card_points_fn and so was blind to zero-rank boss flags."
     )
+
+
+def test_winning_strategy_penalises_when_partner_has_stronger_same_suit() -> None:
+    """4.6.4: `_score_winning_strategy` must penalise playing a card when
+    partner is visibly holding a *strictly stronger* card in the SAME suit.
+
+    Pre-4.6.4 the check was `if card in self.memory.partner_hand` — always
+    False because deck cards are unique across disjoint hands, so the
+    intended -5 penalty never fired. The fix compares trick rank within
+    suit so the AI prefers not to burn its own high card when partner can
+    cover.
+    """
+    from belote.deck import Contract
+
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player._se = False
+    trump = Suit.HEARTS
+
+    # SOUTH considers playing the K♠. Partner (NORTH) visibly holds A♠
+    # (strictly stronger in the same lead suit). The penalty should fire.
+    my_card = Card(Suit.SPADES, Rank.KING)
+    partner_stronger = Card(Suit.SPADES, Rank.ACE)
+    partner_weaker = Card(Suit.SPADES, Rank.SEVEN)
+
+    # Trick led by EAST with a low spade; SOUTH is not winning, partner
+    # also not winning → routes to _score_winning_strategy.
+    trick = (TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.EIGHT)),)
+    state = GameState(
+        hands=((my_card,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=trump,
+        contract=Contract.NORMAL,
+    )
+
+    # Partner visibly holds the stronger card.
+    player.memory.partner_hand = {partner_stronger}
+    score_strong = player._score_winning_strategy(
+        my_card, state, trump, trick, partner_winning=False, points=4,
+    )
+
+    # Partner visibly holds only a weaker card → no penalty.
+    player.memory.partner_hand = {partner_weaker}
+    score_weak = player._score_winning_strategy(
+        my_card, state, trump, trick, partner_winning=False, points=4,
+    )
+
+    delta = score_weak - score_strong
+    assert abs(delta - 5.0) < 1e-6, (
+        f"Expected +5 score delta when partner downgrades from stronger to "
+        f"weaker same-suit card; got delta={delta}. The pre-4.6.4 "
+        f"`card in partner_hand` identity check was dead code."
+    )

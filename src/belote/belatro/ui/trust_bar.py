@@ -8,9 +8,10 @@ if TYPE_CHECKING:
     from ..partner.trust import TrustTrack
 
 
-# 3.4.0: per-tier glyph + name. Index = TrustTrack.tier (0–4).
+# 3.4.0: per-tier glyph. Index = TrustTrack.tier (0–4). Mood names come from
+# `TrustTrack.mood()` directly — a parallel `_TIER_NAMES` tuple used to live
+# here too but was never indexed; removed in 4.6.5.
 _TIER_GLYPHS: tuple[str, ...] = ("✗", "♡", "♥", "♦", "★")
-_TIER_NAMES: tuple[str, ...] = ("Méfiant", "Sulking", "Neutre", "Loyal", "Mécène")
 
 
 def _orange_fg() -> str:

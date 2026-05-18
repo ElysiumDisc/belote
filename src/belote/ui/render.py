@@ -871,13 +871,22 @@ def _render_middle_section(
     return result
 
 
-def _build_hud(state: GameState, term_w: int, layout: LayoutPreset = STANDARD) -> str:
+def _build_hud(
+    state: GameState,
+    term_w: int,
+    layout: LayoutPreset = STANDARD,
+    *,
+    team_scores_override: tuple[int, int] | None = None,
+) -> str:
     """Build the top HUD bar, padded to term_w visible chars.
 
     Verbosity is layout-driven:
       - "verbose"  (spacious): all labels, help hints, theme name
       - "standard": current behaviour (full labels, hints, theme)
       - "compact"  (≤80 cols): abbreviated labels, no help hints, no theme name
+
+    `team_scores_override` lets the score-roll animation in announce.py paint
+    intermediate frames without allocating a fresh frozen GameState per step.
     """
     if state.boss_modifiers.hide_hud:
         left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
@@ -892,7 +901,7 @@ def _build_hud(state: GameState, term_w: int, layout: LayoutPreset = STANDARD) -
         return bar + " " * pad + theme_label
 
     trump_sym = state.trump.symbol if state.trump else "?"
-    ns, ew = state.team_scores
+    ns, ew = team_scores_override if team_scores_override is not None else state.team_scores
     trick_num = len(state.completed_tricks) + (1 if state.current_trick else 0)
     taker_name = state.taker.name if state.taker else "-"
     ns_pts, ew_pts = state.current_round_points
@@ -1159,11 +1168,23 @@ _pending_rendered_lines: tuple[str, ...] | None = None
 _last_rendered_unpadded_h: int = 0
 
 
-def display_hud(state: GameState) -> None:
-    """Targeted update of only the top HUD bar."""
+def display_hud(
+    state: GameState,
+    *,
+    team_scores_override: tuple[int, int] | None = None,
+) -> None:
+    """Targeted update of only the top HUD bar.
+
+    `team_scores_override` is the score-roll animation hook (4.6.5) — lets
+    callers paint intermediate scores without allocating a fresh frozen
+    GameState per frame via `dataclasses.replace`.
+    """
     term_w, term_h = get_term_size()
     layout = choose_layout(term_w, term_h)
-    sys.stdout.write(move(1, 1) + _build_hud(state, term_w, layout))
+    sys.stdout.write(
+        move(1, 1)
+        + _build_hud(state, term_w, layout, team_scores_override=team_scores_override)
+    )
     sys.stdout.flush()
 
 

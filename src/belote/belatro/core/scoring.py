@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -17,6 +18,8 @@ from ..engine.event_bus import (
     RoundEndEvent,
     TrickWonEvent,
 )
+
+_log = logging.getLogger(__name__)
 
 _NS_TEAM = {Seat.SOUTH, Seat.NORTH}
 
@@ -263,43 +266,61 @@ class ScoreAccumulator:
             if not self._handler_index and self._jokers:
                 self.attach_jokers(self._jokers)
             for joker, method in self._handler_index.get(method_name, ()):
-                result = method(event_obj, joker_state)
-                if not result:
-                    continue
-                _apply(result, source=joker.name)
-                _apply_edition(joker)
-                # Phase 2.3: partner-joker tier scaling.
-                # tier 0 (degraded) / 1 (base) → just the baseline apply.
-                # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect),
-                #                               matches legacy partner_jokers_double at trust ≥ 7.
-                # tier 4 (elite) → +2 applies (≈ ×3 effect).
-                #
-                # `partner_jokers_double` is the legacy boolean flag (pre-3.5.0
-                # back-compat for tests that set it directly). When both are
-                # set, `max()` picks whichever is larger; a one-shot
-                # DeprecationWarning fires so callers migrate to tier. The flag
-                # is slated for removal in 4.0; new code should use `partner_tier`.
-                if getattr(joker, "is_partner_joker", False):
-                    # Clamp to the documented [0, 4] tier range; out-of-band
-                    # values from corrupted save state or future mutations
-                    # should degrade to the nearest valid tier rather than
-                    # crash the round with IndexError.
-                    _tier = max(0, min(self.partner_tier, 4))
-                    tier_extras = (0, 0, 1, 1, 2)[_tier]
-                    if self.partner_jokers_double and tier_extras > 0:
-                        import warnings
-                        warnings.warn(
-                            "ScoreAccumulator.partner_jokers_double is deprecated "
-                            "alongside partner_tier; set only one. The flag will "
-                            "be removed in 4.0.",
-                            DeprecationWarning,
-                            stacklevel=2,
-                        )
-                    extra_applies = max(
-                        tier_extras, 1 if self.partner_jokers_double else 0
+                # 4.6.4: per-joker transactional + EventBus-style isolation.
+                # The transactional() guard documented on RoundLedger was
+                # never wired in pre-4.6.4 — a joker raising mid-dispatch
+                # could leave chips/mult/money/joker_state in a partial
+                # state AND skip every sibling joker. Snapshot self._log
+                # too since `_apply` writes to it (the ledger.log roll-back
+                # alone covers the ledger's own log only).
+                snap_log_len = len(self._log)
+                try:
+                    with ledger.transactional():
+                        result = method(event_obj, joker_state)
+                        if not result:
+                            continue
+                        _apply(result, source=joker.name)
+                        _apply_edition(joker)
+                        # Phase 2.3: partner-joker tier scaling.
+                        # tier 0 (degraded) / 1 (base) → just the baseline apply.
+                        # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect),
+                        #                               matches legacy partner_jokers_double at trust ≥ 7.
+                        # tier 4 (elite) → +2 applies (≈ ×3 effect).
+                        #
+                        # `partner_jokers_double` is the legacy boolean flag (pre-3.5.0
+                        # back-compat for tests that set it directly). When both are
+                        # set, `max()` picks whichever is larger; a one-shot
+                        # DeprecationWarning fires so callers migrate to tier. The flag
+                        # is slated for removal in 4.0; new code should use `partner_tier`.
+                        if getattr(joker, "is_partner_joker", False):
+                            # Clamp to the documented [0, 4] tier range; out-of-band
+                            # values from corrupted save state or future mutations
+                            # should degrade to the nearest valid tier rather than
+                            # crash the round with IndexError.
+                            _tier = max(0, min(self.partner_tier, 4))
+                            tier_extras = (0, 0, 1, 1, 2)[_tier]
+                            if self.partner_jokers_double and tier_extras > 0:
+                                import warnings
+                                warnings.warn(
+                                    "ScoreAccumulator.partner_jokers_double is deprecated "
+                                    "alongside partner_tier; set only one. The flag will "
+                                    "be removed in 4.0.",
+                                    DeprecationWarning,
+                                    stacklevel=2,
+                                )
+                            extra_applies = max(
+                                tier_extras, 1 if self.partner_jokers_double else 0
+                            )
+                            for _ in range(extra_applies):
+                                _apply(result, source=f"{joker.name} (T{self.partner_tier})")
+                except Exception:
+                    # Roll back any log lines the partial application wrote
+                    # (the ledger restore is handled by transactional()).
+                    del self._log[snap_log_len:]
+                    _log.exception(
+                        "Joker %s raised on %s; ledger restored, continuing with siblings.",
+                        joker.name, method_name,
                     )
-                    for _ in range(extra_applies):
-                        _apply(result, source=f"{joker.name} (T{self.partner_tier})")
 
         if isinstance(event, TrickWonEvent):
             # Base chips from card points
@@ -415,19 +436,28 @@ class ScoreAccumulator:
             # state.declarations on each event — declarations all fire on
             # trick 1 so the cost is paid once. Frozenset of (suit, rank)
             # tuples for hashability and joker_state scalar-only invariant.
-            ns_cards: set[tuple[str, str]] = set()
-            for d in state.declarations:
-                if d.seat not in _NS_TEAM:
-                    continue
-                detail = d.detail
-                cards = getattr(detail, "cards", ()) if detail else ()
-                for c in cards:
-                    ns_cards.add((c.suit.name, c.rank.name))
-            frozen_ns_cards = frozenset(ns_cards)
-            # L'Architecte's key is kept for backwards-compat with the deck
-            # test that pins it; new consumers read `_ns_annonce_cards`.
-            joker_state["_architecte_ns_annonce_cards"] = frozen_ns_cards
-            joker_state["_ns_annonce_cards"] = frozen_ns_cards
+            #
+            # 4.6.4: skip the harvest under Le Mime (`declarations_zero`).
+            # The boss's promise is "all declaration value zeroed for the
+            # round" — L'Architecte's `annonce_cash_x2` deck rule and
+            # LeCollectionneur's per-trick bonus are declaration-derived,
+            # so they must be suppressed too. Pre-4.6.4 the harvest ran
+            # regardless of points, leaving Le Mime + L'Architecte as a
+            # score-leak combo (+$2/trick on declared-card tricks).
+            if not state.boss_modifiers.declarations_zero:
+                ns_cards: set[tuple[str, str]] = set()
+                for d in state.declarations:
+                    if d.seat not in _NS_TEAM:
+                        continue
+                    detail = d.detail
+                    cards = getattr(detail, "cards", ()) if detail else ()
+                    for c in cards:
+                        ns_cards.add((c.suit.name, c.rank.name))
+                frozen_ns_cards = frozenset(ns_cards)
+                # L'Architecte's key is kept for backwards-compat with the deck
+                # test that pins it; new consumers read `_ns_annonce_cards`.
+                joker_state["_architecte_ns_annonce_cards"] = frozen_ns_cards
+                joker_state["_ns_annonce_cards"] = frozen_ns_cards
             _fire_jokers("on_declaration", event)
 
         elif isinstance(event, RoundEndEvent):

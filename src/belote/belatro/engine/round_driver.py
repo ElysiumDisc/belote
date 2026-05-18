@@ -22,6 +22,7 @@ from belote.game import (
 from belote.scoring import get_declaration_points, is_capot, score_round
 
 from .event_bus import (
+    AnyEvent,
     BeloteAnnouncedEvent,
     BidMadeEvent,
     DeclarationScoredEvent,
@@ -195,7 +196,7 @@ def drive_round(
         acc.partner_jokers_double = partner.trust.partner_jokers_double
         acc.partner_tier = partner.trust.tier
 
-    def _emit(event: object, s: GameState) -> GameState:
+    def _emit(event: AnyEvent, s: GameState) -> GameState:
         # 4.6.2: hot-path entry now goes through process_event (no per-event
         # `replace()`). The state is unchanged for chips/mult/money — those
         # live in the ledger and get sealed once at round-end via
@@ -203,8 +204,17 @@ def drive_round(
         # (installed by trigger_round_start), so classic-Belote read sites
         # (ai.py, scoring.py, game.py) see live mutations on the SAME state
         # object we return here.
+        #
+        # 4.6.4: also publish to the EventBus so external subscribers
+        # (UnlockTracker, ghost-run replay tooling, future analytics) receive
+        # events. Pre-4.6.4 the bus parameter was accepted but never emitted
+        # to, silently breaking every event-driven unlock (L'Exécuteur,
+        # L'Idéologue, Le Fanatique, Quinte Royale). The accumulator runs
+        # first so its ledger mutations are visible to any subscriber that
+        # inspects state.
         if acc is not None:
             acc.process_event(s, event)
+        bus.emit(event)
         return s
 
     # Phase: BIDDING

@@ -298,31 +298,43 @@ def resolve_declarations(
         seat_order = (taker, s1, s2, s3)
 
     def _resolve_tie_carre() -> int | None:
+        # 4.6.5: pre-build a per-seat team lookup once, then walk seat_order
+        # in O(seats). Pre-fix this was nested zips inside the seat loop —
+        # O(seats × decls); both factors tiny in practice but the dict form
+        # also reads more clearly than "first-match wins NS, else EW".
         if taker is None:
             return None  # legacy cancel behaviour
         assert ns_best_carre is not None and ew_best_carre is not None
         tied_rank = ns_best_carre.rank
+        seat_team: dict[Seat, int] = {}
+        for c, cs in zip(ns_carres, ns_carre_seats, strict=True):
+            if c.rank == tied_rank:
+                seat_team.setdefault(cs, 0)
+        for c, cs in zip(ew_carres, ew_carre_seats, strict=True):
+            if c.rank == tied_rank:
+                seat_team.setdefault(cs, 1)
         for s in seat_order:
-            for c, cs in zip(ns_carres, ns_carre_seats, strict=True):
-                if cs == s and c.rank == tied_rank:
-                    return 0
-            for c, cs in zip(ew_carres, ew_carre_seats, strict=True):
-                if cs == s and c.rank == tied_rank:
-                    return 1
+            if s in seat_team:
+                return seat_team[s]
         return None
 
     def _resolve_tie_seq() -> int | None:
+        # Symmetric to _resolve_tie_carre — see comment there for the
+        # O(seats × decls) → O(seats) reasoning.
         if taker is None:
             return None
         assert ns_best_seq is not None and ew_best_seq is not None
         tied_strength = _sequence_strength(ns_best_seq)
+        seat_team: dict[Seat, int] = {}
+        for seq, ss in zip(ns_seqs, ns_seq_seats, strict=True):
+            if _sequence_strength(seq) == tied_strength:
+                seat_team.setdefault(ss, 0)
+        for seq, ss in zip(ew_seqs, ew_seq_seats, strict=True):
+            if _sequence_strength(seq) == tied_strength:
+                seat_team.setdefault(ss, 1)
         for s in seat_order:
-            for seq, ss in zip(ns_seqs, ns_seq_seats, strict=True):
-                if ss == s and _sequence_strength(seq) == tied_strength:
-                    return 0
-            for seq, ss in zip(ew_seqs, ew_seq_seats, strict=True):
-                if ss == s and _sequence_strength(seq) == tied_strength:
-                    return 1
+            if s in seat_team:
+                return seat_team[s]
         return None
 
     scoring_team: int | None = None

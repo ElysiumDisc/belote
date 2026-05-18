@@ -36,6 +36,18 @@ class UnlockTracker:
         bus.subscribe(self.on_event)
 
     def on_event(self, event: object) -> None:
+        """Dispatch bus events to unlock handlers.
+
+        Handled event types (4.6.5):
+          - `RoundEndEvent` → Capot / chute / Tout Atout / total-money unlocks
+            via `_handle_round_end`.
+          - `DeclarationScoredEvent` → Quinte Royale unlock via
+            `_handle_declaration` (3.9.3).
+
+        Other bus events (BidMadeEvent, TrickWonEvent, BeloteAnnouncedEvent)
+        are intentionally no-op; subscribe a new branch here when a future
+        unlock keys off them.
+        """
         dirty = False
 
         if isinstance(event, RoundEndEvent):

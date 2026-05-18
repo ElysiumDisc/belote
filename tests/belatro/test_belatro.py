@@ -116,6 +116,16 @@ class TestEconomy:
         self.eco.add_money(3)
         assert self.eco.money == 8
 
+    def test_add_money_rejects_negative(self) -> None:
+        """4.6.4: symmetry with `spend_money`. A negative `amount` would
+        silently drain the balance; spend operations must go through
+        `spend_money` (balance-checked). Loud failure beats silent drain."""
+        import pytest as _pt
+
+        with _pt.raises(ValueError):
+            self.eco.add_money(-5)
+        assert self.eco.money == 0
+
     def test_spend_money_success_returns_true(self) -> None:
         self.eco.money = 20
         result = self.eco.spend_money(15)

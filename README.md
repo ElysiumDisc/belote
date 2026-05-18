@@ -132,7 +132,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 **General:**
 - `?`: Show keyboard shortcut help
-- `I` or `V`: Toggle BelAtro score overlay (per-trick breakdown popup)
+- `I` or `V` *(BelAtro only)*: Toggle the BelAtro top HUD overlay — see the BelAtro gameplay note below for details
 - `Q`: Quit to main menu or exit
 - `H`: View Game History (round-by-round, with contract / taker / tricks / declarations)
 - `T`: Cycle UI Theme
@@ -215,7 +215,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (933 tests)
+├── tests/             # Comprehensive test suite (941 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -230,14 +230,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **933 tests** passing with 100% coverage on game-logic modules (4.6.3).
+Currently **941 tests** passing with 100% coverage on game-logic modules (4.6.5).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 933/933 passed
+- **pytest**: 941/941 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

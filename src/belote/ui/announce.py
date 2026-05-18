@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 import time
-from dataclasses import replace
 
 from ..ansi import (
     BOLD,
@@ -222,10 +221,22 @@ def animate_score_update(
     steps = 20
     delay = duration / steps
 
-    for i in range(1, steps + 1):
-        curr_ns = start_ns + (target_ns - start_ns) * i // steps
-        curr_ew = start_ew + (target_ew - start_ew) * i // steps
+    try:
+        for i in range(1, steps + 1):
+            curr_ns = start_ns + (target_ns - start_ns) * i // steps
+            curr_ew = start_ew + (target_ew - start_ew) * i // steps
 
-        temp_state = replace(state, team_scores=(curr_ns, curr_ew))
-        display_hud(temp_state)
-        time.sleep(delay)
+            # 4.6.5: pass the intermediate scores as an override instead of
+            # `replace(state, team_scores=...)`. Frozen GameState has ~50
+            # fields; `replace` allocated a fresh one per frame × 20 frames.
+            display_hud(state, team_scores_override=(curr_ns, curr_ew))
+            time.sleep(delay)
+    finally:
+        # 4.6.4: display_hud writes row 1 directly to stdout, bypassing the
+        # render-diff cache. Without this invalidation, a subsequent
+        # display() with a row 1 that happens to match the cached pre-
+        # animation row 1 would skip emitting it, leaving the last
+        # animation frame painted on screen. Matches the same architectural
+        # rule already applied by show_help / show_history / show_rules /
+        # show_card_detail / show_stats.
+        invalidate_diff()

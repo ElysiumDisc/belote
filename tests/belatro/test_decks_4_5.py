@@ -261,6 +261,57 @@ def test_annonce_cache_cleared_between_rounds() -> None:
     assert "_architecte_ns_annonce_cards" not in next_round._joker_state
 
 
+def test_le_mime_suppresses_architecte_annonce_cash() -> None:
+    """4.6.4: Le Mime (declarations_zero) must suppress L'Architecte's
+    annonce-cash bonus.
+
+    Pre-4.6.4 the DeclarationScoredEvent handler stamped
+    `_ns_annonce_cards` into joker_state unconditionally, even when
+    `state.boss_modifiers.declarations_zero` zeroed `event.points`. Le
+    Mime's promise is "all declaration value zeroed" — the L'Architecte
+    +$2/trick payout is declaration-derived, so it must be gated too.
+    """
+    from dataclasses import replace
+
+    from belote.game import BossModifiers
+
+    state = _state_with_ns_tierce_in_hearts()
+    # Activate Le Mime on the state.
+    state = replace(
+        state, boss_modifiers=BossModifiers(declarations_zero=True)
+    )
+    acc = ScoreAccumulator()
+    # Declaration scores 0 chips under Le Mime — the round_driver passes
+    # points=0 in that case; the handler must also skip the harvest.
+    state = acc.update_state(
+        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 0)
+    )
+    # The annonce-cards key must NOT have been stamped.
+    assert "_architecte_ns_annonce_cards" not in state._joker_state
+    assert "_ns_annonce_cards" not in state._joker_state
+
+    # A subsequent trick that WOULD have qualified pre-4.6.4 must pay $0.
+    event = TrickWonEvent(
+        winner=Seat.SOUTH,
+        cards=(
+            Card(Suit.HEARTS, Rank.JACK),
+            Card(Suit.HEARTS, Rank.SEVEN),
+            Card(Suit.HEARTS, Rank.EIGHT),
+            Card(Suit.HEARTS, Rank.QUEEN),
+        ),
+        trick_number=2,
+        is_last=False,
+        card_points=20,
+        trump=Suit.HEARTS,
+        leader_seat=Seat.SOUTH,
+    )
+    out = acc.update_state(state, event)
+    assert out._bonus_money == 0, (
+        f"Le Mime should suppress the L'Architecte $2 bonus; got "
+        f"_bonus_money={out._bonus_money}."
+    )
+
+
 # ── L'Architecte buy-contract picker ────────────────────────────────────────
 
 

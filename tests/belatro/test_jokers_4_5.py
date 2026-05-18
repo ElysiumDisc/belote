@@ -314,6 +314,30 @@ def test_preteur_round_start_result_lands_on_accumulator() -> None:
     assert out._bonus_money == 15
 
 
+def test_preteur_skim_actually_debits_economy() -> None:
+    """4.6.5 regression: pre-fix, the round-end payout site in belatro/main.py
+    only credited `_bonus_money` if it was > 0, silently dropping LePreteur's
+    -$5 skim cost while still applying ×1.2 mult. The negative branch now
+    routes through `Economy.spend_money`, matching the joker's stated cost."""
+    from belote.belatro.core.economy import Economy
+
+    j = LePreteur()
+    acc = ScoreAccumulator()
+    acc.attach_jokers([j])
+    state = GameState(hands=((), (), (), ()), _joker_state={"current_money": 60})
+    out = acc.trigger_round_start(state)
+    assert out._bonus_money == -5
+
+    economy = Economy(money=60)
+    # Replicate belatro/main.py:453-461 payout dispatch.
+    bonus = out._bonus_money
+    if bonus > 0:
+        economy.add_money(bonus)
+    elif bonus < 0:
+        economy.spend_money(-bonus)
+    assert economy.money == 55, "LePreteur's $5 skim must actually debit wallet"
+
+
 # ── Registry ────────────────────────────────────────────────────────────────
 
 

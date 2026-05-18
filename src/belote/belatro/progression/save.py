@@ -113,8 +113,18 @@ class SaveManager:
         Profiles written before SCHEMA_VERSION existed have no `schema_version`
         key but are otherwise structurally compatible. New keys with sensible
         defaults can be added here as the schema evolves.
+
+        4.6.5: reject saves written by a *newer* version of the game. Without
+        this guard, a forward-incompatible field change (e.g. renaming a stat,
+        repurposing a list) would silently load as garbage.
         """
         version = int(data.get("schema_version", 0))
+        if version > self.SCHEMA_VERSION:
+            raise ValueError(
+                f"Save file schema_version={version} is newer than this "
+                f"build's SCHEMA_VERSION={self.SCHEMA_VERSION}. Upgrade the "
+                "game to load this profile."
+            )
         # No structural migrations yet — just normalise the version field.
         if version < self.SCHEMA_VERSION:
             data["schema_version"] = self.SCHEMA_VERSION

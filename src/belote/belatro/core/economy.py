@@ -13,6 +13,17 @@ class Economy:
     bonus_per_round: int = 0  # flat bonus paid each round end (La Télescope)
 
     def add_money(self, amount: int) -> None:
+        # 4.6.4: reject negative amounts for symmetry with `spend_money`. A
+        # caller passing a negative `amount` would otherwise silently drain
+        # the player's balance via `money += -N`. Spend operations must go
+        # through `spend_money` (which is balance-checked); a bug that
+        # routes a "credit" through `add_money(-X)` is the wrong code path
+        # and should fail loudly.
+        if amount < 0:
+            raise ValueError(
+                f"Economy.add_money expects a non-negative amount; got {amount}. "
+                "Use spend_money() for debits."
+            )
         self.money += amount
 
     def spend_money(self, amount: int) -> bool:

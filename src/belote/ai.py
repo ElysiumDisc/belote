@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
 from enum import Enum
 
 from .deck import Card, Contract, Rank, Suit, trick_rank
@@ -462,16 +463,16 @@ class AIPlayer:
             if card.rank == Rank.ACE and card.suit != trump:
                 return card
 
-        # 2. Lead from longest non-trump suit (to establish it)
+        # 2. Lead from longest non-trump suit (to establish it).
+        # 4.6.5: pre-fix walked `non_trumps` 3× — once to build, once per suit
+        # inside the dict-comprehension `sum(...)`, then again to filter by
+        # `best_suit`. Counter collapses that to a single pass; `most_common`
+        # also returns the count so we skip the second lookup.
         non_trumps = [c for c in legal if c.suit != trump]
         if non_trumps:
-            suit_counts = {
-                s: sum(1 for c in non_trumps if c.suit == s)
-                for s in Suit
-                if s != trump and s.is_card_suit
-            }
-            best_suit = max(suit_counts, key=lambda s: suit_counts[s])
-            if suit_counts[best_suit] > 1:
+            suit_counts = Counter(c.suit for c in non_trumps if c.suit.is_card_suit)
+            best_suit, best_n = suit_counts.most_common(1)[0]
+            if best_n > 1:
                 suit_cards = [c for c in non_trumps if c.suit == best_suit]
                 # Lead the highest card of that suit
                 return max(suit_cards, key=lambda c: trick_rank(c, trump, self._se))
@@ -510,16 +511,22 @@ class AIPlayer:
                 suit_cards[c.suit].append(c)
 
         bm = state.boss_modifiers
+        # Honors are J/9/A; drop a rank from the count if it's zeroed by a
+        # boss flag (3.9.3 — honor-counting was previously boss-blind).
+        # 4.6.4: hoisted out of the per-suit loop. The closure was being
+        # rebuilt 4× per `_hard_bid` call (once per suit) for no benefit.
+        _drop_jacks = bm.jacks_zero
+        _drop_aces = bm.aces_zero
+
+        def _is_honor(c: Card) -> bool:
+            if c.rank == Rank.JACK and _drop_jacks:
+                return False
+            if c.rank == Rank.ACE and _drop_aces:
+                return False
+            return c.rank in (Rank.JACK, Rank.NINE, Rank.ACE)
+
         for suit in card_suits:
             trump_cards = suit_cards[suit]
-            # Honors are J/9/A; drop a rank from the count if it's zeroed by a
-            # boss flag (3.9.3 — honor-counting was previously boss-blind).
-            def _is_honor(c: Card) -> bool:
-                if c.rank == Rank.JACK and bm.jacks_zero:
-                    return False
-                if c.rank == Rank.ACE and bm.aces_zero:
-                    return False
-                return c.rank in (Rank.JACK, Rank.NINE, Rank.ACE)
             honor_count = sum(1 for c in trump_cards if _is_honor(c))
             point_total = sum(card_points_with_modifiers(c, suit, bm) for c in trump_cards)
 
@@ -739,9 +746,23 @@ class AIPlayer:
             # We are losing and partner is losing.
             score -= points * 0.4
 
-        # BelAtro awareness: If partner's hand is visible, don't duplicate strength.
-        if card in self.memory.partner_hand:
-            score -= 5
+        # BelAtro awareness: If partner's hand is visible (Le Carnet / shared-
+        # void trust tier) AND partner holds a strictly stronger card in the
+        # same suit, prefer not to burn our own high card here — partner can
+        # cover the trick. 4.6.4: pre-fix this checked `card in partner_hand`
+        # which was always False (deck has 32 unique cards, hands are
+        # disjoint) so the heuristic never fired. Compare by rank within the
+        # same suit using the active trick scale (honours trump rotation
+        # under L'Anarchie via the `_se` flag).
+        if self.memory.partner_hand:
+            my_rank = trick_rank(card, trump, self._se)
+            for partner_card in self.memory.partner_hand:
+                if (
+                    partner_card.suit == card.suit
+                    and trick_rank(partner_card, trump, self._se) > my_rank
+                ):
+                    score -= 5
+                    break
 
         return score
 

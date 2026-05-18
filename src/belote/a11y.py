@@ -91,8 +91,35 @@ def announce_trick_won(winner: Seat, points: int) -> None:
     speak(f"{winner.name.lower()} wins the trick worth {points} points.")
 
 
-def announce_round_result(taker_total: int, defender_total: int, taker_team_label: str) -> None:
+def announce_contract(taker: Seat, contract_label: str, coinche_level: int = 0) -> None:
+    """Speak the locked contract at the bid→play transition (4.6.5).
+
+    `contract_label` is the human-readable trump or special form (e.g. "hearts",
+    "tout atout", "sans atout"). `coinche_level` is 0 (normal), 1 (coinched),
+    or 2 (surcoinched).
+    """
+    suffix = ""
+    if coinche_level == 1:
+        suffix = ", coinched"
+    elif coinche_level >= 2:
+        suffix = ", surcoinched"
+    speak(f"contract: {taker.name.lower()} takes {contract_label}{suffix}.")
+
+
+def announce_declaration(seat: Seat, kind: str, points: int) -> None:
+    """Speak a scored declaration (carre, sequence, belote). 4.6.5."""
+    speak(f"{seat.name.lower()} scores {kind} for {points} points.")
+
+
+def announce_round_result(
+    taker_total: int,
+    defender_total: int,
+    taker_team_label: str,
+    contract: str | None = None,
+) -> None:
+    """Round-end summary line. 4.6.5: optional `contract` adds trump context."""
+    contract_phrase = f" on {contract}" if contract else ""
     speak(
-        f"round complete. {taker_team_label} taker scores {taker_total}; "
-        f"defenders score {defender_total}."
+        f"round complete{contract_phrase}. {taker_team_label} taker "
+        f"scores {taker_total}; defenders score {defender_total}."
     )

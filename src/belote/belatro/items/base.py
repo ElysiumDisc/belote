@@ -42,6 +42,15 @@ class Edition(str, Enum):
 
 @dataclass(frozen=True)
 class JokerResult:
+    """Payload returned by a joker handler. All fields are additive.
+
+    Sign convention for `add_money` (4.6.5): positive = credit the player,
+    negative = debit (cost), zero = no-op. The payout site in
+    `belatro/main.py` routes negative values through `Economy.spend_money`;
+    do NOT use `Economy.add_money` (which now rejects negatives) directly.
+    See LePreteur in `items/jokers/economy.py` for a debit-style example.
+    """
+
     add_chips: int = 0
     add_mult: float = 0.0
     times_mult: float = 0.0
