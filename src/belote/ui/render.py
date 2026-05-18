@@ -919,7 +919,7 @@ def _build_hud(state: GameState, term_w: int, layout: LayoutPreset = STANDARD) -
         f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
         f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
         f"Trick {trick_num}/8   Taker: {taker_name}   "
-        f"{DIM}[H]Hist [T]Theme [Z]Undo{RESET}"
+        f"{DIM}[H]Hist [T]Theme [Z]Undo [I]HUD{RESET}"
     )
     bar = left + "   " + mid
     vlen_bar = visible_len(bar)
@@ -1301,6 +1301,13 @@ def patch_trick_card(
     # card before the HUD update lands. Pre-3.5.0 each card-face line + the HUD
     # update were separate writes, which produced torn frames under load.
     face = _get_card_face(card, layout=layout)
+    # NOTE: do NOT append clear_to_eol() per row. The card frame is positioned
+    # at a specific column over the felt mat, not at end-of-line; clear_to_eol
+    # would wipe felt-coloured cells to the right of every face line with the
+    # terminal's default (black) background, leaving visible grey/black bars
+    # next to every patched card. (Regression caught visually in 4.6.2 and
+    # reverted.) Row-shrink debris on terminal resize is handled by the
+    # invalidate_diff() call below — the next full display() repaints the row.
     buf = [move(row + i, col) + line for i, line in enumerate(face)]
     if force_hud:
         buf.append(move(1, 1) + _build_hud(state, term_w, layout))

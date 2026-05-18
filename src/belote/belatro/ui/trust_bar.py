@@ -39,6 +39,12 @@ class TrustBar:
 
     def render(self) -> None:
         """Render trust meter at (row 4, col 2)."""
+        # 4.6.3: gated by the BelAtro top-HUD toggle so I/V can hide the bar
+        # together with the joker strip and ante line.
+        from .announce import is_top_hud_visible
+
+        if not is_top_hud_visible():
+            return
         val = self.trust.value
         tier = self.trust.tier
         filled = "█" * val

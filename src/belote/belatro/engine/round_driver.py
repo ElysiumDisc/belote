@@ -196,8 +196,15 @@ def drive_round(
         acc.partner_tier = partner.trust.tier
 
     def _emit(event: object, s: GameState) -> GameState:
+        # 4.6.2: hot-path entry now goes through process_event (no per-event
+        # `replace()`). The state is unchanged for chips/mult/money — those
+        # live in the ledger and get sealed once at round-end via
+        # `acc.seal_round` below. joker_state IS shared with state._joker_state
+        # (installed by trigger_round_start), so classic-Belote read sites
+        # (ai.py, scoring.py, game.py) see live mutations on the SAME state
+        # object we return here.
         if acc is not None:
-            return acc.update_state(s, event)
+            acc.process_event(s, event)
         return s
 
     # Phase: BIDDING
@@ -404,9 +411,18 @@ def drive_round(
 
             # Emit declarations first if it's the first trick
             if len(state.completed_tricks) == 1:
+                # Le Mime (declarations_zero) zeros classic-scoring declaration
+                # points at `scoring.py::_carre_points` / `_sequence_points`,
+                # so the BelAtro accumulator must see zeroed points too —
+                # otherwise chips and on_declaration jokers (LeMathématicien,
+                # QuinteRoyale) keyed on event.points would credit value that
+                # the actual round scoring discards. TierceCharger keys on
+                # declaration_type only and is intentionally unaffected so the
+                # "announce" promise of its description holds even under LeMime.
+                declarations_zeroed = state.boss_modifiers.declarations_zero
                 for decl in state.declarations:
                     pts = 0
-                    if decl.detail and decl.kind in ("sequence", "carre"):
+                    if not declarations_zeroed and decl.detail and decl.kind in ("sequence", "carre"):
                         pts = get_declaration_points([decl.detail])
                     state = _emit(
                         DeclarationScoredEvent(
@@ -434,13 +450,20 @@ def drive_round(
             )
             # Le Fantôme partner personality: "Every trick they win gives you
             # +$1." Personalities don't subscribe to the event bus the way
-            # jokers do, so payout is wired through state._bonus_money here.
+            # jokers do, so payout is wired through the accumulator's ledger.
+            # 4.6.2: previously did `replace(state, _bonus_money=...)` here —
+            # but state._bonus_money is stale until seal_round under the new
+            # ledger model. Writing to acc._ledger.money keeps the source of
+            # truth consistent; HUD reads via acc.current_money() see it.
             if (
                 partner is not None
                 and getattr(partner.personality, "id", None) == "le_fantome"
                 and winner == Seat.NORTH
             ):
-                state = replace(state, _bonus_money=state._bonus_money + 1)
+                if acc is not None and acc._ledger is not None:
+                    acc._ledger.money += 1
+                else:
+                    state = replace(state, _bonus_money=state._bonus_money + 1)
             ui_callbacks.on_trick_end(state, winner, points)
 
     # Round End / Scoring
@@ -469,6 +492,13 @@ def drive_round(
             })
         ui_callbacks.on_round_end(breakdown)
 
+    # 4.6.2: seal the round so the returned state carries the ledger's
+    # chips/mult/money. One `replace()` per round (down from ~25 pre-4.6.2).
+    # `belatro/main.py::_play_blind` inspects final_state._bonus_money and
+    # final_state._joker_state for round-end payout flags; sealing here
+    # makes those reads see the canonical sealed values.
+    if acc is not None:
+        state = acc.seal_round(state)
     return state
 
 

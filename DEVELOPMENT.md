@@ -84,17 +84,19 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (790 tests expected)
+# Full test suite (933 tests expected)
 PYTHONPATH=src pytest
 ```
 
-Current baseline (4.6.1):
+Current baseline (4.6.3):
 
-- **790 tests** passing (4.6.0 had 787; +3 in 4.6.1: `test_show_main_menu_invalidates_diff_on_exit`, `test_show_theme_selector_invalidates_diff_on_exit`, `test_shop_render_writes_once_per_frame` — all appended to `tests/test_render_diff.py`).
-- 4.6.1 is a third audit / hardening pass over 4.6.0. Two real changes: `src/belote/ui/menu.py` now calls `invalidate_diff()` on every exit path of `show_theme_selector`, `show_ai_config`, `show_main_menu`, and `show_final_screen` — closing the same overlay-bypass diff-skip class of bug that 4.0.0 fixed for `show_help`/`show_history`/`show_rules` (latent because all four menu paths run before/after the gameplay `display()` loop and the failure mode only surfaces on the second game of a session). `src/belote/belatro/ui/shop.py::_render` now batches its ~16 per-frame `print()` calls into a single `sys.stdout.write` + `flush`, matching the single-write convention used in `belatro/ui/hud.py`, `announce.py`, and `prompts.py::show_help`. No mechanic behaviour changes. The audit verified-clean a long list of previously-flagged candidates (boss-modifier per-round reset by design, L'Infiltré seat-walking correct, LeCollectionneur re_emit guard already added in 4.5.1, `_architecte_ns_annonce_cards` live-read by L'Architecte's `annonce_cash_x2` branch, zero-rank flag three-site consistency, render diff layer, voucher idempotency, A11y, WASD reader aliasing).
+- **933 tests** passing (4.6.2 had 926; +7 in 4.6.3: `tests/belatro/test_hud_toggle.py` pins the new `I`/`V` BelAtro top-HUD toggle).
+- 4.6.3 is a UX fix: pressing `I` (or `V`) now toggles the BelAtro top-HUD overlay (joker pip strip, ante/blind/target line, chips×mult score, trust bar, synergy tooltip) so the classic Belote HUD's `Trump:` and `Taker:` fields on row 1 are reachable. Pre-fix, `render_joker_pip_strip` at `move(1, 2)` unconditionally painted over the leading ~24 chars of the classic HUD produced by `_build_hud()`, clobbering `T:♥` with no way to hide the overlay; the `I` key was already wired to `Key.OVERLAY` but only flashed a transient score popup. New flag `_top_hud_visible` in `src/belote/belatro/ui/announce.py` is consulted by `BelAtroHUD.render`, `render_joker_pip_strip`, `render_synergy_tooltip`, and `TrustBar.render`. The verbose classic-HUD hint string at `src/belote/ui/render.py:922` gained `[I]HUD` for discoverability. Auto trick-end score popup at `on_trick_end()` is unchanged.
 
 Previous baselines:
 
+- 4.6.2 (926 tests): deep-audit / hardening pass. Real changes: (1) `src/belote/belatro/engine/round_driver.py` zeros `DeclarationScoredEvent.points` when `state.boss_modifiers.declarations_zero` is set — pre-fix, Le Mime's "declarations score 0" promise was leaking into the BelAtro accumulator path (raw `event.points` was added to chips at `core/scoring.py:324` and on_declaration jokers like LeMathematicien / QuinteRoyale fired on raw points); (2) `src/belote/belatro/core/scoring.py:197` clamps `partner_tier` to `[0, 4]` defensively so a corrupted save state (tier > 4) degrades to tier 4 rather than crashing the round with `IndexError`. New audit-matrix test files `tests/belatro/test_joker_contracts.py` and `tests/belatro/test_boss_contracts.py` (+136 tests over 4.6.1).
+- 4.6.1 (790 tests): third audit pass — `src/belote/ui/menu.py` `invalidate_diff()` on every overlay-bypass exit; `belatro/ui/shop.py::_render` batched into a single `sys.stdout.write` + `flush`.
 - 4.6.0 (787 tests): removed the Grimaud `card_detail` overlay — module, `Key.CARD_DETAIL` enum value + `f` binding, prompt-card / prompt-bid case arms, the help-screen `[F]` entry, the `tests/test_card_detail.py` suite (5 tests), and the `GRIMAUD Standard Playing-Cards-1898.png` reference image. `render.invalidate_diff()` preserved (still used by `show_help`/`show_history`/`show_rules`).
 - 4.5.1 (792 tests): audit / hardening pass over 4.5.0. `LeCollectionneur.on_trick_won` re_emit guard, L'Architecte deck description NS-won qualifier, `_record_belote_announcement` returns `tuple[bool, bool]` directly. Two clarifying comments (L'Infiltré TOUT_ATOUT degeneracy, LePrêteur snapshot semantics).
 - 4.5.0 (790 tests): WASD nav at the reader source layer, bid quick-keys remapped A→X and S→N, two new starting decks (L'Infiltré, L'Architecte), six new "Conditional Engine" jokers. `ScoreAccumulator.trigger_round_start` now applies `JokerResult` returns from `on_round_start`.

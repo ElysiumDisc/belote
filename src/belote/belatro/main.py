@@ -202,12 +202,18 @@ class BelAtroGame:
                 self.reader = reader
 
             def _show_overlay(self, state: GameState) -> None:
-                from ..ui.render import display
+                # 4.6.3: I/V now toggles BelAtro top HUD visibility (joker pip
+                # strip, ante line, chips×mult, trust bar, synergy tooltip).
+                # When hidden, the classic HUD's `Trump:` / `Taker:` fields on
+                # row 1 are no longer painted over. `invalidate_diff()` is
+                # required so `display()` re-paints row 1 from scratch instead
+                # of diffing against the cached frame that still believed the
+                # joker strip occupied cols 2–25.
+                from ..ui.render import display, invalidate_diff
+                from .ui.announce import toggle_top_hud
 
-                display(state, show_north_hand=show_north)
-                hud.render(acc, state)
-                trust_bar.render()
-                BelAtroAnnounce.score_popup(acc.get_popup_lines(state), self.reader)
+                toggle_top_hud()
+                invalidate_diff()
                 display(state, show_north_hand=show_north)
                 hud.render(acc, state)
                 trust_bar.render()

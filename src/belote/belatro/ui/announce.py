@@ -16,6 +16,13 @@ OVERLAY = "OVERLAY"
 
 _overlay_visible: bool = False
 
+# 4.6.3: separate flag for the BelAtro top-row overlays (joker pip strip,
+# ante/blind/target line, chips×mult score, trust bar, synergy tooltip).
+# Default visible; toggled by the I/V key. Kept independent of
+# `_overlay_visible` because that flag is owned by the score-popup transient
+# and gets flipped on/off inside `score_popup()`.
+_top_hud_visible: bool = True
+
 
 def is_overlay_visible() -> bool:
     return _overlay_visible
@@ -30,6 +37,21 @@ def reset_overlay_state() -> None:
     """Reset overlay state to False. Call between tests to prevent state leakage."""
     global _overlay_visible
     _overlay_visible = False
+
+
+def is_top_hud_visible() -> bool:
+    return _top_hud_visible
+
+
+def toggle_top_hud() -> None:
+    global _top_hud_visible
+    _top_hud_visible = not _top_hud_visible
+
+
+def reset_top_hud_state() -> None:
+    """Reset top-HUD visibility to True. Call between tests to prevent leakage."""
+    global _top_hud_visible
+    _top_hud_visible = True
 
 
 class BelAtroAnnounce:

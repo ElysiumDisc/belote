@@ -103,6 +103,13 @@ class BelAtroHUD:
         """Render HUD elements, with verbosity scaled to the current layout."""
         from belote.ui.render import get_term_size
 
+        # 4.6.3: I/V toggles the top HUD off so the classic row-1 bar (Trump:
+        # … / Taker: …) isn't covered by the joker pip strip + score line.
+        from .announce import is_top_hud_visible
+
+        if not is_top_hud_visible():
+            return
+
         term_w, term_h = get_term_size()
         layout = choose_layout(term_w, term_h)
         run = self.run
@@ -167,7 +174,15 @@ class BelAtroHUD:
                 col = max(2, term_w - len(disclaimer) - 2)
                 parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
             else:
-                score_str = f"{state._chips} x {state._mult:.1f} = {acc.get_total(state)}"
+                # 4.6.2: read live ledger values via the accumulator rather
+                # than state._chips/_mult — those are stale between events now
+                # (sealed once at round-end via acc.seal_round). Cost: zero
+                # replaces per HUD render.
+                score_str = (
+                    f"{acc.current_chips(state)} x "
+                    f"{acc.current_mult(state):.1f} = "
+                    f"{acc.get_total(state)}"
+                )
                 score_col = max(2, term_w - len(score_str) - 2)
                 parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
 
@@ -223,7 +238,13 @@ class BelAtroHUD:
                 col = max(2, term_w - len(disclaimer) - 2)
                 parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
             else:
-                score_str = f"{state._chips}×{state._mult:.1f}={acc.get_total(state)}"
+                # 4.6.2: live ledger values via the accumulator (see standard
+                # branch for rationale).
+                score_str = (
+                    f"{acc.current_chips(state)}×"
+                    f"{acc.current_mult(state):.1f}="
+                    f"{acc.get_total(state)}"
+                )
                 score_col = max(2, term_w - len(score_str) - 2)
                 parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
 
@@ -267,6 +288,10 @@ def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
 
     No-ops when `term_w < 24` (not enough room for a 5-slot strip).
     """
+    from .announce import is_top_hud_visible
+
+    if not is_top_hud_visible():
+        return
     if term_w < 24:
         return
     slots = max(1, run.joker_slots)
@@ -307,6 +332,10 @@ def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) 
     No-ops when there are no active synergies. Truncates each line to the
     available width so we never wrap.
     """
+    from .announce import is_top_hud_visible
+
+    if not is_top_hud_visible():
+        return
     pairs = detect_synergies_full(list(jokers))
     if not pairs:
         return
