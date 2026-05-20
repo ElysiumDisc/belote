@@ -9,6 +9,7 @@ re-dealt round bids cleanly.
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 
 from belote.deck import Suit
 from belote.game import (
@@ -112,3 +113,52 @@ def test_all_pass_at_each_starting_dealer() -> None:
             f"seed={seed}: dealer didn't advance from {dealer_before}"
         )
         assert state.dealer in (Seat.SOUTH, Seat.WEST, Seat.NORTH, Seat.EAST)
+
+
+def test_litige_pool_survives_all_pass_redeal() -> None:
+    """A pending litige pool must persist across an all-pass redeal. The
+    redeal does not call `apply_round_score`, so it cannot zero the pool;
+    `reset_round_fields` is explicitly contracted not to touch
+    `litige_points`. Only a non-litige scoring round consumes the pool.
+    """
+    state = new_game()
+    state = start_round(state, random.Random(29))
+    # Simulate a prior litige round having left 92 pts in the pool.
+    state = replace(state, litige_points=92)
+    assert state.litige_points == 92
+
+    # All-pass the current bidding round → forced redeal.
+    for _ in range(8):
+        state = process_bid(state, None)
+    assert state.phase == Phase.DEAL
+    assert state.litige_points == 92, (
+        "Pending litige pool was zeroed by all-pass; it must survive until "
+        "the next non-litige scoring round consumes it."
+    )
+
+    # Re-enter the next deal — start_round → reset_round_fields must NOT
+    # touch litige_points either.
+    state = start_round(state, random.Random(31))
+    assert state.phase == Phase.BIDDING
+    assert state.litige_points == 92, (
+        "reset_round_fields zeroed litige_points; the field is contracted to "
+        "carry across rounds (including all-pass redeals)."
+    )
+
+
+def test_litige_pool_survives_two_consecutive_all_pass_redeals() -> None:
+    """Two consecutive all-pass redeals still preserve the pool. Pins
+    against a future regression that resets `litige_points` on the second
+    pass through `start_round`."""
+    state = new_game()
+    state = start_round(state, random.Random(37))
+    state = replace(state, litige_points=162)
+
+    for _ in range(8):
+        state = process_bid(state, None)
+    state = start_round(state, random.Random(41))
+    for _ in range(8):
+        state = process_bid(state, None)
+    state = start_round(state, random.Random(43))
+
+    assert state.litige_points == 162

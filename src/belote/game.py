@@ -259,7 +259,13 @@ class GameState:
 
 
 def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
-    """Return a new state with round-specific fields reset to defaults."""
+    """Return a new state with round-specific fields reset to defaults.
+
+    `litige_points` is deliberately NOT reset here. The litige pool survives
+    across rounds — including all-pass redeals — until a non-litige scoring
+    round consumes it (see `scoring.py::apply_round_score`). Tests in
+    `tests/test_bidding_all_pass.py` pin this contract.
+    """
     reset_values: dict[str, object] = {
         "trump": None,
         "taker": None,

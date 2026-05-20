@@ -84,7 +84,7 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (999 tests expected)
+# Full test suite (1003 tests expected)
 PYTHONPATH=src pytest
 ```
 

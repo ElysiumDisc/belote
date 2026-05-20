@@ -137,6 +137,39 @@ def test_boss_invert_scoring():
     assert any("Malédiction" in m for m in breakdown.messages)
 
 
+def test_boss_invert_scoring_4_4_tie_zeros_taker():
+    """Malédiction with a 4-4 trick tie: the taker failed to break the tie
+    under the curse, so the curse falls on them. Pre-fix this fell through
+    and zeroed neither side."""
+    ns_win = (
+        TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.JACK)),
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.SEVEN)),
+        TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.EIGHT)),
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.NINE)),
+    )
+    ew_win = (
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),
+        TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.QUEEN)),
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
+        TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.TEN)),
+    )
+    state = GameState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        boss_modifiers=BossModifiers(invert_scoring=True),
+        completed_tricks=tuple([ns_win] * 4 + [ew_win] * 4),
+        last_trick_winner=Seat.EAST,
+    )
+    breakdown = score_round(state)
+    assert breakdown.taker_total == 0, (
+        "Malédiction 4-4 tie should zero the taker (the cursed side that "
+        "failed to break the tie)."
+    )
+    assert any("Malédiction" in m for m in breakdown.messages)
+
+
 # ── La Rupture: is_capot must honor Rupture in explicit-tricks branch ─────
 
 

@@ -57,6 +57,20 @@ def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
 
 
+def _contract_word(state: GameState) -> str | None:
+    """Render the active contract as the lowercase a11y phrase used by the
+    screen-reader announce calls. Returns None when no contract is set
+    (caller decides whether to substitute "no trump" or omit the slot).
+    """
+    if state.contract == "sans_atout":
+        return "sans atout"
+    if state.trump == Suit.TOUT_ATOUT:
+        return "tout atout"
+    if state.trump is not None:
+        return a11y._suit_word(state.trump.symbol)
+    return None
+
+
 def _undo_pop_to_south(
     history_stack: list[GameState], stack_base: int
 ) -> GameState | None:
@@ -374,15 +388,7 @@ def run_round(
         # Belote has no coinche concept — that lives in BelAtro's
         # `round_driver` only, so coinche_level defaults to 0 here.
         if current.taker is not None:
-            if current.contract == "sans_atout":
-                _bid_word = "sans atout"
-            elif current.trump == Suit.TOUT_ATOUT:
-                _bid_word = "tout atout"
-            elif current.trump is not None:
-                _bid_word = a11y._suit_word(current.trump.symbol)
-            else:
-                _bid_word = "no trump"
-            a11y.announce_contract(current.taker, _bid_word)
+            a11y.announce_contract(current.taker, _contract_word(current) or "no trump")
 
         # Play Phase
         res_play = run_play(
@@ -443,20 +449,11 @@ def run_round(
             # 4.6.5 a11y: speak the round result. Helper existed since 3.0.0
             # but had no caller; screen-reader users heard trick-by-trick
             # results without a round-summary line.
-            _round_contract: str | None
-            if current.contract == "sans_atout":
-                _round_contract = "sans atout"
-            elif current.trump == Suit.TOUT_ATOUT:
-                _round_contract = "tout atout"
-            elif current.trump is not None:
-                _round_contract = a11y._suit_word(current.trump.symbol)
-            else:
-                _round_contract = None
             a11y.announce_round_result(
                 breakdown.taker_total,
                 breakdown.defender_total,
                 "north-south" if breakdown.taker_team == 0 else "east-west",
-                contract=_round_contract,
+                contract=_contract_word(current),
             )
 
             # Update global stats

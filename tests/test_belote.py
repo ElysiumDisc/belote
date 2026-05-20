@@ -779,9 +779,12 @@ class TestBidFailure:
 
 
 class TestLastTrickBonus:
-    def test_last_trick_bonus_applied(self) -> None:
+    def test_capot_subsumes_last_trick_bonus(self) -> None:
+        """Capot scoring is a fixed base — the +10 dix-de-der is folded in,
+        not added on top. Pins both `is_capot` AND the numeric taker total
+        so a regression that breaks the capot constant (or accidentally
+        adds the +10 twice) is caught."""
         trump = Suit.SPADES
-        # Capot scenario: last trick bonus is subsumed by capot scoring
         trick_data = [
             (
                 Card(Suit.SPADES, Rank.JACK),
@@ -864,8 +867,94 @@ class TestLastTrickBonus:
         )
 
         breakdown = score_round(state)
-        # Capot triggers, so last trick bonus is subsumed
         assert breakdown.is_capot is True
+        # Capot base is the entire taker total — no separate +10 last-trick
+        # row stacked on top. (CAPOT_BASE already accounts for the bonus.)
+        assert breakdown.taker_total == CAPOT_BASE
+
+    def test_last_trick_bonus_applied_in_normal_round(self) -> None:
+        """Non-capot round where NS (the taker) wins the final trick: the
+        table_taker_pts must include the +10 dix-de-der bonus. Pins the
+        actual mechanic the original test name promised."""
+        trump = Suit.SPADES
+        # 8 distinct tricks covering all 32 cards. NS wins tricks 1, 2, 7, 8;
+        # EW wins tricks 3, 4, 5, 6. Last trick (8) goes to SOUTH → +10 lands
+        # on the taker (NS) side.
+        # NS card points: 11 + 19 + 24 + 38 = 92  ;  + 10 dix-de-der = 102
+        # EW card points: 10 + 20 + 10 + 20      = 60
+        # 92 + 60 + 10 = 162 (TOTAL_POINTS + LAST_TRICK_BONUS) ✓
+        trick_data = [
+            # T1: ♣ lead, SOUTH wins A♣ — 11 pts
+            (Card(Suit.CLUBS, Rank.ACE), Card(Suit.CLUBS, Rank.SEVEN),
+             Card(Suit.CLUBS, Rank.EIGHT), Card(Suit.CLUBS, Rank.NINE)),
+            # T2: ♣ lead, SOUTH wins 10♣ — 19 pts
+            (Card(Suit.CLUBS, Rank.TEN), Card(Suit.CLUBS, Rank.QUEEN),
+             Card(Suit.CLUBS, Rank.KING), Card(Suit.CLUBS, Rank.JACK)),
+            # T3: ♥ lead, EAST wins 10♥ — 10 pts to EW
+            (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.HEARTS, Rank.EIGHT),
+             Card(Suit.HEARTS, Rank.NINE), Card(Suit.HEARTS, Rank.TEN)),
+            # T4: ♥ lead, EAST wins A♥ — 20 pts to EW
+            (Card(Suit.HEARTS, Rank.JACK), Card(Suit.HEARTS, Rank.QUEEN),
+             Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.ACE)),
+            # T5: ♦ lead, EAST wins 10♦ — 10 pts to EW
+            (Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.DIAMONDS, Rank.EIGHT),
+             Card(Suit.DIAMONDS, Rank.NINE), Card(Suit.DIAMONDS, Rank.TEN)),
+            # T6: ♦ lead, EAST wins A♦ — 20 pts to EW
+            (Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.DIAMONDS, Rank.QUEEN),
+             Card(Suit.DIAMONDS, Rank.KING), Card(Suit.DIAMONDS, Rank.ACE)),
+            # T7: ♠ TRUMP lead, NORTH wins 9♠ (trump rank: J>9>A>10>K>Q>8>7)
+            # — 24 pts to NS
+            (Card(Suit.SPADES, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT),
+             Card(Suit.SPADES, Rank.NINE), Card(Suit.SPADES, Rank.TEN)),
+            # T8 (last): ♠ TRUMP lead, SOUTH wins J♠ — 38 pts + 10 dix-de-der
+            (Card(Suit.SPADES, Rank.JACK), Card(Suit.SPADES, Rank.QUEEN),
+             Card(Suit.SPADES, Rank.KING), Card(Suit.SPADES, Rank.ACE)),
+        ]
+        tricks = tuple(
+            tuple(TrickCard(list(Seat)[i], cards[i]) for i in range(4))
+            for cards in trick_data
+        )
+
+        state = GameState(
+            hands=tuple(() for _ in range(4)),
+            trump=trump,
+            dealer=Seat.SOUTH,
+            leader=Seat.SOUTH,
+            turn=Seat.SOUTH,
+            phase=Phase.SCORING,
+            bids=(),
+            taker=Seat.SOUTH,
+            current_trick=(),
+            completed_tricks=tricks,
+            last_trick_winner=Seat.SOUTH,
+            declarations=(),
+            team_scores=(0, 0),
+            current_round_points=(0, 0),
+            score_history=(),
+            target=1000,
+            up_card=None,
+            remaining_cards=(),
+            bidder_index=0,
+            bidding_round=1,
+            announced=None,
+            belote_tracker=(False, False),
+            first_trick_done=True,
+        )
+
+        breakdown = score_round(state)
+        assert breakdown.is_capot is False
+        assert breakdown.last_trick_team == 0, (
+            "Fixture invariant: NS must win the last trick for the +10 to "
+            "land on the taker side."
+        )
+        # Card points NS won (92) + 10 dix-de-der = 102
+        assert breakdown.table_taker_pts == 92 + LAST_TRICK_BONUS
+        assert breakdown.table_defender_pts == 60
+        # Conservation: every point on the table is accounted for.
+        assert (
+            breakdown.table_taker_pts + breakdown.table_defender_pts
+            == TOTAL_POINTS + LAST_TRICK_BONUS
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -919,11 +1008,18 @@ class TestPointConservation:
         )
 
         breakdown = score_round(state)
-        if not breakdown.is_capot:
-            # Use table card points
-            total = breakdown.table_taker_pts + breakdown.table_defender_pts
-            expected = TOTAL_POINTS + LAST_TRICK_BONUS
-            assert total == expected, f"Expected {expected}, got {total}"
+        # Pin the fixture-invariant: the deterministic `make_deck()` ordering
+        # used here MUST produce a non-capot round, otherwise the conservation
+        # check below is meaningless. Pre-fix this was a silent `if not capot`
+        # which made the test vacuous if a future change to `make_deck()`
+        # ordering flipped the outcome.
+        assert not breakdown.is_capot, (
+            "Fixture assumption violated: make_deck() trick layout produced "
+            "a capot — the conservation check needs a non-capot scenario."
+        )
+        total = breakdown.table_taker_pts + breakdown.table_defender_pts
+        expected = TOTAL_POINTS + LAST_TRICK_BONUS
+        assert total == expected, f"Expected {expected}, got {total}"
 
 
 # ---------------------------------------------------------------------------

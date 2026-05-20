@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.2] - 2026-05-20
+
+Patch release: external-model audit verification pass. A prior audit (pasted
+from another LLM) flagged ~30 issues across bugs / perf / quality. Verifying
+each claim against the live code rejected the false positives (including one
+HIGH-severity claim — "160 event dispatches per round" — that the model
+invented out of whole cloth) and shipped only the genuinely confirmed
+findings. Two real correctness gaps the prior audit missed were caught via
+fresh-additions review. All baselines green: `ruff` 0 violations,
+`mypy --strict` 0 errors, `pytest` 1003/1003.
+
+### Fixed
+
+- **(Bug) Malédiction (`invert_scoring`) 4-4 trick tie.** Pre-fix the boss
+  flag zeroed the team that won MORE tricks, but a 4-4 split fell through
+  both branches and neither side was zeroed — both teams kept their full
+  scores under the curse. Rule chosen: the taker is zeroed (the cursed
+  side failed to break the tie). `scoring.py::_apply_invert_scoring` adds
+  an `else` branch; pinned by
+  `test_boss_invert_scoring_4_4_tie_zeros_taker` in
+  `tests/belatro/test_boss_modifiers_integration.py`.
+
+### Changed
+
+- **`bm: object` → `bm: BossModifiers`** on `_trick_zeroed_by_ban_clubs`,
+  `_card_points_with_zero_ranks`, `card_points_with_modifiers`, and
+  `_trick_points_with_modifiers` (`scoring.py`). All four helpers were
+  typed as `object` with `getattr(bm, "ban_clubs", False)` defensive
+  lookups; the actual callsites always pass `BossModifiers`. Now type-
+  safe attribute access — `mypy --strict` enforces every new field is
+  spelled correctly.
+- **`UICallbacks` extracted from `BelAtroGame._play_blind`** to a module-
+  top class in `belatro/main.py`. The nested class spanned 189 lines and
+  captured 8 closure variables (`run`, `profile`, `save_manager`, `hud`,
+  `acc`, `trust_bar`, `show_north`, plus a dead-write `last_display_state`
+  cell). Now an explicit constructor; `last_display_state` removed
+  (write-only, never read).
+- **Litige pool carry across all-pass redeals is now documented.** Added
+  a `reset_round_fields` docstring entry calling out that `litige_points`
+  is deliberately NOT in the reset list — the pool survives across
+  rounds (including all-pass redeals) until a non-litige scoring round
+  consumes it. Pinned by
+  `test_litige_pool_survives_all_pass_redeal` +
+  `test_litige_pool_survives_two_consecutive_all_pass_redeals` in
+  `tests/test_bidding_all_pass.py`.
+
+### Performance
+
+- **`detect_sequences` is now `@lru_cache(128)`.** Microbench placed it
+  at ~25% of `score_round` cost when `initial_hands` is populated, and
+  `get_declarations` runs the same 4 hand tuples through the helper
+  twice per round (once at bid-acceptance time in `game.py`, once during
+  `score_round` itself). Cache hits eliminate the second pass.
+  `score_round` macrobench: 300 µs → 227 µs (~24% on the full path).
+  Cards are frozen dataclasses (hashable); all callers treat the
+  returned list as read-only.
+
+### Tests strengthened
+
+- **`test_last_trick_bonus_applied`** (`tests/test_belote.py`) → split
+  into `test_capot_subsumes_last_trick_bonus` (asserts the actual
+  `CAPOT_BASE` total) and new `test_last_trick_bonus_applied_in_normal_round`
+  (deterministic 4-NS/4-EW non-capot fixture proving the +10 dix-de-der
+  actually lands on the taker side). Previously only asserted `is_capot
+  is True` — the +10 mechanic the test name promised was untested.
+- **`test_non_capot_points_sum_162`** (`tests/test_belote.py`) →
+  conditional `if not breakdown.is_capot:` replaced with explicit
+  `assert not breakdown.is_capot` plus the unconditional conservation
+  check. The old form passed vacuously if `make_deck()` ordering ever
+  produced a capot.
+
+### Internal
+
+- **Contract→word a11y mapping deduplicated** to a `_contract_word(state)`
+  helper in `gameflow.py`. Two near-identical 8-line blocks collapsed
+  into one helper call each (bid→play transition; round-result speak).
+
+### Documentation
+
+- README test count claims and CHANGELOG / DEVELOPMENT references
+  updated 999 → 1003.
+
+### Verified-false audit claims (re-investigate at your peril)
+
+For the record so the next audit cycle doesn't relitigate items the
+external model flagged but the code disagreed with:
+
+- `partner()` if-chain vs modular arithmetic — style only, not a bug.
+- `start_round` "doesn't reset belote_holders" — self-refuted (line 308
+  passes `belote_holders={}`).
+- Score-animation labels "confusing" — `gameflow.py:458` already labels
+  by `breakdown.taker_team`.
+- `_empty_breakdown` taker_team default — only returned on contract-
+  inactive states; harmless.
+- `BelAtroRun.consume()` "removes before use" — wrapped in
+  `contextlib.suppress(ValueError)`, semantically correct.
+- `_bonus_money` "race" — Le Fantôme writes to `acc._ledger.money`
+  directly since 4.6.2; main.py only consumes seal_round-routed amounts.
+- "160 event dispatches per round" — false. Jokers subscribe to
+  `TrickWonEvent` / `BeloteAnnouncedEvent` / `DeclarationScoredEvent`
+  only; per-card emit doesn't iterate jokers. Real count is ~85-100
+  dispatches per round and they're already O(jokers × events).
+- LeRebelle / RebeloteEcho / TierceCharger ungated under boss flags —
+  verified gated. `game.py:907` short-circuits `BeloteAnnouncedEvent`
+  under `no_belote`; `round_driver.py:467-473` documents
+  TierceCharger's intentional un-gating; LeMathématicien / QuinteRoyale
+  read `event.points` which Le Mime forces to 0.
+
 ## [4.7.1] - 2026-05-19
 
 Patch release: post-4.7.0 audit pass that found two latent correctness

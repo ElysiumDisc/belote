@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TypedDict
 
 from .config import GLOBAL_CONFIG
 from .deck import Card, Contract, Rank, Suit
 from .deck import card_points as card_points_fn
 from .game import (
+    BossModifiers,
     Carre,
     Declaration,
     GameState,
@@ -115,11 +117,21 @@ def detect_belote(hand: tuple[Card, ...], trump: Suit) -> bool:
     return king in hand and queen in hand
 
 
+@lru_cache(maxsize=128)
 def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
     """Find all maximal sequences (tierce/quarte/quinte) in a hand.
 
     Sequences are based on rank order 7<8<9<10<J<Q<K<A within a single suit.
     Only sequences of length >= 3 count.
+
+    Cached on the input hand tuple: detect_sequences is ~25% of `score_round`
+    cost (measured 4.7.2), and the same `initial_hands` tuples flow through
+    multiple call paths per round (`get_declarations` at bid-acceptance time
+    in `game.py`, then again from `_detect_all_declarations` during scoring).
+    Cards are frozen dataclasses, so tuple-of-card is hashable. The returned
+    list is treated as read-only by every caller — `decls.extend(seqs)` and
+    dict-storage are non-mutating. maxsize=128 covers ~32 full rounds before
+    eviction (4 seats × 32).
     """
     # Group cards by suit
     by_suit: dict[Suit, list[int]] = {}
@@ -476,18 +488,16 @@ def _detect_all_declarations(
 
 
 def _trick_zeroed_by_ban_clubs(
-    trick: tuple[TrickCard, ...], bm: object
+    trick: tuple[TrickCard, ...], bm: BossModifiers
 ) -> bool:
     """``ban_clubs`` zeros the entire trick if ANY card is a club. Matches
     the rule in `_calculate_base_points` — earlier the separate-scoring
     branch checked only the lead card and silently awarded points for
     off-lead clubs."""
-    return bool(getattr(bm, "ban_clubs", False)) and any(
-        tc.card.suit == Suit.CLUBS for tc in trick
-    )
+    return bm.ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick)
 
 
-def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: object) -> int:
+def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: BossModifiers) -> int:
     """Per-card point value after applying every active zero-rank boss flag.
 
     When a new zero-rank flag is added to BossModifiers, this is the only
@@ -495,20 +505,20 @@ def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: object) -> 
     to `card_points` for correctness even though current point tables zero
     those cards anyway."""
     r = card.rank
-    if getattr(bm, "kings_zero", False) and r == Rank.KING:
+    if bm.kings_zero and r == Rank.KING:
         return 0
-    if getattr(bm, "tens_zero", False) and r == Rank.TEN:
+    if bm.tens_zero and r == Rank.TEN:
         return 0
-    if getattr(bm, "aces_zero", False) and r == Rank.ACE:
+    if bm.aces_zero and r == Rank.ACE:
         return 0
-    if getattr(bm, "jacks_zero", False) and r == Rank.JACK:
+    if bm.jacks_zero and r == Rank.JACK:
         return 0
-    if getattr(bm, "ban_clubs", False) and card.suit == Suit.CLUBS:
+    if bm.ban_clubs and card.suit == Suit.CLUBS:
         return 0
-    return card_points_fn(card, trump, getattr(bm, "seven_eight_trump", False))
+    return card_points_fn(card, trump, bm.seven_eight_trump)
 
 
-def card_points_with_modifiers(card: Card, trump: Suit | None, bm: object) -> int:
+def card_points_with_modifiers(card: Card, trump: Suit | None, bm: BossModifiers) -> int:
     """Public helper: per-card point value with active zero-rank boss flags.
 
     Mirrors `trick_card_points` (per-trick canonical helper) at the per-card
@@ -521,7 +531,7 @@ def card_points_with_modifiers(card: Card, trump: Suit | None, bm: object) -> in
 
 
 def _trick_points_with_modifiers(
-    trick: tuple[TrickCard, ...], trump: Suit | None, bm: object
+    trick: tuple[TrickCard, ...], trump: Suit | None, bm: BossModifiers
 ) -> int:
     """Total card points for a single trick after every boss modifier."""
     if not trick:
@@ -900,6 +910,11 @@ def _score_normal_outcome(
         elif defender_tricks > t_tricks:
             defender_total = 0
             messages.append("Malédiction: Defense won more tricks!")
+        else:
+            # 4-4 tie: the taker failed to break the tie under Malédiction,
+            # so the curse falls on them. Treated as a contract failure flavor.
+            taker_total = 0
+            messages.append("Malédiction: 4-4 tie — taker cursed!")
 
     return ScoringBreakdown(
         taker_team=ctx.taker_team,
