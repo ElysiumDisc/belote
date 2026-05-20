@@ -645,3 +645,94 @@ def test_winning_strategy_penalises_when_partner_has_stronger_same_suit() -> Non
         f"weaker same-suit card; got delta={delta}. The pre-4.6.4 "
         f"`card in partner_hand` identity check was dead code."
     )
+
+
+def test_winning_strategy_partner_hand_uses_nontrump_order_under_sa() -> None:
+    """4.7.1 B1: under Sans Atout the partner-hand same-suit comparison must
+    use `_NONTRUMP_ORDER`, not `trick_rank(card, None, ...)`.
+
+    Today `trick_rank` happens to collapse to the same ordering when
+    `trump=None`, so the bug is benign. The pin guards against a future
+    divergence: we monkeypatch `trick_rank` to a sentinel that would skew
+    the comparison if accidentally called, and verify the SA partner-hand
+    penalty still fires correctly (proving the SA branch took the
+    `_NONTRUMP_ORDER` path and never touched `trick_rank`).
+    """
+    from belote import ai as ai_module
+    from belote.deck import Contract
+
+    player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
+    player._se = False
+
+    # Under SA: SOUTH holds K♠, partner holds A♠ (strictly stronger same
+    # suit). The -5 penalty must fire. Lead is EAST's 8♠.
+    my_card = Card(Suit.SPADES, Rank.KING)
+    partner_stronger = Card(Suit.SPADES, Rank.ACE)
+    trick = (TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.EIGHT)),)
+    state = GameState(
+        hands=((my_card,), (), (), ()),
+        turn=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        trump=None,
+        contract=Contract.SANS_ATOUT,
+    )
+
+    player.memory.partner_hand = {partner_stronger}
+
+    # Poison `trick_rank`: if the SA branch erroneously calls it, the
+    # partner-hand comparison will silently mis-rank (returning 0 for every
+    # card) and the -5 penalty will not fire. The is_sa=True branch must
+    # not reach this poisoned helper for the partner-hand block.
+    sentinel_calls: list[tuple[Card, object, bool]] = []
+
+    def _poisoned_trick_rank(card, trump, se=False):  # type: ignore[no-untyped-def]
+        sentinel_calls.append((card, trump, se))
+        return 0
+
+    with unittest.mock.patch.object(ai_module, "trick_rank", _poisoned_trick_rank):
+        score_with_partner = player._score_winning_strategy(
+            my_card, state, None, trick, partner_winning=False, points=4, is_sa=True,
+        )
+        player.memory.partner_hand = set()  # baseline: no penalty
+        score_no_partner = player._score_winning_strategy(
+            my_card, state, None, trick, partner_winning=False, points=4, is_sa=True,
+        )
+
+    # Penalty fired (-5) only when partner-hand had the stronger card.
+    delta = score_no_partner - score_with_partner
+    assert abs(delta - 5.0) < 1e-6, (
+        f"Expected +5 score delta under SA partner-hand penalty using "
+        f"_NONTRUMP_ORDER; got delta={delta}. If this fails the SA branch "
+        f"in `_score_winning_strategy` is wrongly routing partner-hand "
+        f"rank through `trick_rank` instead of `_NONTRUMP_ORDER`."
+    )
+
+
+def test_prompt_card_raises_on_empty_legal_cards() -> None:
+    """4.7.1 B2: `prompt_card` must fail loudly when `legal_cards` returns
+    empty for a non-empty hand. Belote rules guarantee this never happens,
+    but the pre-fix `return hand[0], state` silently substituted a possibly
+    illegal card. The AI path (`ai.py::decide_card`) already raises; the
+    human-input path now matches.
+    """
+    import random
+    from dataclasses import replace as dc_replace
+    from unittest.mock import MagicMock, patch
+
+    import pytest
+
+    from belote.game import new_game, start_round
+    from belote.ui import prompts as prompts_module
+
+    state = new_game()
+    state = start_round(state, random.Random(0))
+    state = dc_replace(
+        state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH, turn=Seat.SOUTH
+    )
+    reader = MagicMock()
+
+    with (
+        patch.object(prompts_module, "legal_cards", return_value=()),
+        pytest.raises(AssertionError, match="legal_cards returned empty"),
+    ):
+        prompts_module.prompt_card(state, reader, show_north_hand=False)

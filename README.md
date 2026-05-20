@@ -220,7 +220,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (997 tests)
+├── tests/             # Comprehensive test suite (999 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -235,14 +235,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **997 tests** passing with 100% coverage on game-logic modules (4.7.0).
+Currently **999 tests** passing with 100% coverage on game-logic modules (4.7.1).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 997/997 passed
+- **pytest**: 999/999 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

@@ -621,6 +621,26 @@ class AIPlayer:
             partner_trumps = sum(1 for c in self.memory.partner_hand if c.suit == trump)
         opp_trumps = max(0, total_trumps - my_trumps - played_trumps - partner_trumps)
 
+        # 4.7.1 P1/P2: hoist invariants out of the per-card scoring loop.
+        # `highest_rank` and `opp_voids` depend only on (trick, trump, is_sa,
+        # self._se, next_opp) — all constant across the 1–8 legal candidates.
+        # Recomputing them per card was the dominant cost of `_hard_play`.
+        if trick:
+            highest_rank = max(
+                (
+                    trick_rank(tc.card, trump, self._se)
+                    if not is_sa
+                    else _NONTRUMP_ORDER[tc.card.rank]
+                    for tc in trick
+                    if not is_sa or tc.card.suit == trick[0].card.suit
+                ),
+                default=-1,
+            )
+        else:
+            highest_rank = -1
+        next_opp = self.seat.next_seat()
+        opp_voids = self.memory.known_voids.get(next_opp, set())
+
         # Score each legal card by expected outcome
         best_card = legal[0]
         best_score: float = -999.0
@@ -636,6 +656,8 @@ class AIPlayer:
                 my_trumps,
                 opp_trumps,
                 is_sa=is_sa,
+                highest_rank=highest_rank,
+                opp_voids=opp_voids,
             )
             if score > best_score:
                 best_score = score
@@ -654,6 +676,8 @@ class AIPlayer:
         my_trumps: int,
         opp_trumps: int,
         is_sa: bool = False,
+        highest_rank: int = -1,
+        opp_voids: set[Suit] | None = None,
     ) -> float:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
@@ -670,15 +694,35 @@ class AIPlayer:
         score += points * 0.1
 
         if not trick:
-            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps, bm, is_sa=is_sa)
+            return self._score_leading_strategy(
+                card, trump, my_trumps, opp_trumps, bm, points=points, is_sa=is_sa
+            )
 
         if partner_winning and trick[0].card.suit != (trump if not is_sa else None):
             return self._score_discarding_strategy(card, trump, points, hand_suit_counts, is_sa=is_sa)
 
-        return self._score_winning_strategy(card, state, trump, trick, partner_winning, points, is_sa=is_sa)
+        return self._score_winning_strategy(
+            card,
+            state,
+            trump,
+            trick,
+            partner_winning,
+            points,
+            is_sa=is_sa,
+            highest_rank=highest_rank,
+            opp_voids=opp_voids,
+        )
 
     def _score_leading_strategy(
-        self, card: Card, trump: Suit | None, my_trumps: int, opp_trumps: int, bm: object, is_sa: bool = False
+        self,
+        card: Card,
+        trump: Suit | None,
+        my_trumps: int,
+        opp_trumps: int,
+        bm: object,
+        *,
+        points: int,
+        is_sa: bool = False,
     ) -> float:
         """Heuristics for when we are leading the trick."""
         score = 0.0
@@ -690,8 +734,10 @@ class AIPlayer:
                 score += 1
         elif card.rank == Rank.ACE:
             score += 5
-        elif card_points_with_modifiers(card, trump, bm) == 0:
-            # Leading waste card to probe
+        elif points == 0:
+            # Leading waste card to probe (4.7.1 P3: reuse caller's already-
+            # computed `points` instead of recomputing card_points_with_modifiers
+            # — the caller already paid for it on the per-card scoring line).
             score += 2
         return score
 
@@ -722,19 +768,36 @@ class AIPlayer:
         partner_winning: bool,
         points: int,
         is_sa: bool = False,
+        *,
+        highest_rank: int | None = None,
+        opp_voids: set[Suit] | None = None,
     ) -> float:
-        """Heuristics for trying to win the trick or ducking."""
+        """Heuristics for trying to win the trick or ducking.
+
+        4.7.1: `highest_rank` and `opp_voids` are hoisted out of the
+        per-legal-card loop in `_hard_play` and passed in. They depend only
+        on (trick, trump, is_sa, self._se) and the next-opp seat — all
+        constant across the legal-card scoring sweep, so recomputing them
+        per card was pure waste. Both default to `None` so standalone
+        callers (tests, ad-hoc heuristics) can omit them and the function
+        will derive them itself.
+        """
         score = 0.0
         rank = trick_rank(card, trump, self._se) if not is_sa else _NONTRUMP_ORDER[card.rank]
         is_last_trick = len(state.completed_tricks) == 7
-        highest_rank = max(
-            (
-                trick_rank(tc.card, trump, self._se) if not is_sa else _NONTRUMP_ORDER[tc.card.rank]
-                for tc in trick
-                if not is_sa or tc.card.suit == trick[0].card.suit
-            ),
-            default=-1,
-        )
+        if highest_rank is None:
+            highest_rank = max(
+                (
+                    trick_rank(tc.card, trump, self._se)
+                    if not is_sa
+                    else _NONTRUMP_ORDER[tc.card.rank]
+                    for tc in trick
+                    if not is_sa or tc.card.suit == trick[0].card.suit
+                ),
+                default=-1,
+            )
+        if opp_voids is None:
+            opp_voids = self.memory.known_voids.get(self.seat.next_seat(), set())
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
@@ -745,7 +808,6 @@ class AIPlayer:
             # 2-PLY: If we are winning now, will the next player beat us?
             if len(trick) < 3:
                 next_opp = self.seat.next_seat()
-                opp_voids = self.memory.known_voids.get(next_opp, set())
                 if (
                     next_opp != p
                     and lead_suit in opp_voids
@@ -771,13 +833,24 @@ class AIPlayer:
         # disjoint) so the heuristic never fired. Compare by rank within the
         # same suit using the active trick scale (honours trump rotation
         # under L'Anarchie via the `_se` flag).
+        #
+        # 4.7.1 B1: mirror the `is_sa` branch above so Sans Atout uses
+        # `_NONTRUMP_ORDER` consistently. `trick_rank(card, None, ...)`
+        # happens to fall through to the same ordering today, but the SA
+        # path is the canonical one and any future divergence in trick_rank
+        # would silently break this heuristic.
         if self.memory.partner_hand:
-            my_rank = trick_rank(card, trump, self._se)
+            my_rank = (
+                _NONTRUMP_ORDER[card.rank] if is_sa else trick_rank(card, trump, self._se)
+            )
             for partner_card in self.memory.partner_hand:
-                if (
-                    partner_card.suit == card.suit
-                    and trick_rank(partner_card, trump, self._se) > my_rank
-                ):
+                if partner_card.suit != card.suit:
+                    continue
+                if is_sa:
+                    partner_rank = _NONTRUMP_ORDER[partner_card.rank]
+                else:
+                    partner_rank = trick_rank(partner_card, trump, self._se)
+                if partner_rank > my_rank:
                     score -= 5
                     break
 

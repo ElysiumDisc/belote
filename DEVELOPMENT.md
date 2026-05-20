@@ -84,7 +84,7 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (997 tests expected)
+# Full test suite (999 tests expected)
 PYTHONPATH=src pytest
 ```
 
@@ -158,7 +158,9 @@ git push origin master
 
 ## Releasing a New Version (Manual)
 
-1. **Bump the version** in `pyproject.toml`.
+1. **Bump the version** in BOTH `pyproject.toml` AND `src/belote/__init__.py`
+   (they must stay in sync — `belote --version` / `belatro --version` read
+   `__version__` while PyPI / pipx read `pyproject.toml`).
 2. **Add a CHANGELOG entry** at the top of `CHANGELOG.md`.
 3. **Clean stale build artifacts:**
    ```bash

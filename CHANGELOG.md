@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.1] - 2026-05-19
+
+Patch release: post-4.7.0 audit pass that found two latent correctness
+foot-guns and three concrete AI hot-path wins, then reconciled the
+documentation surfaces with the actual code. Three parallel Explore-agent
+audits (core engine, BelAtro mode, performance) surfaced ~20 candidate
+issues; the seven false-positives were rejected against the live code
+and only the verified findings shipped. All baselines green: `ruff` 0
+violations, `mypy --strict` 0 errors, `pytest` 999/999.
+
+### Fixed
+
+- **(Major) Sans Atout partner-hand rank comparison.** `_score_winning_strategy`
+  computed the local `rank` via `_NONTRUMP_ORDER[card.rank]` under SA
+  (correct), but the partner-hand penalty block at the bottom of the
+  function unconditionally called `trick_rank(card, trump, self._se)` with
+  `trump=None` for BOTH the candidate card and every partner card.
+  `trick_rank(card, None, ...)` happens to collapse to the same ordering
+  as `_NONTRUMP_ORDER` today, so the bug is benign-by-coincidence — but
+  any future tweak to `trick_rank`'s SA branch (e.g. honor-scaling)
+  would silently break the partner-hand heuristic without any test
+  catching it. Now mirrors line 728's `if is_sa` branch on both rank
+  computations. Pinned by `test_winning_strategy_partner_hand_uses_nontrump_order_under_sa`
+  in `tests/test_ai.py`, which poisons `trick_rank` and confirms the
+  SA branch never touches it.
+- **(Minor) `prompt_card` silently substituted `hand[0]` on empty
+  `legal_cards`.** Belote's suit-follow / overtrump rules guarantee at
+  least one legal card whenever the hand is non-empty, so the path is
+  unreachable today — but the `return hand[0], state` fallback would
+  let an illegal card through to `play_card` if `legal_cards` ever
+  regressed. The AI path (`ai.py::decide_card`) already raises on the
+  same precondition; the human-input path now matches. Pinned by
+  `test_prompt_card_raises_on_empty_legal_cards`.
+
+### Performance
+
+- **Hoisted `highest_rank` and `opp_voids` out of the per-card scoring
+  loop in `_hard_play`.** Both depend only on `(trick, trump, is_sa,
+  self._se)` and the next-opp seat — all constant across the 1–8 legal
+  candidates being scored. Pre-fix they were recomputed inside
+  `_score_winning_strategy` per card. Now precomputed once and threaded
+  through `_score_card_play` → `_score_winning_strategy` as kwargs with
+  `None` defaults so standalone callers (tests, future ad-hoc
+  heuristics) still work. ~8–15% on hard-AI card decisions.
+- **Plumbed `points` through `_score_leading_strategy`.**
+  `_score_card_play` already computes `points = card_points_with_modifiers(card, trump, bm)`,
+  but the leading-strategy helper re-invoked the function to detect waste
+  cards. Now the helper accepts a keyword-only `points: int` and reuses
+  the caller's value. ~3–5% on lead decisions.
+
+### Changed
+
+- `tests/test_ai.py` test count: 22 → 24 (the two new pins above).
+  Total suite: 997 → **999**.
+
+### Documentation
+
+- `README.md` — test-count claims updated 997 → 999 in three places
+  (project-structure block, "Running Tests" section, "Technical
+  Integrity" bullet list). Joker/voucher/planet/tarot/boss/deck counts
+  reverified against `registry` / `ALL_BOSS_MODIFIERS` / `STARTING_DECKS`
+  (42 / 12 / 8 / 12 / 21 / 12) — all already accurate at 4.7.0, no
+  change.
+- `DEVELOPMENT.md` — code-quality command block now mentions 999 tests.
+  Release process now explicitly calls out that `pyproject.toml` AND
+  `src/belote/__init__.py` must be bumped together (they had been
+  drifting in older release attempts; `belote --version` /
+  `belatro --version` read `__version__` while PyPI / pipx read
+  `pyproject.toml`).
+
 ## [4.7.0] - 2026-05-19
 
 Feature minor: ships the **Dix de Der Heist** (BelAtro roguelite gamble keyed off `economy.interest_rate`) and the **slot-machine score tally** that replaces the static per-trick popup with a rolling odometer animation. Includes a full 4.6.5-style multi-agent audit (six parallel Explore agents covering heist correctness, slot-machine boss safety, items integration, save/load, performance, and 21-boss crash safety) and the resulting fixes, plus a hands-on polish pass — heist-discoverability hint, persistent tally in HUD, and a new V-key inventory overlay. All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 997/997.

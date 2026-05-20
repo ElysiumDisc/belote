@@ -57,7 +57,16 @@ def prompt_card(
     if not hand:
         raise ValueError("No cards in hand")
     if not legal:
-        return hand[0], state
+        # 4.7.1 B2: Belote's suit-follow / overtrump rules guarantee at least
+        # one legal card whenever the hand is non-empty. Silently substituting
+        # `hand[0]` here would let an illegal card reach `play_card` if
+        # `legal_cards` ever regresses. Match the AI-path contract
+        # (`ai.py::decide_card`) and fail loudly instead.
+        raise AssertionError(
+            f"legal_cards returned empty for non-empty hand "
+            f"(seat=SOUTH, phase={state.phase}, trump={state.trump}, "
+            f"contract={state.contract}, hand_size={len(hand)})"
+        )
 
     # Start selection on the first legal card
     sel = next((i for i, c in enumerate(hand) if c in legal), 0)
