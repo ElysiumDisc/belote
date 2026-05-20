@@ -86,6 +86,20 @@ class RoundUICallbacks(ABC):
         """
         return False
 
+    def prompt_heist(self, state: GameState) -> bool:
+        """Ask the player whether to declare a Dix de Der Heist (4.7.0).
+
+        Fired by `drive_round` after the bidding/coinche flow and before the
+        first card of trick 1, only when SOUTH is the taker. A declared heist
+        bets the round on winning trick 8: success multiplies the round's
+        chips × mult by `(1 + economy.interest_rate)`; failure forfeits the
+        card_point chips NS earned in tricks 1-7.
+
+        Default no-op returns False — classic Belote UI inherits this and
+        never offers the heist. BelAtro overrides in `belatro/main.py`.
+        """
+        return False
+
     def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
         """Ask the player whether to surcoinche (NS-taker path, 3.7.1 D3).
 
@@ -364,6 +378,30 @@ def drive_round(
             ),
             state
         )
+
+    # 4.7.0: Dix de Der Heist declaration site. Fires after the bidding /
+    # coinche / surcoinche flow has settled all derived state (taker, trump,
+    # coinche_level, joker_state["contract"]) and before trick 1. Gated on
+    # SOUTH being the taker; the `phase == PLAYING` guard naturally skips
+    # the all-pass branch (which ends the round at Phase.DEAL above).
+    # AI takers never get the prompt — the UICallbacks default returns False
+    # and the BelAtro override also gates on `state.taker == Seat.SOUTH`.
+    #
+    # Write to BOTH `acc._ledger.joker_state` (the accumulator's source of
+    # truth read by process_event) and `state._joker_state` (the classic-
+    # read path). These usually alias to the same dict — `trigger_round_start`
+    # installs the ledger's dict as `state._joker_state` — but the post-
+    # trigger agent_double sabotage block at line ~175 does a
+    # `replace(state, _joker_state={**state._joker_state, ...})` that breaks
+    # the alias. Mutating both keeps both observers consistent regardless.
+    if (
+        state.phase == Phase.PLAYING
+        and state.taker == Seat.SOUTH
+        and ui_callbacks.prompt_heist(state)
+    ):
+        if acc is not None and acc._ledger is not None:
+            acc._ledger.joker_state["heist_declared"] = True
+        state._joker_state["heist_declared"] = True
 
     # Phase: PLAYING
     while state.phase == Phase.PLAYING:

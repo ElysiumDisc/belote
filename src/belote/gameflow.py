@@ -166,6 +166,11 @@ def run_play(
             if card == "OVERLAY":
                 # Classic mode has no separate score overlay; re-prompt for a real card.
                 continue
+            if card == "INVENTORY":
+                # 4.7.0: V key opens the BelAtro inventory overlay. Classic
+                # Belote has no run-state to inspect, so V is a no-op here
+                # — re-prompt for a real card play.
+                continue
             if not isinstance(card, Card):
                 return "UNDO"
             if replay_decisions is not None:

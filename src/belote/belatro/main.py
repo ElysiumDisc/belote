@@ -180,6 +180,11 @@ class BelAtroGame:
         acc.contract_levels = cast("dict[str, ContractReward]", self.run.contract_levels)
         acc.permanent_chips = self.run.permanent_chips
         acc.permanent_mult = self.run.permanent_mult
+        # 4.7.0: snapshot the run's current interest_rate so the Dix de Der
+        # Heist multiplier is deterministic for the round (a mid-round La
+        # Voûte purchase shouldn't retroactively pump an already-resolved
+        # heist). Symmetric plumbing with target_score above.
+        acc.interest_rate = self.run.economy.interest_rate
         acc.attach_jokers(self.run.jokers + self.run.partner.jokers)
 
         # UI Implementation of callbacks
@@ -189,8 +194,18 @@ class BelAtroGame:
 
         hud = BelAtroHUD(self.run)
         trust_bar = TrustBar(self.run.partner.trust)
+        # 4.7.0: clear the slot-machine tally cache so this round's animation
+        # starts from 0 rather than the previous round's final total.
+        # Module-level function, mirrors `reset_top_hud_state` /
+        # `reset_overlay_state` in the same module — not a method on
+        # BelAtroAnnounce.
+        from .ui.announce import reset_tally_state
+        reset_tally_state()
         show_north = self.run.show_north_hand or self.run.partner.trust.shares_void_info
         run = self.run  # captured for UICallbacks closure (see prompt_bid)
+        # 4.7.0: captured for the one-time La Voûte hint in prompt_heist.
+        profile = self.profile
+        save_manager = self.save_manager
 
         last_display_state: list[GameState | None] = [None]  # mutable cell for closure
 
@@ -258,10 +273,34 @@ class BelAtroGame:
             def prompt_card(self, state: GameState) -> tuple[Card, GameState]:
                 from ..ui.prompts import prompt_card
 
+                # 4.7.0 follow-up: hook the BelAtro HUD + trust bar into the
+                # classic prompt_card loop so the persistent slot-machine
+                # tally readout (gated on `_top_hud_visible`) repaints after
+                # every `display()` call. Without this hook, between-tricks
+                # the player sees the felt mat but no readout — the HUD is
+                # only refreshed by `on_card_played` (post-play) and
+                # `_show_overlay` (I-toggle).
+                def _hud_after_display(s: GameState) -> None:
+                    hud.render(acc, s)
+                    trust_bar.render()
+
                 while True:
-                    card, new_state = prompt_card(state, self.reader, show_north_hand=show_north)
+                    card, new_state = prompt_card(
+                        state,
+                        self.reader,
+                        show_north_hand=show_north,
+                        after_display=_hud_after_display,
+                    )
                     if card == "OVERLAY":
                         self._show_overlay(state)
+                        continue
+                    if card == "INVENTORY":
+                        # 4.7.0: V key — open the InventoryOverlay (read-only
+                        # view of jokers/vouchers/consumables/permanent
+                        # bonuses/contract levels). Wraps with
+                        # invalidate_diff() then re-renders so the player
+                        # returns to a clean card-selection prompt.
+                        self._show_inventory(state)
                         continue
                     if card is None:
                         raise KeyboardInterrupt
@@ -270,6 +309,18 @@ class BelAtroGame:
                     if isinstance(card, str):
                         continue
                     return card, new_state
+
+            def _show_inventory(self, state: GameState) -> None:
+                """Open the V-key inventory overlay and repaint on exit."""
+                from belote.ui.render import display, invalidate_diff
+
+                from .ui.inventory import InventoryOverlay
+
+                InventoryOverlay(run, self.reader).open()
+                invalidate_diff()
+                display(state, show_north_hand=show_north)
+                hud.render(acc, state)
+                trust_bar.render()
 
             def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None:
                 from dataclasses import replace as dc_replace
@@ -286,7 +337,13 @@ class BelAtroGame:
                 trust_bar.render()
 
             def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None:
-                BelAtroAnnounce.score_popup(acc.get_popup_lines(state), self.reader)
+                # 4.7.0: animated odometer-style tally replaces the static
+                # multi-line popup. The popup helper is kept defined for one
+                # release in case a future BelAtro overlay needs the per-trick
+                # log breakdown.
+                BelAtroAnnounce.slot_machine_tally(
+                    acc, state, self.reader, points=points
+                )
 
             def on_round_end(self, breakdown: object) -> None:
                 pass
@@ -295,6 +352,54 @@ class BelAtroGame:
                 """3.7.1 D3: ask the NS taker whether to surcoinche after EW coinches."""
                 prompt = f"{coincheur.name} coinched! Surcoinche back?"
                 return BelAtroAnnounce.yes_no(prompt, self.reader)
+
+            def prompt_heist(self, state: GameState) -> bool:
+                """4.7.0: Dix de Der Heist declaration prompt.
+
+                Two gates collapse the prompt when the heist has no value:
+                  - `state.taker == Seat.SOUTH`: only the player declares; AI
+                    seats never get the prompt. The engine already gates on
+                    this too — belt-and-suspenders here so a future direct
+                    caller can't slip past.
+                  - `acc.interest_rate > 0`: with rate=0 the multiplier is
+                    1× (no reward), so declaring is pure downside. Default
+                    Economy.interest_rate is 0 — La Voûte voucher or one of
+                    the rate-bumping tarots must be purchased to enable.
+
+                Discoverability hint (4.7.0): when the player takes a
+                contract without La Voûte, show a one-time explainer
+                banner. `profile.seen_heist_hint` is flipped True and
+                persisted, so the hint never shows again for this profile.
+                Without this, fresh players would never see the heist —
+                the prompt is silently gated off and there's no signal
+                pointing at the unlock path.
+                """
+                if state.taker != Seat.SOUTH:
+                    return False
+                if acc.interest_rate <= 0:
+                    if not profile.seen_heist_hint:
+                        BelAtroAnnounce.banner(
+                            "Tip: buy the La Voûte voucher in the shop to unlock "
+                            "the Dix de Der Heist (×2+ Mult on trick 8).",
+                            self.reader,
+                            hold=2.5,
+                        )
+                        profile.seen_heist_hint = True
+                        save_manager.save_profile(profile)
+                    return False
+                multiplier = 1 + acc.interest_rate
+                declared = BelAtroAnnounce.yes_no(
+                    f"DIX DE DER HEIST — Win trick 8 for ×{multiplier} Mult, "
+                    "or lose trick 8 and forfeit tricks 1-7 chips. Declare?",
+                    self.reader,
+                )
+                if declared:
+                    BelAtroAnnounce.banner(
+                        "DIX DE DER HEIST DECLARED — all in on trick 8",
+                        self.reader,
+                        hold=1.5,
+                    )
+                return declared
 
         # Check if boss
         boss = None
@@ -401,6 +506,34 @@ class BelAtroGame:
         # Le Diable tarot is one-round only — consume after the round so the
         # partner doesn't permanently over-cut for the rest of the run.
         self.run.card_enhancements.pop("partner_overcut_round", None)
+
+        # 4.7.0: Dix de Der Heist resolution banner. `heist_outcome` is stamped
+        # by the accumulator on the trick-8 TrickWonEvent ("won" if NS took
+        # the last trick with heist active, "lost" otherwise). Only banner
+        # if the heist was actually declared — `None` means no heist this
+        # round and the player needs no message. The multiplier / forfeit
+        # has already been applied to ledger.chips/mult, so this is purely a
+        # narrative beat for the player. Audit (4.7.0): also gate on
+        # `hide_hud` — Le Brouillard's "hide the score" promise should
+        # cover the heist outcome too, otherwise the banner leaks the
+        # round's narrative.
+        heist_outcome = final_state._joker_state.get("heist_outcome")
+        if heist_outcome is not None and not final_state.boss_modifiers.hide_hud:
+            if heist_outcome == "won":
+                mult = 1 + acc.interest_rate
+                BelAtroAnnounce.banner(
+                    f"HEIST SECURED ×{mult} — Dix de Der pays out",
+                    self.reader,
+                    hold=2.0,
+                )
+            elif heist_outcome == "lost":
+                forfeit = int(final_state._joker_state.get("heist_ns_trick_chips", 0))
+                BelAtroAnnounce.banner(
+                    f"HEIST BUSTED — tricks 1-7 forfeited (-{forfeit} chips)",
+                    self.reader,
+                    color="red",
+                    hold=2.0,
+                )
 
         # Check win/loss and update trust
         total = acc.get_total(final_state)

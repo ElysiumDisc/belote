@@ -1088,60 +1088,35 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 1
     ) if ew_decl_total > 0 else ()
 
-    # Create RoundScore for history. Inlined kwargs (rather than splatting a
-    # dict) so mypy can validate each field's type per-call.
-    if breakdown.taker_team == 0:
-        round_score = RoundScore(
-            taker_team=0,
-            ns_card_pts=breakdown.credit_taker_pts,
-            ew_card_pts=breakdown.credit_defender_pts,
-            ns_decl_pts=breakdown.taker_declarations,
-            ew_decl_pts=breakdown.defender_declarations,
-            ns_belote_pts=breakdown.taker_belote,
-            ew_belote_pts=breakdown.defender_belote,
-            ns_rebelote=breakdown.taker_rebelote,
-            ew_rebelote=breakdown.defender_rebelote,
-            ns_total=breakdown.taker_total,
-            ew_total=breakdown.defender_total,
-            is_failed=breakdown.is_failed,
-            is_capot=breakdown.is_capot,
-            is_litige=breakdown.is_litige,
-            litige_points=breakdown.litige_points_awarded,
-            contract=state.contract,
-            trump=state.trump,
-            taker_seat=state.taker,
-            tricks_ns=tricks_ns,
-            tricks_ew=tricks_ew,
-            last_trick_winner=state.last_trick_winner,
-            decl_summary_ns=ns_decls,
-            decl_summary_ew=ew_decls,
-        )
-    else:
-        round_score = RoundScore(
-            taker_team=1,
-            ns_card_pts=breakdown.credit_defender_pts,
-            ew_card_pts=breakdown.credit_taker_pts,
-            ns_decl_pts=breakdown.defender_declarations,
-            ew_decl_pts=breakdown.taker_declarations,
-            ns_belote_pts=breakdown.defender_belote,
-            ew_belote_pts=breakdown.taker_belote,
-            ns_rebelote=breakdown.defender_rebelote,
-            ew_rebelote=breakdown.taker_rebelote,
-            ns_total=breakdown.defender_total,
-            ew_total=breakdown.taker_total,
-            is_failed=breakdown.is_failed,
-            is_capot=breakdown.is_capot,
-            is_litige=breakdown.is_litige,
-            litige_points=breakdown.litige_points_awarded,
-            contract=state.contract,
-            trump=state.trump,
-            taker_seat=state.taker,
-            tricks_ns=tricks_ns,
-            tricks_ew=tricks_ew,
-            last_trick_winner=state.last_trick_winner,
-            decl_summary_ns=ns_decls,
-            decl_summary_ew=ew_decls,
-        )
+    # 4.6.6: Unified RoundScore construction. Pre-4.6.6 this used two
+    # identical-but-swapped branches for taker_team=0 vs 1, which was 50 lines
+    # of redundant mapping.
+    ns_is_taker = (breakdown.taker_team == 0)
+    round_score = RoundScore(
+        taker_team=breakdown.taker_team,
+        ns_card_pts=breakdown.credit_taker_pts if ns_is_taker else breakdown.credit_defender_pts,
+        ew_card_pts=breakdown.credit_defender_pts if ns_is_taker else breakdown.credit_taker_pts,
+        ns_decl_pts=breakdown.taker_declarations if ns_is_taker else breakdown.defender_declarations,
+        ew_decl_pts=breakdown.defender_declarations if ns_is_taker else breakdown.taker_declarations,
+        ns_belote_pts=breakdown.taker_belote if ns_is_taker else breakdown.defender_belote,
+        ew_belote_pts=breakdown.defender_belote if ns_is_taker else breakdown.taker_belote,
+        ns_rebelote=breakdown.taker_rebelote if ns_is_taker else breakdown.defender_rebelote,
+        ew_rebelote=breakdown.defender_rebelote if ns_is_taker else breakdown.taker_rebelote,
+        ns_total=breakdown.taker_total if ns_is_taker else breakdown.defender_total,
+        ew_total=breakdown.defender_total if ns_is_taker else breakdown.taker_total,
+        is_failed=breakdown.is_failed,
+        is_capot=breakdown.is_capot,
+        is_litige=breakdown.is_litige,
+        litige_points=breakdown.litige_points_awarded,
+        contract=state.contract,
+        trump=state.trump,
+        taker_seat=state.taker,
+        tricks_ns=tricks_ns,
+        tricks_ew=tricks_ew,
+        last_trick_winner=state.last_trick_winner,
+        decl_summary_ns=ns_decls,
+        decl_summary_ew=ew_decls,
+    )
 
     new_history = state.score_history + (round_score,)
 

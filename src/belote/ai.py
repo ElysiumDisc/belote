@@ -4,7 +4,7 @@ import random
 from collections import Counter
 from enum import Enum
 
-from .deck import Card, Contract, Rank, Suit, trick_rank
+from .deck import _NONTRUMP_ORDER, Card, Contract, Rank, Suit, trick_rank
 from .game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -98,7 +98,9 @@ class AIPlayer:
             self.memory.last_voids_key = None
             self.memory.last_partner_hand_key = None
 
-        # Track all cards in completed tricks
+        # Track all cards in completed tricks. N is small (max 32 cards), so
+        # the O(N) re-walk is fine and keeps this in sync with the transient
+        # current_trick loop below.
         for trick in state.completed_tricks:
             for tc in trick:
                 self.memory.played.add(tc.card)
@@ -567,13 +569,10 @@ class AIPlayer:
         trump = state.trump
         trick = state.current_trick
 
-        if not trump:
-            # Sans Atout: the lookahead scoring uses `trick_rank(c, trump, ...)`
-            # which is meaningless without a trump suit. Fall back to easy
-            # (random over legal) rather than `legal[0]` so we don't degrade
-            # to a fully deterministic worst-case under SA — matches what
-            # `_medium_play` does at its own trump==None guard.
-            return self._easy_play(state, legal)
+        # 4.6.6: Sans Atout now uses a 1-ply lookahead with a non-trump
+        # ranking heuristic (based on _NONTRUMP_ORDER), rather than falling
+        # back to random play.
+        is_sa = state.contract == Contract.SANS_ATOUT
 
         # Update void inferences from completed tricks
         self._update_voids(state)
@@ -583,8 +582,6 @@ class AIPlayer:
 
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
-
-        is_sa = state.contract == Contract.SANS_ATOUT
         current_winner = _current_trick_winner(
             [tc for tc in trick if tc.seat != self.seat], trump, lead_suit, self._se, is_sa
         )
@@ -607,6 +604,16 @@ class AIPlayer:
             my_trumps = len(my_hand)
             played_trumps = len(self.memory.played)
             partner_trumps = len(self.memory.partner_hand)
+        elif trump is None:
+            # Sans Atout: there is no trump suit, so opp_trumps is moot.
+            # Setting every count to 0 makes `opp_trumps = max(0, 8) = 8`,
+            # but the heuristic branches keyed off `opp_trumps` won't fire
+            # anyway because the lookahead falls through to the non-trump
+            # ranking path.
+            total_trumps = 0
+            my_trumps = 0
+            played_trumps = 0
+            partner_trumps = 0
         else:
             total_trumps = 8
             my_trumps = hand_suit_counts.get(trump, 0)
@@ -628,6 +635,7 @@ class AIPlayer:
                 hand_suit_counts,
                 my_trumps,
                 opp_trumps,
+                is_sa=is_sa,
             )
             if score > best_score:
                 best_score = score
@@ -639,12 +647,13 @@ class AIPlayer:
         self,
         card: Card,
         state: GameState,
-        trump: Suit,
+        trump: Suit | None,
         trick: tuple[TrickCard, ...],
         partner_winning: bool,
         hand_suit_counts: dict[Suit, int],
         my_trumps: int,
         opp_trumps: int,
+        is_sa: bool = False,
     ) -> float:
         """Score a card play decision with advanced heuristics."""
         score = 0.0
@@ -661,19 +670,19 @@ class AIPlayer:
         score += points * 0.1
 
         if not trick:
-            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps, bm)
+            return self._score_leading_strategy(card, trump, my_trumps, opp_trumps, bm, is_sa=is_sa)
 
-        if partner_winning and trick[0].card.suit != trump:
-            return self._score_discarding_strategy(card, trump, points, hand_suit_counts)
+        if partner_winning and trick[0].card.suit != (trump if not is_sa else None):
+            return self._score_discarding_strategy(card, trump, points, hand_suit_counts, is_sa=is_sa)
 
-        return self._score_winning_strategy(card, state, trump, trick, partner_winning, points)
+        return self._score_winning_strategy(card, state, trump, trick, partner_winning, points, is_sa=is_sa)
 
     def _score_leading_strategy(
-        self, card: Card, trump: Suit, my_trumps: int, opp_trumps: int, bm: object
+        self, card: Card, trump: Suit | None, my_trumps: int, opp_trumps: int, bm: object, is_sa: bool = False
     ) -> float:
         """Heuristics for when we are leading the trick."""
         score = 0.0
-        if card.suit == trump:
+        if not is_sa and card.suit == trump:
             # Leading trump is good for pulling if opponents still have them
             if opp_trumps > my_trumps:
                 score += 4
@@ -687,7 +696,7 @@ class AIPlayer:
         return score
 
     def _score_discarding_strategy(
-        self, card: Card, trump: Suit, points: int, hand_suit_counts: dict[Suit, int]
+        self, card: Card, trump: Suit | None, points: int, hand_suit_counts: dict[Suit, int], is_sa: bool = False
     ) -> float:
         """Heuristics for when partner is winning and we can discard."""
         score = 0.0
@@ -708,16 +717,24 @@ class AIPlayer:
         self,
         card: Card,
         state: GameState,
-        trump: Suit,
+        trump: Suit | None,
         trick: tuple[TrickCard, ...],
         partner_winning: bool,
         points: int,
+        is_sa: bool = False,
     ) -> float:
         """Heuristics for trying to win the trick or ducking."""
         score = 0.0
-        rank = trick_rank(card, trump, self._se)
+        rank = trick_rank(card, trump, self._se) if not is_sa else _NONTRUMP_ORDER[card.rank]
         is_last_trick = len(state.completed_tricks) == 7
-        highest_rank = max((trick_rank(tc.card, trump, self._se) for tc in trick), default=-1)
+        highest_rank = max(
+            (
+                trick_rank(tc.card, trump, self._se) if not is_sa else _NONTRUMP_ORDER[tc.card.rank]
+                for tc in trick
+                if not is_sa or tc.card.suit == trick[0].card.suit
+            ),
+            default=-1,
+        )
         lead_suit = trick[0].card.suit
         p = partner(self.seat)
 
@@ -766,8 +783,16 @@ class AIPlayer:
 
         return score
 
-    def _hard_lead(self, legal: tuple[Card, ...], trump: Suit, state: GameState) -> Card:
-        """Strategic lead with void awareness."""
+    def _hard_lead(
+        self, legal: tuple[Card, ...], trump: Suit | None, state: GameState
+    ) -> Card:
+        """Strategic lead with void awareness.
+
+        4.6.6: `trump` is `Suit | None` to accommodate Sans Atout, where there
+        is no trump. The `card.suit != trump` comparisons degrade gracefully
+        when `trump` is `None` (every card is treated as non-trump), so the
+        function returns a sensible lead in both cases.
+        """
         # Prefer leading suit where opponent is known void
         for card in legal:
             if card.suit != trump:

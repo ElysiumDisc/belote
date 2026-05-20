@@ -78,6 +78,12 @@ class ScoreAccumulator:
     partner_jokers_double: bool = False
     partner_tier: int = 1  # Phase 2.3 — 0=degraded … 4=elite
     target_score: int = 80
+    # 4.7.0: Dix de Der Heist — economy.interest_rate snapshot at round start.
+    # Drives the heist reward multiplier `(1 + interest_rate)` when SOUTH wins
+    # trick 8 after declaring. Set by `belatro/main.py::_play_blind` next to
+    # `target_score`. Symmetric plumbing — heist code reads `self.interest_rate`
+    # directly without reaching into `joker_state` for run-level config.
+    interest_rate: int = 0
     contract_levels: dict[str, ContractReward] = field(default_factory=dict)
     permanent_chips: int = 0
     permanent_mult: float = 1.0
@@ -144,6 +150,20 @@ class ScoreAccumulator:
         # L'Architecte (deck rule) and LeCollectionneur (joker).
         joker_state.pop("_architecte_ns_annonce_cards", None)
         joker_state.pop("_ns_annonce_cards", None)
+
+        # 4.7.0: Dix de Der Heist — per-round transient state.
+        #   heist_declared: bool — set True by `round_driver` after the player
+        #     accepts the heist prompt. Never set for AI takers.
+        #   heist_ns_trick_chips: int — running sum of NS-won card_points over
+        #     tricks 1-7. Forfeited (subtracted from `ledger.chips`) if NS does
+        #     not win trick 8 with heist active. Scalar (no list) per the
+        #     joker_state invariant.
+        #   heist_outcome: "won" | "lost" | None — sentinel set on trick-8
+        #     resolution so subsequent reads (HUD materialize, etc.) can short-
+        #     circuit and so the resolve cannot double-apply.
+        joker_state["heist_declared"] = False
+        joker_state["heist_ns_trick_chips"] = 0
+        joker_state["heist_outcome"] = None
 
         # Apply permanent bonuses from Tarot cards
         ledger.chips = state._chips + self.permanent_chips
@@ -421,6 +441,51 @@ class ScoreAccumulator:
                     ):
                         ledger.money += 2
                         self._log.append("L'Architecte: +$2 (Annonce trick)")
+
+            # 4.7.0: Dix de Der Heist resolution. Two paths share this branch:
+            #   (a) Tricks 1-7 with NS winner: accumulate the forfeit basis.
+            #       We add `event.card_points` (the same value just added to
+            #       `ledger.chips`) into the running sum; symmetric add/subtract
+            #       guarantees that on a forfeit we subtract exactly what we put
+            #       in, regardless of boss modifiers (La Compétition's per-seat
+            #       split is computed elsewhere at round-end and doesn't touch
+            #       `event.card_points`).
+            #   (b) Trick 8 (`is_last`) with a heist declared and unresolved:
+            #       multiply mult by (1 + interest_rate) on NS win, or subtract
+            #       the accumulated NS trick chips on EW win. Sentinel
+            #       `heist_outcome` blocks any re-application — important
+            #       because the HUD calls materialize() ~30× per round and we
+            #       want strict idempotency.
+            #
+            # Ordering: this block runs BEFORE `_fire_jokers("on_trick_won")`
+            # so trick-8 jokers (LeDernierMot ×2, LExecuteur ×1.5, etc.) layer
+            # on top of the heisted base. The heist is the player's contract;
+            # jokers compose on the realized outcome.
+            if joker_state.get("heist_declared"):
+                if event.winner in _NS_TEAM and event.trick_number <= 7:
+                    joker_state["heist_ns_trick_chips"] = (
+                        int(joker_state.get("heist_ns_trick_chips", 0))
+                        + event.card_points
+                    )
+                if event.is_last and joker_state.get("heist_outcome") is None:
+                    if event.winner in _NS_TEAM:
+                        rate = self.interest_rate
+                        multiplier = 1 + rate
+                        if multiplier != 1:
+                            ledger.mult *= float(multiplier)
+                        joker_state["heist_outcome"] = "won"
+                        self._log.append(
+                            f"Dix de Der HEIST SECURED: ×{multiplier} Mult"
+                        )
+                    else:
+                        forfeit = int(joker_state.get("heist_ns_trick_chips", 0))
+                        if forfeit:
+                            ledger.chips -= forfeit
+                        joker_state["heist_outcome"] = "lost"
+                        self._log.append(
+                            f"Dix de Der HEIST BUSTED: -{forfeit} chips "
+                            "(tricks 1-7 forfeited)"
+                        )
 
             # Fire all Joker triggers
             _fire_jokers("on_trick_won", event)

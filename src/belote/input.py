@@ -27,6 +27,12 @@ class Key(Enum):
     THEME = "THEME"
     HIST = "HIST"
     OVERLAY = "OVERLAY"
+    # 4.7.0: the V key was a duplicate of I (both Key.OVERLAY). Split so V
+    # opens the BelAtro inventory overlay (jokers / vouchers / consumables /
+    # permanent bonuses / contract levels) while I keeps its existing top-HUD
+    # toggle role. Wired in `belote/ui/prompts.py::prompt_card` and consumed
+    # by `belote/belatro/main.py::UICallbacks._show_inventory`.
+    INVENTORY = "INVENTORY"
     # End-of-file on stdin (closed pipe, headless harness, Ctrl-D on a real
     # tty). Distinct from ESC so the outermost game loops can recognise a
     # closed input stream and exit cleanly instead of spinning through
@@ -176,8 +182,10 @@ class _UnixKeyReader:
                 return KeyEvent(Key.THEME)
             if ch.lower() == "o":
                 return KeyEvent(Key.SORT)
-            if ch.lower() == "i" or ch.lower() == "v":
+            if ch.lower() == "i":
                 return KeyEvent(Key.OVERLAY)
+            if ch.lower() == "v":
+                return KeyEvent(Key.INVENTORY)
 
             return KeyEvent(Key.CHAR, ch)
         except (ValueError, UnicodeDecodeError):
@@ -318,8 +326,10 @@ if os.name == "nt":
                 return KeyEvent(Key.THEME)
             if ch.lower() == b"o":
                 return KeyEvent(Key.SORT)
-            if ch.lower() in (b"i", b"v"):
+            if ch.lower() == b"i":
                 return KeyEvent(Key.OVERLAY)
+            if ch.lower() == b"v":
+                return KeyEvent(Key.INVENTORY)
 
             try:
                 char = ch.decode("utf-8")

@@ -20,6 +20,14 @@ class Profile:
             ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
         )
     )
+    # 4.7.0: one-time discoverability flag for the Dix de Der Heist.
+    # Set to True the first time the player takes a contract without owning
+    # the La Voûte voucher (so the heist prompt has no reward to offer).
+    # When set, `UICallbacks.prompt_heist` no longer shows the explainer
+    # banner — players who've seen the tip aren't pestered again. Persisted
+    # via SaveManager; loaded with a default of False for legacy saves (no
+    # SCHEMA_VERSION bump needed, dataclass default kicks in).
+    seen_heist_hint: bool = False
 
     def is_unlocked(self, item_id: str) -> bool:
         return item_id in self.unlocked_ids
@@ -103,6 +111,7 @@ class SaveManager:
                 unlocked_ids=unlocked_ids,
                 discovered_items=data.get("discovered_items", []),
                 stats={**_default_stats, **data.get("stats", {})},
+                seen_heist_hint=bool(data.get("seen_heist_hint", False)),
             )
         except (FileNotFoundError, json.JSONDecodeError):
             return Profile()
@@ -114,7 +123,7 @@ class SaveManager:
         key but are otherwise structurally compatible. New keys with sensible
         defaults can be added here as the schema evolves.
 
-        4.6.5: reject saves written by a *newer* version of the game. Without
+        4.6.6: reject saves written by a *newer* version of the game. Without
         this guard, a forward-incompatible field change (e.g. renaming a stat,
         repurposing a list) would silently load as garbage.
         """

@@ -151,11 +151,16 @@ def test_belatro_overlays_invalidate_diff() -> None:
         "src/belote/belatro/ui/history.py": 1,
         "src/belote/belatro/ui/collection.py": 1,
         "src/belote/belatro/ui/consumables.py": 2,
-        # BelAtroAnnounce.score_popup / boss_reveal / banner / yes_no all
-        # paint directly with `print(move(...) + ...)` and previously left
-        # their content on screen "the whole time" until the next forced
-        # redraw. Each must invalidate_diff() on exit.
-        "src/belote/belatro/ui/announce.py": 4,
+        # BelAtroAnnounce.score_popup / boss_reveal / banner / yes_no /
+        # slot_machine_tally (4.7.0) all paint directly with
+        # `print(move(...) + ...)` and previously left their content on
+        # screen "the whole time" until the next forced redraw. Each must
+        # invalidate_diff() on exit.
+        "src/belote/belatro/ui/announce.py": 5,
+        # InventoryOverlay (4.7.0 follow-up): list view and empty-state
+        # branches each end with `invalidate_diff()` in the `finally`
+        # block, mirroring ConsumablesOverlay.
+        "src/belote/belatro/ui/inventory.py": 1,
     }
     repo_root = Path("/home/mrrobot/belote/")
     invalidate_re = re.compile(r"invalidate_diff\s*\(\s*\)")

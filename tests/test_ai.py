@@ -224,7 +224,7 @@ def _capture_opp_trumps(player: AIPlayer, state: GameState) -> tuple[int, int]:
     `_score_card_play`. Returns the first call's args."""
     captured: dict[str, int] = {}
 
-    def _capture(self, card, st, trump, trick, partner_winning, hsc, my_t, opp_t):  # type: ignore[no-untyped-def]
+    def _capture(self, card, st, trump, trick, partner_winning, hsc, my_t, opp_t, **kwargs):  # type: ignore[no-untyped-def]
         captured.setdefault("my", my_t)
         captured.setdefault("opp", opp_t)
         return 0.0

@@ -31,13 +31,21 @@ from .render import display, get_term_size, invalidate_diff
 
 
 def prompt_card(
-    state: GameState, reader: KeyReader, show_north_hand: bool = False
-) -> tuple[Card | Literal["UNDO", "OVERLAY"] | None, GameState]:
+    state: GameState,
+    reader: KeyReader,
+    show_north_hand: bool = False,
+    after_display: Callable[[GameState], None] | None = None,
+) -> tuple[Card | Literal["UNDO", "OVERLAY", "INVENTORY"] | None, GameState]:
     """Interactive card selection with arrow keys.
 
     Returns (card, state) where state may differ from the input if the hand was
     sorted during selection. Callers should propagate the returned state.
     Returns (None, state) if QUIT is pressed.
+
+    4.7.0 follow-up: `after_display` runs after every `display()` in the
+    selection loop. The BelAtro wrapper uses it to repaint the top HUD and
+    the persistent slot-machine tally readout so they stay visible between
+    tricks. Classic Belote passes `None` and gets the original behaviour.
     """
     # Auto-sort the south hand on entry so cards are always grouped by suit
     # (trump first) and rank. sort_south_hand returns a new frozen state; the
@@ -56,6 +64,8 @@ def prompt_card(
 
     while True:
         display(state, sel, show_north_hand=show_north_hand)
+        if after_display is not None:
+            after_display(state)
         event = reader.read()
 
         match event.key:
@@ -106,6 +116,14 @@ def prompt_card(
                 continue
             case Key.OVERLAY:
                 return "OVERLAY", state
+            case Key.INVENTORY:
+                # 4.7.0: V split off from I and opens the BelAtro inventory
+                # overlay. Classic Belote's prompt_card has no UI for this
+                # (no run-state to inspect), so the wrapper in
+                # `belatro/main.py::UICallbacks.prompt_card` is the only
+                # site that acts on the return; under classic Belote the
+                # outermost loop falls through and treats this like a no-op.
+                return "INVENTORY", state
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()

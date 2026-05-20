@@ -132,7 +132,8 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 **General:**
 - `?`: Show keyboard shortcut help
-- `I` or `V` *(BelAtro only)*: Toggle the BelAtro top HUD overlay — see the BelAtro gameplay note below for details
+- `I` *(BelAtro only)*: Toggle the BelAtro top HUD overlay AND the persistent slot-machine tally readout — see the BelAtro gameplay note below for details
+- `V` *(4.7.0, BelAtro only)*: Open the **Inventory** overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). ↑/↓ navigate, Enter for detail, Esc/V/Q close. Distinct from `C` (Consumables tray, action-oriented); `V` is read-only inspection.
 - `Q`: Quit to main menu or exit
 - `H`: View Game History (round-by-round, with contract / taker / tricks / declarations)
 - `T`: Cycle UI Theme
@@ -154,11 +155,15 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
 - During bidding round 2: `P` = Pass, `X` = Tout Atout, `N` = Sans Atout *(remapped from A/S in 4.5.0 to make room for WASD nav)*
-- `I` or `V` *(4.6.3, BelAtro only)*: Toggle the BelAtro top HUD (joker pip strip, ante/blind/target line, chips×mult score, trust bar, synergy tooltip). Visible by default; press `I` to hide it and reveal the classic Belote HUD's `Trump:` / `Taker:` fields underneath. Press `I` again to bring the overlay back.
+- `I` *(4.6.3, BelAtro only)*: Toggle the BelAtro top HUD (joker pip strip, ante/blind/target line, chips×mult score, trust bar, synergy tooltip) AND, since 4.7.0, the persistent slot-machine tally readout at the bottom. Visible by default; press `I` to hide both and reveal the classic Belote HUD's `Trump:` / `Taker:` fields underneath. Press `I` again to bring them back.
+- `V` *(4.7.0, BelAtro only)*: Open the read-only inventory overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). Pre-4.7.0 this was an alias of `I`; it's now its own thing.
 
 ## Features
 
 - **BelAtro Roguelite Mode:** A massive expansion featuring 42 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
+- **Dix de Der Heist (4.7.0):** Take a contract and declare a heist before trick 1 — win trick 8 for a `×(1 + interest_rate)` Mult multiplier on your round score; lose it and forfeit your card chips from tricks 1–7. Gated on owning **La Voûte** voucher (`interest_rate > 0`). AI never declares.
+- **Slot-Machine Score Tally (4.7.0):** Per-trick odometer animation replaces the static popup. Chip-bucket fills, mult pulses, total ticks toward target, and a flame row crowns the odometer when you blow past 120% of the blind. Skippable on SPACE / ESC / ENTER. Final readout persists in the HUD between tricks (toggled by `I` alongside the top HUD). Suppressed under Le Brouillard (`hide_hud`) and La Compétition (`separate_scoring`).
+- **Inventory Overlay on V (4.7.0):** Press `V` mid-game to inspect everything you own — jokers (with edition tags + per-edition bonus blurb), vouchers, consumables, permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter for detail, Esc/V/Q close. Read-only counterpart to the `C` consumables-action tray.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
 - **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
@@ -215,7 +220,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (941 tests)
+├── tests/             # Comprehensive test suite (997 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -230,14 +235,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **941 tests** passing with 100% coverage on game-logic modules (4.6.5).
+Currently **997 tests** passing with 100% coverage on game-logic modules (4.7.0).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 941/941 passed
+- **pytest**: 997/997 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.0] - 2026-05-19
+
+Feature minor: ships the **Dix de Der Heist** (BelAtro roguelite gamble keyed off `economy.interest_rate`) and the **slot-machine score tally** that replaces the static per-trick popup with a rolling odometer animation. Includes a full 4.6.5-style multi-agent audit (six parallel Explore agents covering heist correctness, slot-machine boss safety, items integration, save/load, performance, and 21-boss crash safety) and the resulting fixes, plus a hands-on polish pass — heist-discoverability hint, persistent tally in HUD, and a new V-key inventory overlay. All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 997/997.
+
+### Added
+
+- **Dix de Der Heist (BelAtro)** — Player-only roguelite gamble declared at the start of trick phase. When SOUTH is the taker and `economy.interest_rate > 0` (gated; default rate = 0 = no reward = no prompt), the player can declare a heist that resolves on trick 8:
+  - On NS win: `ledger.mult *= (1 + interest_rate)` (`×2` with La Voûte, up to `×4` stacked with interest-bumping tarots).
+  - On NS loss: the card_points NS accumulated in tricks 1–7 are subtracted from `ledger.chips`. Declarations / belote / permanent / joker bonuses preserved.
+  - The multiplier resolves BEFORE `_fire_jokers("on_trick_won", event)` on trick 8 so jokers like LeDernierMot (×2) and LExecuteur (×1.5) compose on top. Documented in `belatro/core/scoring.py` to lock the composition rule in for future readers.
+  - State on `joker_state` as three scalar keys (`heist_declared`, `heist_ns_trick_chips`, `heist_outcome`) seeded fresh by `trigger_round_start`; per-round transient, never persisted. Sentinel `heist_outcome` guards resolution against the ~30 HUD `materialize()` re-reads per round.
+  - New `RoundUICallbacks.prompt_heist(state) -> bool` hook with a default no-op (classic Belote never offers the heist). BelAtro UICallbacks overrides in `belatro/main.py`.
+- **Slot-machine score tally** (`BelAtroAnnounce.slot_machine_tally`) — Per-trick odometer animation replacing the static `score_popup`. 20-frame ease-out over ~600ms; bucket bar shows trick card_points filling, mult indicator pulses, odometer ticks toward the new total with color shifts (cyan → white → gold) and a flame row (`≈ ▼ ◆ ▼ ≈`) when running total crosses 120% of target. Skippable on SPACE / ESC / ENTER / EOF. Suppressed under `hide_hud` (Le Brouillard), `separate_scoring` (La Compétition), and on terminals smaller than 6 rows. Module-level cache (`_last_tally_total`) cleared each round via `reset_tally_state()`.
+- **Persistent slot-machine readout in the BelAtro HUD (follow-up).** After the animation completes, the final-frame bucket + odometer lines stay visible at the bottom of the screen until the next trick or until `I` toggles the top HUD off. Adds a 1s skippable hold after the final frame so the player can read the result, then a new `_last_tally_readout` module cache feeds `BelAtroHUD.render()` / `_render_compact()` for the repaint. Cleared via `reset_tally_state()`. Bound to `is_top_hud_visible()` so `I` hides both the HUD and the readout in one shot.
+- **Inventory overlay on the V key** (`BelAtroAnnounce` peer `InventoryOverlay` in `belatro/ui/inventory.py`). Read-only detail-on-select pager that lists owned jokers (with edition tags + per-edition bonus blurb), vouchers, consumables (tarots/planets held but not yet activated), permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter opens a per-item detail page; Esc/V/Q close. Mirrors the `C` key's `ConsumablesOverlay` paint pattern (`clear_screen` + `vcenter_lines` + `invalidate_diff()` in `finally`).
+- **Discoverability hint for the Dix de Der Heist.** The first time a player takes a contract while `economy.interest_rate == 0` (i.e. they haven't bought La Voûte yet), a one-time banner explains the gating: *"Tip: buy the La Voûte voucher in the shop to unlock the Dix de Der Heist (×2+ Mult on trick 8)."* Persisted via a new `Profile.seen_heist_hint: bool` field; no SCHEMA_VERSION bump needed (dataclass default kicks in for legacy saves).
+
+### Fixed (4.7.0 audit pass)
+
+- **(Critical) Slot-machine cache leak on mid-animation interrupt** (`belatro/ui/announce.py`). The `_last_tally_total = new_total` update lived inside the try-block; a `KeyboardInterrupt` or render-time raise mid-animation would skip the update and leave the next round animating from a stale baseline. Moved into the `finally` block alongside `invalidate_diff()`. Pinned by `test_slot_machine_cache_updates_even_if_render_raises`.
+- **(Critical) Slot-machine row collision on tiny terminals** (`belatro/ui/announce.py`). Row math (`term_h - 5..3`) collapsed when `term_h < 6`, painting the animation over the HUD row 1. Added a `term_h < 6` short-circuit that suppresses the animation while still updating the cache. Pinned by `test_slot_machine_tiny_terminal_renders_nothing`.
+- **(Critical) `BelAtroAnnounce.reset_tally_state` AttributeError on round start.** `belatro/main.py::_play_blind` called `BelAtroAnnounce.reset_tally_state()` but the function was defined at module level (mirroring `reset_top_hud_state` / `reset_overlay_state`), not as a static method on the class. Crashed at the first round. Now imported as a module function. User-surfaced.
+- **(Medium) Slot-machine paints misleading totals under La Compétition** (`belatro/ui/announce.py`). `acc.get_total(state)` is a running sum but `separate_scoring` uses a per-seat max at round-end; the animated total diverged from the eventual sealed total. Now gated like the HUD (`belatro/ui/hud.py:171-176`): cache update without paint. Pinned by `test_slot_machine_under_separate_scoring_renders_nothing`.
+- **(Medium) Heist outcome banner leaked under Le Brouillard** (`belatro/main.py`). The post-round "HEIST SECURED / BUSTED" banner ignored `hide_hud`, defeating the boss's "hide the score" promise. Now gated on `not final_state.boss_modifiers.hide_hud`.
+- **(Polish) Blank flame row consumed a screen row** (`belatro/ui/announce.py`). When `displayed < target × 1.2`, `ansi_center("")` painted a `term_w`-wide blank line, wasting vertical space. Now skip the paint when the flame line is empty.
+- **Sans Atout AI type safety.** The 4.6.6 in-flight Sans Atout Hard AI work shipped with type annotations that assumed `trump: Suit`, but the SA path has `trump = None`. Widened `_hard_lead` and `_score_card_play` signatures to `Suit | None`, added an explicit `trump is None` arm to the `opp_trumps` computation in `_hard_play`, and removed a dead `is_sa = True/False` branch (overwritten three lines later by the canonical `state.contract == Contract.SANS_ATOUT` read). `mypy --strict` now clean.
+
+### Changed
+
+- **`BelAtroAnnounce.score_popup` no longer called at `on_trick_end`.** Replaced by `slot_machine_tally`. The method is still defined for one release; if no consumer surfaces by 4.8 it will be removed. Bumped the `belatro/ui/announce.py` `invalidate_diff` count in `tests/test_alt_screen_scroll.py::test_belatro_overlays_invalidate_diff` from 4 to 5.
+- **`ScoreAccumulator` gained an `interest_rate: int = 0` field.** Snapshotted at `_play_blind` time alongside `target_score`, so a mid-round La Voûte purchase or tarot effect cannot retroactively change the resolved heist multiplier.
+- **`V` key is no longer an alias of `I`.** Pre-4.7.0 both keys mapped to `Key.OVERLAY` (top-HUD toggle). The follow-up pass split `V` into a new `Key.INVENTORY` enum value that opens the read-only inventory overlay. `I` keeps its existing toggle semantics (and now also covers the persistent tally readout). Wired in `belote/input.py` (both `_UnixKeyReader` and `_WindowsKeyReader`), dispatched in `belote/ui/prompts.py::prompt_card` (`"INVENTORY"` sentinel string), and handled by `belatro/main.py::UICallbacks._show_inventory`. Classic Belote's `gameflow.py` treats the sentinel as a no-op (re-prompt).
+
+### Internal
+
+- **Test count baseline**: 941 → 997 (+56 in 4.7.0: 23 heist tests including 3 hint-discoverability regressions, 16 slot-machine tests including 5 HUD-readout persistence regressions, 15 inventory-overlay tests, 2 audit-driven entries).
+- **Version markers bumped**: `pyproject.toml` (`4.6.6` → `4.7.0`), `src/belote/__init__.py` (`4.6.6` → `4.7.0`).
+- **No `SCHEMA_VERSION` bump required**: heist state is per-round transient on `joker_state`, seeded fresh by `trigger_round_start` and never persisted. `Economy.interest_rate` was already persisted as part of `BelAtroRun.economy`; existing saves load without migration.
+- **Six-agent audit highlights (all verified clean, no further action)**: per-round transient state hygiene (heist keys reset at round start, slot-machine cache reset at `_play_blind` entry); idempotency under HUD `materialize()` (sentinel-guarded, no re-application); composition with all trick-8 jokers (LeDernierMot, LExecuteur, Le Carnet, L'Infiltré); composition with planets (Pluton capot bonus, Mercure round-end money, Le Soleil Tout Atout per-trick mult); 21-boss safety smoke (La Rupture / La Compétition / L'Avocat / Le Mime / Le Zéro Final / L'Anarchie / L'Agent Double / La Solitude all verified). Performance: heist branches sub-microsecond per trick; slot-machine animation adds ~4.8s/round (designed, skippable).
+- **Documentation accuracy sweep**: README and DEVELOPMENT refreshed; item counts (42 jokers, 12 tarots, 8 planets, 12 vouchers, 12 starting decks, 21 bosses) unchanged from 4.6.6 and re-verified against the registry.
+- **Plan file**: `/home/mrrobot/.claude/plans/let-s-add-dix-de-steady-duckling.md`.
+
+---
+
+## [4.6.6] - 2026-05-19
+
+Performance and logic audit pass. Highlights: improved Hard AI strategy for Sans Atout, unified round scoring paths to remove redundancy, and end-to-end documentation accuracy verification. All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 941/941.
+
+### Fixed
+
+- **Hard AI fallback for Sans Atout rounds.** Pre-4.6.6, the 1-ply lookahead heuristic was trump-centric and fell back to random play when no trump was set. Now uses a non-trump ranking heuristic based on `_NONTRUMP_ORDER` (A > 10 > K > Q > J > 9 > 8 > 7), making the Hard AI significantly more competitive in Sans Atout play.
+- **Refactored `apply_round_score` in `scoring.py`.** Unified the NS-taker and EW-taker branches into a single path using conditional mapping, eliminating 50+ lines of duplicated code and reducing the risk of logic drift between teams.
+
+### Internal
+
+- **Test count baseline**: 941 (unchanged).
+- **Version markers bumped**: `pyproject.toml`, `src/belote/__init__.py`, and various documentation references (4.6.5 → 4.6.6).
+- **Documentation accuracy sweep**: Item counts (42 jokers, 12 tarots, 8 planets, 12 vouchers, 12 starting decks, 21 bosses) and test counts (941) verified across `README.md` and `DEVELOPMENT.md`.
+
 ## [4.6.5] - 2026-05-18
 
 Follow-up audit pass — six parallel Explore agents covered the surface area the 4.6.4 sweep didn't reach (partner-trust + bidding state machine, shop / economy / items / ghost-run, progression / replay / a11y / input). Result: two verified critical bugs in production paths the previous audit didn't touch (the LePrêteur economy exploit and a Windows-only EOF reader bug), three performance wins, and four quality items including the dead-but-declared `announce_round_result` helper finally wired up. Mechanics audits (partner trust, bidding state machine, capot detection, belote/rebelote under L'Anarchie, voucher idempotency, ghost-run write safety, save atomic-writes, achievement unlocks) all came back clean against current code. Plan file: `/home/mrrobot/.claude/plans/bug-hunt-code-performance-sparkling-fairy.md`. All baselines green: `ruff` 0 violations, `mypy --strict` 0 errors, `pytest` 941/941.

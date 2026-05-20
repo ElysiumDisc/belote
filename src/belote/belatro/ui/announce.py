@@ -3,13 +3,15 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from belote.ansi import BOLD, RESET, ansi_center, clear_screen, gold_fg, move, red_fg, white_fg
+from belote.ansi import BOLD, DIM, RESET, ansi_center, clear_screen, gold_fg, move, red_fg, white_fg
 from belote.input import Key, interruptible_sleep
 from belote.ui.render import invalidate_diff
 
 if TYPE_CHECKING:
+    from belote.game import GameState
     from belote.input import KeyReader
 
+    from ..core.scoring import ScoreAccumulator
     from ..run.boss import BossModifier
 
 OVERLAY = "OVERLAY"
@@ -52,6 +54,28 @@ def reset_top_hud_state() -> None:
     """Reset top-HUD visibility to True. Call between tests to prevent leakage."""
     global _top_hud_visible
     _top_hud_visible = True
+
+
+# 4.7.0: Slot-machine tally state. Module-level so the per-trick animation
+# can resume from the previous total without reading state. `None` means
+# the next call seeds from 0 (round start). Reset via reset_tally_state().
+_last_tally_total: int | None = None
+
+# 4.7.0 follow-up: final-frame text lines from the most recent tally
+# animation, persisted in the HUD region between tricks. Read by
+# `BelAtroHUD.render()` (gated on `is_top_hud_visible()`), so pressing `I`
+# hides both the top HUD and the persistent tally readout in one shot.
+# Cleared at round start alongside `_last_tally_total`. Overwritten at the
+# end of every subsequent `slot_machine_tally` call.
+_last_tally_readout: list[str] | None = None
+
+
+def reset_tally_state() -> None:
+    """Reset the slot-machine tally cache. Call at round start in `_play_blind`
+    and between tests to prevent leakage from a prior round/test."""
+    global _last_tally_total, _last_tally_readout
+    _last_tally_total = None
+    _last_tally_readout = None
 
 
 class BelAtroAnnounce:
@@ -215,3 +239,181 @@ class BelAtroAnnounce:
         # and writes nothing — leaving the popup lines visible "the whole
         # time" until something forces a full redraw.
         invalidate_diff()
+
+    @staticmethod
+    def slot_machine_tally(
+        acc: ScoreAccumulator,
+        state: GameState,
+        reader: KeyReader,
+        *,
+        points: int,
+    ) -> None:
+        """4.7.0: Per-trick odometer-style score animation.
+
+        Replaces the static `score_popup` at `on_trick_end`. Animates the
+        running total from the previous tally to the current
+        `acc.get_total(state)` value over ~600ms (20 frames × 30ms),
+        showing the trick's `points` filling a "bucket" bar and the mult
+        applied. Skippable on SPACE / ESC / ENTER / EOF.
+
+        Color thresholds on the displayed total:
+          - < target × 0.5 : cyan-ish (white_fg in our palette)
+          - < target       : white
+          - >= target      : gold
+          - >= target × 1.2: gold + flame row above the odometer
+
+        Suppressed under `state.boss_modifiers.hide_hud` (Le Brouillard's
+        "hide the score" promise) — the round still progresses, just no
+        animation. `invalidate_diff()` always runs in the `finally` block
+        per the 4.6.4 overlay rule (pinned by
+        `tests/test_alt_screen_scroll.py::test_belatro_overlays_invalidate_diff`).
+        """
+        from belote.ui.render import get_term_size
+
+        global _last_tally_total, _last_tally_readout
+
+        # Several gates suppress the animation but still update the cache so
+        # the NEXT visible call animates from the correct delta:
+        #   - Le Brouillard (hide_hud): the boss promise is "hide the score";
+        #     painting an odometer at term_h-3 defeats it.
+        #   - La Compétition (separate_scoring): `acc.get_total(state)` is a
+        #     running sum across all four seats, but the round's sealed total
+        #     uses a per-seat MAX. The animation would mislead the player.
+        #     The HUD applies the same gate at belatro/ui/hud.py:171-176.
+        #   - term_h < 6: rows would collide with HUD row 1 (audit finding).
+        new_total = acc.get_total(state)
+        term_w, term_h = get_term_size()
+        if (
+            state.boss_modifiers.hide_hud
+            or state.boss_modifiers.separate_scoring
+            or term_h < 6
+        ):
+            _last_tally_total = new_total
+            return
+
+        old_total = _last_tally_total if _last_tally_total is not None else 0
+        target = max(1, acc.target_score)  # avoid div-by-zero in threshold math
+        chips = acc.current_chips(state)
+        mult = acc.current_mult(state)
+
+        # Paint at rows term_h-5..term_h-3, leaving the bottom 2 rows for the
+        # existing prompt/hint area. Mirrors score_popup's bottom-anchored
+        # placement at `term_h - len(lines) - 4`. Layout is gated by the
+        # `term_h < 6` skip above, so these subtractions can't collide with
+        # the HUD row.
+        row_flame = term_h - 5
+        row_bucket = term_h - 4
+        row_odometer = term_h - 3
+
+        # Bucket-fill glyph budget: 10-cell bar, scaled to the trick's points
+        # so a high-value trick (Jack of trump = 20) fills more than a low
+        # one. Capped at 10 cells to keep the layout stable.
+        bucket_cells = max(0, min(10, points // 3))  # ~1 cell per 3 pts
+
+        frames = 20
+        frame_delay = 0.03  # 30ms → ~600ms total
+
+        # Mutable container used by `_render` to surface the final frame's
+        # painted lines back to the outer scope. The `finally` block reads
+        # this and stamps `_last_tally_readout` for the HUD to repaint
+        # between tricks. List (not tuple) so Python's late-binding closure
+        # rules let the inner function mutate it without `nonlocal`.
+        final_lines: list[str] = []
+
+        def _render(frame: int) -> None:
+            t = frame / frames  # 0.0 → 1.0
+            # Ease-out (1 - (1-t)^2) so the number snaps fast then settles.
+            eased = 1 - (1 - t) * (1 - t)
+            displayed = int(old_total + (new_total - old_total) * eased)
+
+            # Bucket fills during the first third of the animation.
+            bucket_fill = int(min(bucket_cells, bucket_cells * (t * 3)))
+            bucket_bar = (
+                "[" + "█" * bucket_fill + "_" * (bucket_cells - bucket_fill)
+                + " " * max(0, 10 - bucket_cells) + "]"
+            )
+
+            # Color resolution based on displayed total.
+            if displayed >= target:
+                tint = gold_fg() + BOLD
+            elif displayed >= target // 2:
+                tint = white_fg() + BOLD
+            else:
+                tint = white_fg()
+
+            mult_pulse = BOLD if frame % 2 == 0 else DIM
+            bucket_line = (
+                white_fg() + f"+{points} chips " + RESET
+                + tint + bucket_bar + RESET
+                + "   " + mult_pulse + f"× {mult:.1f} Mult" + RESET
+            )
+            odometer_line = (
+                tint + f"►  {displayed}  ◄" + RESET
+                + DIM + f"   ({chips} × {mult:.1f})" + RESET
+            )
+            # Only paint the flame row when it has content. ansi_center("")
+            # would paint a `term_w`-wide row of spaces, wasting a screen
+            # row and pushing the bucket/odometer rows above the visible
+            # area on tight terminals.
+            if displayed >= target * 1.2:
+                flame_line = red_fg() + BOLD + "≈ ▼ ◆ ▼ ≈" + RESET
+                print(move(row_flame, 1) + ansi_center(flame_line, term_w), end="")
+            print(move(row_bucket, 1) + ansi_center(bucket_line, term_w), end="")
+            print(
+                move(row_odometer, 1)
+                + ansi_center(odometer_line, term_w),
+                end="",
+                flush=True,
+            )
+            # 4.7.0 follow-up: on the final frame, stash a stable, non-
+            # pulsing version of the rendered lines so the HUD can repaint
+            # them between tricks. Use BOLD (not the alternating pulse) so
+            # the persisted line doesn't depend on parity. The flame row
+            # is intentionally omitted — it's a transient "moment of joy"
+            # accent, not a steady-state readout.
+            if frame == frames:
+                steady_bucket = (
+                    white_fg() + f"+{points} chips " + RESET
+                    + tint + bucket_bar + RESET
+                    + "   " + BOLD + f"× {mult:.1f} Mult" + RESET
+                )
+                final_lines.clear()
+                final_lines.append(steady_bucket)
+                final_lines.append(odometer_line)
+
+        try:
+            for frame in range(frames):
+                _render(frame)
+                event = reader.read_timeout(frame_delay)
+                if event is None:
+                    continue
+                if event.key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
+                    break
+            # Always render the final frame so the displayed total matches
+            # new_total exactly (skip or natural completion both land here).
+            _render(frames)
+            # 4.7.0 follow-up: hold the final frame for ~1s so the player
+            # can actually read the trick result. Skippable on the same
+            # key set the animation honours. The reader.read_timeout call
+            # mirrors the per-frame poll above — won't crash under stdin-
+            # redirected pytest because we don't call interruptible_sleep.
+            hold_event = reader.read_timeout(1.0)
+            del hold_event  # we don't need to act on it; it just breaks the wait
+        finally:
+            # Cache update MUST be in finally — a KeyboardInterrupt or
+            # render-time exception mid-animation must not leave the next
+            # round animating from a stale baseline. The audit (4.7.0)
+            # flagged this as a critical cache-leak path.
+            _last_tally_total = new_total
+            # 4.7.0 follow-up: stamp the final-frame lines for the HUD to
+            # repaint between tricks. Empty `final_lines` (i.e. an
+            # exception fired before `_render(frames)` ran) leaves the
+            # readout untouched — the previous trick's readout stays
+            # visible, which is acceptable degradation.
+            if final_lines:
+                _last_tally_readout = list(final_lines)
+            # 4.6.4 architectural rule: any overlay that paints rows directly
+            # MUST invalidate the diff baseline so subsequent display() calls
+            # re-emit overwritten rows. Pinned by
+            # tests/test_alt_screen_scroll.py::test_belatro_overlays_invalidate_diff.
+            invalidate_diff()

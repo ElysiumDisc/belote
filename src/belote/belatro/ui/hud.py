@@ -4,7 +4,18 @@ import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from belote.ansi import BOLD, DIM, RESET, gold_fg, green_fg, move, red_fg, visible_len, white_fg
+from belote.ansi import (
+    BOLD,
+    DIM,
+    RESET,
+    ansi_center,
+    gold_fg,
+    green_fg,
+    move,
+    red_fg,
+    visible_len,
+    white_fg,
+)
 from belote.ui.layout import choose_layout
 
 if TYPE_CHECKING:
@@ -81,6 +92,38 @@ def detect_synergies(jokers: Sequence[object]) -> list[tuple[str, str]]:
     if not found and len(ids) >= 3:
         found.append(("stack", str(len(ids))))
     return found
+
+
+def _emit_tally_readout(
+    parts: list[str],
+    state: GameState,
+    term_w: int,
+    term_h: int,
+) -> None:
+    """4.7.0 follow-up: paint the persistent slot-machine tally readout.
+
+    Appends 2 centered rows (bucket + odometer lines from the most recent
+    trick's final animation frame) to `parts`. No-op when:
+      - `_last_tally_readout is None` (round start or no trick has fired yet)
+      - `hide_hud` boss flag is active (Le Brouillard hides the score)
+      - the terminal is too short to fit the rows without colliding with
+        the upper HUD (matches the `term_h < 6` gate in
+        `slot_machine_tally`, which is the symmetric write-side guard)
+
+    The caller has already short-circuited on `is_top_hud_visible()`, so
+    `I` press → top HUD hidden → tally readout hidden in one shot.
+    """
+    from .announce import _last_tally_readout
+
+    if _last_tally_readout is None:
+        return
+    if state.boss_modifiers.hide_hud:
+        return
+    if term_h < 6:
+        return
+    base_row = term_h - len(_last_tally_readout) - 2
+    for i, line in enumerate(_last_tally_readout):
+        parts.append(move(base_row + i, 1) + ansi_center(line, term_w) + "\n")
 
 
 def detect_synergies_full(jokers: Sequence[object]) -> list[tuple[str, str, str]]:
@@ -198,6 +241,17 @@ class BelAtroHUD:
                 badge = f"{gold_fg()}{BOLD}★ SYN×{len(synergies)}{RESET}"
                 parts.append(move(4, max(2, term_w // 2)) + badge + "\n")
 
+        # 4.7.0 follow-up: persistent slot-machine tally readout. Paints the
+        # last trick's odometer + mult line near the bottom of the screen
+        # between tricks. Gated by `is_top_hud_visible()` (the caller already
+        # short-circuited if False at the top of `render`) so pressing `I`
+        # also hides the readout. `hide_hud` boss skip is here too —
+        # `slot_machine_tally` already suppresses the animation under
+        # Le Brouillard, so `_last_tally_readout` would normally be None,
+        # but a tally produced before the boss flag flipped (impossible
+        # today but defensive) wouldn't paint either.
+        _emit_tally_readout(parts, state, term_w, term_h)
+
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
 
@@ -247,6 +301,12 @@ class BelAtroHUD:
                 )
                 score_col = max(2, term_w - len(score_str) - 2)
                 parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
+
+        # 4.7.0 follow-up: persistent slot-machine tally readout, matched to
+        # the standard branch (see comment there).
+        from belote.ui.render import get_term_size as _gt
+        _, term_h = _gt()
+        _emit_tally_readout(parts, state, term_w, term_h)
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
