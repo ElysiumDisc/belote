@@ -399,6 +399,11 @@ class AIPlayer:
             # Leading
             return self._medium_lead(legal, trump, state)
 
+        # 4.8.1: cache trick_rank per card so each min/max walk is O(n) lookups
+        # rather than O(n) recomputations. Same for card_points_with_modifiers
+        # in the discard branches.
+        ranks = {c: trick_rank(c, trump, self._se) for c in legal}
+
         lead_card = trick[0].card
         lead_suit = lead_card.suit
         p = partner(self.seat)
@@ -412,7 +417,7 @@ class AIPlayer:
 
         if partner_winning and lead_suit != trump:
             # Partner winning, discard low
-            return min(legal, key=lambda c: trick_rank(c, trump, self._se))
+            return min(legal, key=ranks.__getitem__)
 
         if lead_suit == trump:
             # Trump led
@@ -420,9 +425,9 @@ class AIPlayer:
             if my_trumps:
                 if current_winner is not None and current_winner == p:
                     # Partner winning trump, play lowest trump
-                    return min(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
+                    return min(my_trumps, key=ranks.__getitem__)
                 # Try to win if we can afford it
-                return max(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
+                return max(my_trumps, key=ranks.__getitem__)
             # No trumps, discard low non-trump
             return min(legal, key=lambda c: card_points_with_modifiers(c, trump, bm))
 
@@ -431,8 +436,8 @@ class AIPlayer:
         if my_suit:
             # Must follow
             if current_winner is not None and current_winner == p:
-                return min(my_suit, key=lambda c: trick_rank(c, trump, self._se))
-            return max(my_suit, key=lambda c: trick_rank(c, trump, self._se))
+                return min(my_suit, key=ranks.__getitem__)
+            return max(my_suit, key=ranks.__getitem__)
 
         # Void - must trump or discard
         my_trumps = [c for c in legal if c.suit == trump]
@@ -442,10 +447,10 @@ class AIPlayer:
             highest_in_trick = max(
                 (trick_rank(tc.card, trump, self._se) for tc in trick), default=-1
             )
-            winners = [c for c in my_trumps if trick_rank(c, trump, self._se) > highest_in_trick]
+            winners = [c for c in my_trumps if ranks[c] > highest_in_trick]
             if winners:
-                return min(winners, key=lambda c: trick_rank(c, trump, self._se))
-            return min(my_trumps, key=lambda c: trick_rank(c, trump, self._se))
+                return min(winners, key=ranks.__getitem__)
+            return min(my_trumps, key=ranks.__getitem__)
 
         return min(legal, key=lambda c: card_points_with_modifiers(c, trump, bm))
 

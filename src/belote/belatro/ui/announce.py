@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING
 
 from belote.ansi import BOLD, DIM, RESET, ansi_center, clear_screen, gold_fg, move, red_fg, white_fg
-from belote.input import Key, interruptible_sleep
+from belote.input import Key
 from belote.ui.render import invalidate_diff
 
 if TYPE_CHECKING:
@@ -204,15 +204,15 @@ class BelAtroAnnounce:
             move(mid - 3, 1)
             + ansi_center(red_fg() + BOLD + "! BOSS BLIND REVEALED !" + RESET, term_w)
         )
-        interruptible_sleep(1.0, reader)
+        reader.read_timeout(1.0)
         print(move(mid, 1) + ansi_center(gold_fg() + BOLD + boss.name.upper() + RESET, term_w))
-        interruptible_sleep(1.0, reader)
+        reader.read_timeout(1.0)
         print(move(mid + 2, 1) + ansi_center(white_fg() + boss.description + RESET, term_w))
         print(
             move(max(mid + 5, term_h - 2), 1)
             + ansi_center(BOLD + "[ Press any key to continue ]" + RESET, term_w)
         )
-        interruptible_sleep(2.0, reader)
+        reader.read_timeout(2.0)
         invalidate_diff()
 
     @staticmethod

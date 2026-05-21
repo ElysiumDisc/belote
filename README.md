@@ -160,7 +160,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 
 ## Features
 
-- **BelAtro Roguelite Mode:** A massive expansion featuring 42 Jokers, 12 Tarot cards, 8 Planets, 12 Vouchers, and permanent upgrades.
+- **BelAtro Roguelite Mode:** A massive expansion featuring 42 jokers, 12 tarots, 8 planets, 12 vouchers, 12 decks, 21 bosses, and permanent upgrades.
 - **Dix de Der Heist (4.7.0):** Take a contract and declare a heist before trick 1 — win trick 8 for a `×(1 + interest_rate)` Mult multiplier on your round score; lose it and forfeit your card chips from tricks 1–7. Gated on owning **La Voûte** voucher (`interest_rate > 0`). AI never declares.
 - **Slot-Machine Score Tally (4.7.0):** Per-trick odometer animation replaces the static popup. Chip-bucket fills, mult pulses, total ticks toward target, and a flame row crowns the odometer when you blow past 120% of the blind. Skippable on SPACE / ESC / ENTER. Final readout persists in the HUD between tricks (toggled by `I` alongside the top HUD). Suppressed under Le Brouillard (`hide_hud`) and La Compétition (`separate_scoring`).
 - **Inventory Overlay on V (4.7.0):** Press `V` mid-game to inspect everything you own — jokers (with edition tags + per-edition bonus blurb), vouchers, consumables, permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter for detail, Esc/V/Q close. Read-only counterpart to the `C` consumables-action tray.
@@ -221,7 +221,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (1007 tests)
+├── tests/             # Comprehensive test suite (1028 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -236,14 +236,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1028 tests** passing with 100% coverage on game-logic modules (4.8.0).
+Currently **1028 tests** passing with 100% coverage on game-logic modules (4.8.1).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 1007/1007 passed
+- **pytest**: 1028/1028 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

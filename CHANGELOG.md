@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.1] - 2026-05-21
+
+Maintenance release: outcome of a thorough multi-lane audit (logic / performance / state management, then four deeper passes). Audit headline: **zero critical or high-severity bugs** survived verification. The two micro-fixes below are pure consistency / micro-optimization. No rules, scoring, AI behavior, or UI behavior changes — `belatro` and `belote` play exactly the same.
+
+### Changed
+
+- **`BelAtroAnnounce.boss_reveal` harmonized onto the post-4.8.0
+  `reader.read_timeout(...)` pattern** (`src/belote/belatro/ui/announce.py`).
+  Pre-4.8.1 used `interruptible_sleep(N, reader)` at three sites, which
+  routes through a module-level `select.select` call that doesn't go
+  through the `KeyReader` interface. `banner()` (just below `boss_reveal`
+  in the same file) was already on the new pattern; this aligns
+  `boss_reveal` so test stubs can interpose at the reader interface
+  without monkey-patching `belote.input.interruptible_sleep`. Runtime
+  behavior is byte-identical — any key still skips the reveal.
+- **`AIPlayer._medium_play` precomputes `trick_rank` once per decision**
+  (`src/belote/ai.py`). The pre-4.8.1 code recomputed `trick_rank(c,
+  trump, self._se)` inside each `min(...)`/`max(...)` walk plus inside
+  the void-trump "winners" filter — five+ recomputations per AI play.
+  Now a single `ranks = {c: trick_rank(c, trump, self._se) for c in
+  legal}` is built up-front and reused via `ranks.__getitem__` and
+  `ranks[c]` lookups. Saves roughly 1200 `trick_rank` calls per round
+  (~60 µs) and reads cleaner. Decision output is unchanged.
+
+### Internal
+
+- Audit found and documented six **verified-false** findings from agent
+  passes (LeNotaire/LeRebelle `is_rebelote` gate, ToutStreak streak
+  persistence, `pulse_winner_glow` banner persistence, Libra + auto_coinche
+  on chute, AI `_hard_play` SA-trump condition, `boss_reveal` print()
+  scrolling). All re-investigated against current code and confirmed
+  correct as designed. Plan file
+  `/home/mrrobot/.claude/plans/bug-hunt-code-performance-greedy-perlis.md`
+  has the full list so future audits don't re-raise them.
+- Test count baseline unchanged: **1028**. No new tests; the changes are
+  behavior-preserving refactors and the existing suite covers them
+  (`test_ai.py` for the AI path, `test_phase2_content.py` for joker
+  flow; `boss_reveal` is exercised indirectly through ante setup).
+
 ## [4.8.0] - 2026-05-21
 
 Feature release: a twelfth theme, a coordinated animation polish pass for
