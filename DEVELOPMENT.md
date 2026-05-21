@@ -143,6 +143,19 @@ once at startup; toggling mid-run has no effect.
   `fg()` / `bg()` per the [no-color.org](https://no-color.org/) spec.
   Bold/dim/underline/reverse/strikethrough and cursor sequences remain
   (they aren't color). Added in 3.9.0. Backed by `src/belote/ansi.py`.
+- `BELOTE_NO_ANIM=1` — short-circuit every 4.8.0 animation helper
+  (`pulse_text`, `float_text`, `tick_bar`, the joker callouts, the shop
+  purchase/reroll feedback, the trust-bar tick-up, the classic-mode
+  trail / winner glow) to its end-state with no perceptible delay.
+  Useful on slow terminals, in CI, or under scripted runs. Read once at
+  import; tests that mutate it must call
+  `belote.ui.anim._refresh_animations_enabled_from_env()` after the
+  patch. Independent of `BELOTE_NO_DIFF` — each lever is its own
+  toggle. Backed by `src/belote/ui/anim.py`.
+- `BELOTE_NO_DIFF=1` — disable the render-diff layer in
+  `belote/ui/render.py::display`; every call paints a full frame
+  instead of only changed rows. Escape hatch for debugging visual
+  artifacts on uncommon terminal emulators.
 
 ## Releasing a New Version
 

@@ -576,6 +576,11 @@ class BelAtroGame:
         from belote.scoring import score_round
         bd = score_round(final_state)
         trust = self.run.partner.trust
+        # 4.8.0 / B4: snapshot for the trust-bar tick animation. The mutations
+        # in the lock_trust-gated branches below shift this between 0 and 10;
+        # we animate from the pre-block value to the final value after the
+        # block completes so the player sees the change land.
+        pre_trust_value = trust.value
 
         # Phase 2.2: drain pending Tierce charges into the run state.
         pending = final_state._joker_state.get("_pending_tierce_charge", 0)
@@ -667,6 +672,16 @@ class BelAtroGame:
                 trust.chute()
             elif bd.is_capot and bd.taker_team == 0:
                 trust.capot_together()
+
+        # 4.8.0 / B4: animate the trust bar from its pre-round value to its
+        # post-round value. No-op when nothing changed (lock_trust path, or
+        # symmetric mutations that net to zero). Routed through the bar's
+        # tick helper so each intermediate value paints + briefly holds.
+        # `trust_bar` is the local TrustBar instance constructed earlier in
+        # this method (it's also passed into UICallbacks below); `self`
+        # (BelAtroGame) does not have its own trust_bar attribute.
+        if trust.value != pre_trust_value:
+            trust_bar.animate_change(pre_trust_value, self.reader)
 
         # 3.3.0: append a BelAtro-side history entry (the [H] overlay reads
         # `self.run.history` via the override hook installed in `start()`).

@@ -255,6 +255,29 @@ THEMES: dict[str, Theme] = {
         menu_art_fg=(212, 175, 55),
         menu_border_fg=(110, 170, 130),
     ),
+    # 4.8.0: warm sunset/magma palette — fills the orange/magenta niche left
+    # open by the cool/dark/earthy spread of the first 11 themes. Deep magenta
+    # felt, coral suits, smoky-purple "blacks", amber-sunset highlights.
+    "sunset_magma": Theme(
+        name="Sunset Magma",
+        felt_bg=(92, 28, 60),           # deep magenta
+        felt_edge_bg=(58, 16, 38),      # rose edge
+        card_face_bg=(248, 232, 210),   # warm cream
+        face_card_bg=(252, 226, 188),   # peach-cream
+        card_back_bg=(168, 50, 70),     # rose
+        highlight_bg=(248, 168, 92),    # amber
+        red_fg=(228, 88, 78),           # coral
+        black_fg=(72, 38, 70),          # smoky purple
+        white_fg=(248, 238, 226),
+        gold_fg=(232, 168, 78),         # amber-sunset
+        light_gray_fg=(178, 150, 160),
+        green_fg=(140, 138, 96),        # olive accent
+        banner_bg=(126, 36, 78),        # magenta
+        banner_fg=(248, 232, 210),      # cream
+        felt_placeholder_fg=(132, 60, 92),
+        menu_art_fg=(232, 168, 78),
+        menu_border_fg=(228, 88, 78),
+    ),
 }
 
 

@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.0] - 2026-05-21
+
+Feature release: a twelfth theme, a coordinated animation polish pass for
+BelAtro, and a tactile feel pass for classic-mode Belote. All additions are
+UI-only — zero rules / scoring / AI changes. Every new helper follows the
+established `try / finally invalidate_diff()` architectural rule (4.6.4 /
+4.0.0). New `BELOTE_NO_ANIM=1` env-var kill switch short-circuits every new
+animation to its end-state for slow terminals or scripted runs.
+
+### Added
+
+- **Twelfth theme: Sunset Magma** (`src/belote/themes.py::sunset_magma`).
+  Deep-magenta felt, coral suits, smoky-purple "blacks", amber-sunset
+  highlights, magenta-on-cream banners. Fills the warm orange/magenta niche
+  none of the existing 11 themes occupied. Cycles via the `T` key and
+  shows up in the main-menu theme selector automatically — no other code
+  changes needed because `ThemeManager.set_current` validates dynamically.
+- **Shared animation toolkit** (`src/belote/ui/anim.py`). New module with
+  three easing helpers (`ease_out_quad`, `ease_in_out_quad`,
+  `ease_out_cubic`) and three painted-frame helpers (`pulse_text`,
+  `float_text`, `tick_bar`). Every painted helper ends with
+  `invalidate_diff()` in `finally`; every interruptible delay routes
+  through `reader.read_timeout(...)` so test stubs (and the existing
+  `slot_machine_tally` idiom) work uniformly. Env switch
+  `BELOTE_NO_ANIM=1` short-circuits to the end-state, paired with
+  `_refresh_animations_enabled_from_env()` for test fixtures.
+- **(BelAtro / B1) Joker trigger callouts in the slot-machine tally**
+  (`belatro/ui/announce.py`). Per-trick log entries added by
+  `ScoreAccumulator._log` (joker firings, planet/Carnet/Architecte
+  attributions) now float above the bucket row as labelled callouts
+  (`⚡ Foo: +25 chips` / `✦ Bar: ×2.5 Mult` / `$ Architecte: +$2 …`).
+  New module-level `_last_log_count` cursor + `_classify_callout` /
+  `_emit_callouts` helpers; reset by `reset_tally_state()`. Capped at 4
+  callouts per trick to keep the moment under ~600 ms.
+- **(BelAtro / B2) Shop purchase and reroll feedback**
+  (`belatro/ui/shop.py`). New `_animate_purchase(idx, num_items, money_before,
+  money_after)` (gold pulse on the bought slot + `tick_bar` money tick-down)
+  and `_animate_reroll(num_items)` (pulsed "↻ rerolling..." cue before the
+  new inventory paints). Hooked from the existing `run()` loop without
+  changing shop state semantics.
+- **(BelAtro / B3) Target-crossing celebration**
+  (`belatro/ui/announce.py::_emit_target_celebration`). Fires once per
+  round on the first tally where the running total crosses
+  `acc.target_score`: gold pulse on the odometer line plus a `★ TARGET ★`
+  floater above it. The existing 1.2× flame row is unchanged.
+- **(BelAtro / B4) Trust-bar tick-up animation**
+  (`belatro/ui/trust_bar.py::TrustBar.animate_change`). After the
+  round-end trust mutations in `belatro/main.py` (`blind_beaten` /
+  `blind_failed` / `big_margin_win` / `chute` / `capot_together`), the bar
+  animates from the pre-round value to the post-round value via `tick_bar`.
+  Snapshot taken right after `trust = self.run.partner.trust`; animation
+  fires only when `trust.value != pre_trust_value`.
+- **(Classic / C3) Tactile play-trail on SOUTH plays**
+  (`belote/ui/render.py::slide_card_to_table_hint`). A brief vertical
+  sparkle trail (`✦/✧/·`) from the south hand toward the south trick
+  slot, painted just before the played card lands via `patch_trick_card`.
+  AI plays are unchanged. Self-cleaning trail; ~120 ms, skippable.
+- **(Classic / C4) Trick-winner glow + hold**
+  (`belote/ui/render.py::pulse_winner_glow`). After all four cards land
+  and the MIN_TRICK_DWELL pause completes, a 3-frame gold→white→gold pulse
+  on the bottom hint row announces `★ <Direction> wins the trick ★`
+  before the trick sweeps. Computed via `trick_winner_seat` (Rupture
+  swing takes effect at scoring, so the on-table label stays accurate).
+- **(Classic / C5) Dramatic centered Belote / Rebelote stinger**
+  (`belote/ui/announce.py::belote_stinger`). Replaces the modest
+  one-line `announce("Belote!")` / `announce("Rebelote!")` call with a
+  4-row centered banner framed in `╔═╗║╚═╝` chars, painted in the active
+  theme's `banner_bg()` + `gold_fg()`. Falls back to the slim
+  `announce()` path on terminals narrower than 32 columns. Routed through
+  `gameflow.py`'s existing `current.announced` dispatch.
+
+### Internal
+
+- `belote/ui/__init__.py` now re-exports `belote_stinger`,
+  `pulse_winner_glow`, and `slide_card_to_table_hint` alongside the
+  existing UI surface.
+- Test count baseline: **1028** (4.7.3 had 1007; +21 in 4.8.0). New files:
+  `tests/test_anim_helpers.py` (8), `tests/test_belote_stinger.py` (2),
+  `tests/test_winner_glow.py` (5), `tests/belatro/test_joker_callouts.py`
+  (5), `tests/belatro/test_shop_animations.py` (2). All anim tests use
+  `sys.modules["belote.ui.render"]` to bypass the `belote.ui` re-export
+  shadow (per the 4.0.0 architectural note).
+- **Deferred from this release:** the original plan included a
+  "card lift on selection" (C1) and "smooth highlight slide between cards"
+  (C2) for the south-hand cursor. Both require deeper changes to the
+  multi-row horizontal hand renderer than fit cleanly in the same release
+  as the new toolkit; tracked for a follow-up. The remaining tactile
+  effects (C3 trail, C4 winner glow, C5 stinger) ship as planned.
+
 ## [4.7.3] - 2026-05-21
 
 Patch release: targeted bug-hunt + performance + code-logic audit. Three

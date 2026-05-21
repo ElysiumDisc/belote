@@ -69,13 +69,123 @@ _last_tally_total: int | None = None
 # end of every subsequent `slot_machine_tally` call.
 _last_tally_readout: list[str] | None = None
 
+# 4.8.0: snapshot of `len(acc._log)` at the end of the previous
+# `slot_machine_tally` call. The next call uses the delta to find log
+# entries added by THIS trick's events (joker firings, planet/Carnet/
+# Architecte/etc.) and floats them as per-source callouts. Reset on round
+# start alongside the other tally caches.
+_last_log_count: int = 0
+
 
 def reset_tally_state() -> None:
     """Reset the slot-machine tally cache. Call at round start in `_play_blind`
     and between tests to prevent leakage from a prior round/test."""
-    global _last_tally_total, _last_tally_readout
+    global _last_tally_total, _last_tally_readout, _last_log_count
     _last_tally_total = None
     _last_tally_readout = None
+    _last_log_count = 0
+
+
+def _classify_callout(entry: str) -> tuple[str, str]:
+    """4.8.0: Given an accumulator log entry like 'Foo: +25 chips' or
+    'Bar: ×2.5 Mult', return a `(glyph, color)` pair for the callout floater.
+
+    Falls back to a generic gold-chip styling for unrecognised shapes so the
+    caller still gets some visual feedback even if the log format drifts.
+    """
+    lower = entry.lower()
+    if "×" in entry or "x mult" in lower or " mult" in lower and ":" in entry and "×" in entry:
+        return ("✦", gold_fg() + BOLD)
+    if "mult" in lower:
+        # "+N Mult" branch (additive multiplier, not multiplicative).
+        return ("✦", gold_fg())
+    if "$" in entry:
+        return ("$", gold_fg() + BOLD)
+    return ("⚡", gold_fg())
+
+
+def _emit_target_celebration(
+    target: int,
+    term_w: int,
+    term_h: int,
+    reader: KeyReader,
+) -> None:
+    """4.8.0 / B3: one-shot 'crossed the target' moment.
+
+    Pulses the odometer row in gold and floats a brief '★ TARGET ★' banner
+    above it. Bounded to ~300ms total so the slot-machine cadence stays
+    snappy. Honours BELOTE_NO_ANIM via the underlying anim helpers.
+    """
+    from belote.ui.anim import animations_enabled, float_text, pulse_text
+
+    if not animations_enabled():
+        return
+
+    row_odometer = term_h - 3
+    row_above = max(2, row_odometer - 2)
+
+    text = ansi_center(gold_fg() + BOLD + f"★  TARGET  {target}+  ★" + RESET, term_w)
+    pulse_text(
+        row_odometer,
+        1,
+        text,
+        frames=4,
+        frame_delay=0.04,
+        reader=reader,
+        colors=(gold_fg() + BOLD, white_fg() + BOLD),
+    )
+    float_text(
+        ansi_center(gold_fg() + BOLD + "★ TARGET ★" + RESET, term_w),
+        start_row=row_above,
+        end_row=max(2, row_above - 1),
+        col=1,
+        color="",
+        frames=4,
+        frame_delay=0.04,
+        reader=reader,
+    )
+
+
+def _emit_callouts(
+    entries: list[str],
+    term_w: int,
+    term_h: int,
+    reader: KeyReader,
+) -> None:
+    """4.8.0: Float each log entry as a brief centered callout above the
+    tally bucket row. One entry per ~120ms, skippable wholesale on any
+    skip-key. Always restores the row to blank before returning.
+
+    The float helper from `belote.ui.anim` clears its trail on exit, so the
+    tally's bucket/odometer rows below remain intact.
+    """
+    from belote.ui.anim import animations_enabled, float_text
+
+    if not animations_enabled():
+        return
+
+    # Start two rows above the bucket and drift one row further up. Keep
+    # within the screen on tight terminals: clamp start_row >= 2.
+    bucket_row = term_h - 4
+    start_row = max(2, bucket_row - 2)
+    end_row = max(2, start_row - 1)
+
+    for entry in entries:
+        glyph, color = _classify_callout(entry)
+        # Format: "⚡ Foo: +25 chips" → ansi_center it for stability.
+        text = ansi_center(color + f"{glyph}  {entry}" + RESET, term_w)
+        event = float_text(
+            text,
+            start_row=start_row,
+            end_row=end_row,
+            col=1,
+            color="",  # already coloured via `color` inside `text`
+            frames=4,
+            frame_delay=0.04,
+            reader=reader,
+        )
+        if event is not None and event.key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
+            return
 
 
 class BelAtroAnnounce:
@@ -270,7 +380,7 @@ class BelAtroAnnounce:
         """
         from belote.ui.render import get_term_size
 
-        global _last_tally_total, _last_tally_readout
+        global _last_tally_total, _last_tally_readout, _last_log_count
 
         # Several gates suppress the animation but still update the cache so
         # the NEXT visible call animates from the correct delta:
@@ -289,7 +399,14 @@ class BelAtroAnnounce:
             or term_h < 6
         ):
             _last_tally_total = new_total
+            _last_log_count = len(acc._log)
             return
+
+        # 4.8.0: capture per-trick log entries (joker firings + structured
+        # source attributions like "Planet (tout_atout): +30 chips"). The
+        # accumulator's `_log` is append-only within a round; the delta
+        # since the previous tally is exactly this trick's contributions.
+        trick_log: list[str] = list(acc._log[_last_log_count:])
 
         old_total = _last_tally_total if _last_tally_total is not None else 0
         target = max(1, acc.target_score)  # avoid div-by-zero in threshold math
@@ -319,6 +436,11 @@ class BelAtroAnnounce:
         # between tricks. List (not tuple) so Python's late-binding closure
         # rules let the inner function mutate it without `nonlocal`.
         final_lines: list[str] = []
+        # 4.8.0: one-shot target-crossing flag. Set when the displayed total
+        # crosses `target` for the first time during this tally. The post-
+        # animation hook reads it to fire the "★ TARGET ★" floater + gold
+        # pulse on the odometer.
+        crossed_target: list[bool] = [old_total >= target]
 
         def _render(frame: int) -> None:
             t = frame / frames  # 0.0 → 1.0
@@ -380,7 +502,12 @@ class BelAtroAnnounce:
                 final_lines.clear()
                 final_lines.append(steady_bucket)
                 final_lines.append(odometer_line)
+            # 4.8.0: latch the first-time crossing of `target` so the post-
+            # animation hook can fire the celebration exactly once.
+            if not crossed_target[0] and displayed >= target:
+                crossed_target[0] = True
 
+        skipped = False
         try:
             for frame in range(frames):
                 _render(frame)
@@ -388,10 +515,26 @@ class BelAtroAnnounce:
                 if event is None:
                     continue
                 if event.key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
+                    skipped = True
                     break
             # Always render the final frame so the displayed total matches
             # new_total exactly (skip or natural completion both land here).
             _render(frames)
+
+            # 4.8.0: target-crossing celebration. Fires once per round on
+            # the first trick that pushes the running total to/over the
+            # target. Skipped if the player already skipped the tally.
+            if not skipped and crossed_target[0] and old_total < target:
+                _emit_target_celebration(target, term_w, term_h, reader)
+
+            # 4.8.0: per-source callouts. Float each trick_log entry as a
+            # short line ABOVE the bucket row, briefly, in order. Capped at
+            # 4 entries to keep the moment under ~600ms even on a busy
+            # trick. Skipped wholesale if the player already skipped the
+            # tally (they signalled "move on").
+            if not skipped and trick_log:
+                _emit_callouts(trick_log[:4], term_w, term_h, reader)
+
             # 4.7.0 follow-up: hold the final frame for ~1s so the player
             # can actually read the trick result. Skippable on the same
             # key set the animation honours. The reader.read_timeout call
@@ -405,6 +548,10 @@ class BelAtroAnnounce:
             # round animating from a stale baseline. The audit (4.7.0)
             # flagged this as a critical cache-leak path.
             _last_tally_total = new_total
+            # 4.8.0: advance the log-count cursor so the next trick's
+            # callouts come from the correct slice. Done in finally for the
+            # same reason as _last_tally_total (cache-leak guard).
+            _last_log_count = len(acc._log)
             # 4.7.0 follow-up: stamp the final-frame lines for the HUD to
             # repaint between tricks. Empty `final_lines` (i.e. an
             # exception fired before `_render(frames)` ran) leaves the

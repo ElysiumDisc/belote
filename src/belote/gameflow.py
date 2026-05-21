@@ -38,11 +38,14 @@ from .stats import update_stats_round
 from .ui import (
     animate_score_update,
     announce,
+    belote_stinger,
     display,
     patch_trick_card,
     prompt_bid,
     prompt_card,
+    pulse_winner_glow,
     show_round_summary,
+    slide_card_to_table_hint,
 )
 
 # Minimum time the four cards stay on the mat before a trick clears. This
@@ -198,6 +201,11 @@ def run_play(
         display_state = replace(
             current, current_trick=current.current_trick + (TrickCard(player, card),)
         )
+        # 4.8.0 / C3: tactile launch trail when the player (SOUTH) plays a
+        # card. Cheap (~120ms, skippable). AI seats skip — their plays
+        # already feel different via the per-card AI delay below.
+        if player == Seat.SOUTH and not skip_anims:
+            slide_card_to_table_hint(reader)
         if len(display_state.current_trick) == 1:
             display(display_state, None)
         else:
@@ -223,6 +231,21 @@ def run_play(
             # before the trick clears, even when the user has skipped earlier
             # animations or is on the "instant" speed preset.
             interruptible_sleep(MIN_TRICK_DWELL, None)
+            # 4.8.0 / C4: brief gold pulse identifying the trick winner. The
+            # winner is the natural trick winner (pre-Rupture-override) for
+            # the just-completed trick — Rupture's swing only takes effect
+            # at scoring time, so the on-table visual stays accurate.
+            if not skip_anims:
+                from .game import trick_winner_seat as _twin
+                is_sa = current.contract == Contract.SANS_ATOUT
+                w = _twin(
+                    display_state.current_trick,
+                    current.trump,
+                    current.boss_modifiers.seven_eight_trump,
+                    is_sa,
+                )
+                if w is not None:
+                    pulse_winner_glow(w, reader)
             if len(current.completed_tricks) == 7:  # This was the 8th trick
                 is_sa = current.contract == Contract.SANS_ATOUT
                 # Use the Rupture-aware helper so the announcement names the
@@ -293,11 +316,15 @@ def run_play(
             a11y.announce_trick_won(current.last_trick_winner, pts)
 
         if current.announced:
-            announce(
-                current.announced,
-                duration=max(0.5, trick_pause * 0.6) if not skip_anims else 0,
-                reader=reader,
-            )
+            # 4.8.0 / C5: Belote / Rebelote get a dramatic 4-row centered
+            # stinger; other announcements (none today, but the path is
+            # generic) keep the slim one-line `announce`.
+            msg = current.announced
+            dur = max(0.5, trick_pause * 0.6) if not skip_anims else 0
+            if msg in ("Belote!", "Rebelote!"):
+                belote_stinger(msg, duration=dur, reader=reader)
+            else:
+                announce(msg, duration=dur, reader=reader)
             current = clear_announced(current)
             display(current, None)
 

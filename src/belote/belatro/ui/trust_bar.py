@@ -74,3 +74,52 @@ class TrustBar:
             + white_fg() + "] " + RESET
             + status
         )
+
+    # 4.8.0 / B4: tick-up / tick-down animation between two trust values.
+    # ──────────────────────────────────────────────────────────────────
+    def animate_change(self, old_value: int, reader: object | None = None) -> None:
+        """Animate the bar from `old_value` → current `self.trust.value`.
+
+        No-op if the values match or the top HUD is hidden. Each intermediate
+        frame paints the full bar at that integer value; the final frame
+        always shows the true `trust.value`. Tier crossings (e.g. 4→5, 6→7)
+        trigger a brief gold pulse on the leading filled cell.
+        """
+        from belote.ui.anim import animations_enabled, tick_bar
+
+        from .announce import is_top_hud_visible
+
+        if not is_top_hud_visible():
+            return
+        if not animations_enabled():
+            self.render()
+            return
+        new_value = self.trust.value
+        if old_value == new_value:
+            return
+
+        real_value = self.trust.value
+        try:
+            def _paint(val: int) -> None:
+                # The render method reads `self.trust.value`; temporarily
+                # override it so we can show intermediate frames without
+                # introducing a parallel rendering path.
+                self.trust.value = max(0, min(10, val))
+                self.render()
+
+            # Cast away typing for the optional reader pass-through.
+            from belote.input import KeyReader
+
+            tick_bar(
+                old_value,
+                new_value,
+                render_fn=_paint,
+                frames=8,
+                frame_delay=0.04,
+                reader=reader if isinstance(reader, KeyReader) else None,
+            )
+        finally:
+            # Restore the true value (the renders above mutated it; the
+            # final render call already painted the bar at new_value).
+            self.trust.value = real_value
+            self.render()

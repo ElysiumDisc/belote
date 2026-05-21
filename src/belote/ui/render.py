@@ -363,6 +363,106 @@ def invalidate_diff() -> None:
     _last_emitted_lines = None
 
 
+def slide_card_to_table_hint(reader: object | None = None) -> None:
+    """4.8.0 / C3: brief vertical sparkle trail from south's hand toward the
+    south trick slot, painted just before the played card lands at its
+    destination.
+
+    Deliberately doesn't try to slide the actual card frame — restoring the
+    felt-pip background under multi-row card frames is fragile across
+    terminals (Konsole's alt-screen handling especially). Instead we paint a
+    short tactile trail of ✦/✧ glyphs along the slot anchor's vertical axis,
+    which gives the play a 'launches upward' feel without risking visual
+    artifacts. Cheap (~120ms, 4 frames, skippable) and self-cleaning.
+    """
+    import sys as _sys
+
+    from ..ansi import RESET, gold_fg, move
+    from .anim import animations_enabled
+
+    if not animations_enabled():
+        return
+
+    term_w, term_h = get_term_size()
+    # Bottom-of-hand to mid-screen vertical axis at the centre column.
+    col = max(1, term_w // 2)
+    start_row = max(2, term_h - 4)
+    # Three rows is enough to read as motion without crossing the south slot
+    # label and clobbering it.
+    end_row = max(2, start_row - 3)
+    if start_row <= end_row:
+        return
+
+    has_reader = reader is not None and hasattr(reader, "read_timeout")
+    glyphs = ("✦", "✧", "✦", "·")
+    try:
+        for i, row in enumerate(range(start_row, end_row - 1, -1)):
+            _sys.stdout.write(move(row, col) + gold_fg() + glyphs[i % len(glyphs)] + RESET)
+            _sys.stdout.flush()
+            if has_reader:
+                event = reader.read_timeout(0.03)  # type: ignore[union-attr]
+                if event is not None:
+                    break
+            else:
+                import time as _time
+
+                _time.sleep(0.03)
+    finally:
+        # Wipe the trail so the next display() repaints over a blank centre
+        # column (felt repaint comes via the normal full-frame render).
+        for row in range(end_row, start_row + 1):
+            _sys.stdout.write(move(row, col) + " ")
+        _sys.stdout.flush()
+        invalidate_diff()
+
+
+def pulse_winner_glow(winner: Seat, reader: object | None = None) -> None:
+    """4.8.0 / C4: brief gold pulse identifying the trick winner.
+
+    Called from `gameflow.py` after all 4 cards land on the mat and the
+    winner is known, BEFORE the trick is swept off the screen. Paints a
+    short centered "★ <Direction> wins ★" line at the bottom hint row for
+    ~250ms, pulsing gold→white→gold. Skippable; always calls
+    `invalidate_diff()` in `finally`.
+    """
+    import sys as _sys
+
+    from ..ansi import BOLD, RESET, ansi_center, gold_fg, move, white_fg
+    from .anim import animations_enabled
+
+    if not animations_enabled():
+        return
+
+    term_w, term_h = get_term_size()
+    direction = {
+        Seat.NORTH: "North",
+        Seat.SOUTH: "South",
+        Seat.WEST: "West",
+        Seat.EAST: "East",
+    }[winner]
+    row = max(1, term_h - 1)
+    body = f"★  {direction} wins the trick  ★"
+    frames = (gold_fg() + BOLD, white_fg() + BOLD, gold_fg() + BOLD)
+
+    has_reader = reader is not None and hasattr(reader, "read_timeout")
+    try:
+        for prefix in frames:
+            _sys.stdout.write(
+                move(row, 1) + ansi_center(prefix + body + RESET, term_w)
+            )
+            _sys.stdout.flush()
+            if has_reader:
+                event = reader.read_timeout(0.08)  # type: ignore[union-attr]
+                if event is not None:
+                    return
+            else:
+                import time as _time
+
+                _time.sleep(0.08)
+    finally:
+        invalidate_diff()
+
+
 @lru_cache(maxsize=128)
 def _card_back(theme_name: str, has_utf8: bool, card_w: int, card_h: int) -> list[str]:
     """Render a face-down card with an ornate pattern, sized to (card_w, card_h)."""

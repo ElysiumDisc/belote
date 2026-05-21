@@ -25,6 +25,54 @@ from ..stats import get_session_stats, load_stats
 from .render import display_hud, get_term_size, invalidate_diff
 
 
+def belote_stinger(
+    message: str, duration: float = 1.0, reader: KeyReader | None = None
+) -> KeyEvent | None:
+    """4.8.0 / C5: dramatic centered stinger for peak moments (Belote / Rebelote).
+
+    A 4-row centered banner painted with absolute cursor positioning so it
+    cannot scroll the alt-screen. Theme-aware via `banner_bg()` / `banner_fg()`
+    / `gold_fg()` — looks great on the new Sunset Magma theme too. Skippable
+    via any key press; returns the consumed `KeyEvent` if so. Always calls
+    `invalidate_diff()` in `finally` per the 4.6.4 architectural rule.
+
+    Replaces the modest one-line `announce(...)` call previously used for
+    Belote / Rebelote so the moment actually lands. Other `announce(...)`
+    call sites are unchanged.
+    """
+    term_w, term_h = get_term_size()
+    # Box dimensions: a 4-row banner roughly 28 columns wide centered both
+    # horizontally and vertically. On tight terminals (term_w < 32) we fall
+    # back to the slim `announce()` styling rather than clipping the frame.
+    box_w = 28
+    if term_w < box_w + 4:
+        return announce(message, duration=duration, reader=reader)
+
+    box_top = max(2, (term_h - 4) // 2)
+    title = f"  ✦  {message}  ✦  "
+    title_padded = title.center(box_w - 2)
+    top_border = "╔" + "═" * (box_w - 2) + "╗"
+    blank_row = "║" + " " * (box_w - 2) + "║"
+    title_row = "║" + title_padded + "║"
+    bot_border = "╚" + "═" * (box_w - 2) + "╝"
+
+    style = banner_bg() + banner_fg() + BOLD + gold_fg()
+    parts: list[str] = []
+    for i, line in enumerate((top_border, blank_row, title_row, bot_border)):
+        parts.append(move(box_top + i, 1) + ansi_center(style + line + RESET, term_w))
+    sys.stdout.write("".join(parts))
+    sys.stdout.flush()
+
+    try:
+        if reader and duration > 0:
+            return interruptible_sleep(duration, reader)
+        if duration > 0:
+            time.sleep(duration)
+        return None
+    finally:
+        invalidate_diff()
+
+
 def announce(
     message: str, duration: float = 2.0, reader: KeyReader | None = None
 ) -> KeyEvent | None:

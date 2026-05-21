@@ -57,6 +57,9 @@ class ShopScreen:
                 self.selected = (self.selected + 1) % total_options
             elif key == Key.ENTER:
                 if self.selected < num_items:
+                    # 4.8.0: capture pre-purchase context for the animation.
+                    money_before = self.shop.run.economy.money
+                    sel_idx = self.selected
                     bought = self.shop.buy_item(self.selected)
                     if not bought and self.shop.last_buy_failure == "slots_full":
                         from .announce import BelAtroAnnounce
@@ -64,9 +67,13 @@ class ShopScreen:
                         BelAtroAnnounce.banner(
                             "Slots full — sell first to make room", self.reader, hold=1.0
                         )
+                    elif bought:
+                        money_after = self.shop.run.economy.money
+                        self._animate_purchase(sel_idx, num_items, money_before, money_after)
                     if self.selected >= len(self.shop.inventory):
                         self.selected = max(0, len(self.shop.inventory) - 1)
                 elif self.selected == num_items:
+                    self._animate_reroll(num_items)
                     self.shop.reroll()
                     # Clamp to a *valid* index: len(inventory)-1, not len.
                     # The previous form let `selected == len(inventory)` slip
@@ -328,3 +335,94 @@ class ShopScreen:
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
         invalidate_diff()
+
+    # ── 4.8.0 / B2: purchase + reroll feedback ────────────────────────────
+
+    def _animate_purchase(
+        self,
+        sel_idx: int,
+        num_items_before: int,
+        money_before: int,
+        money_after: int,
+    ) -> None:
+        """Pulse the bought card slot in gold, then tick down the money figure.
+
+        Both effects run BEFORE the next `_render()` repaints the shop, so
+        they animate on the still-on-screen pre-purchase frame. Honours
+        `BELOTE_NO_ANIM` via the underlying anim helpers.
+        """
+        from belote.ui.anim import animations_enabled, pulse_text, tick_bar
+        from belote.ui.render import get_term_size
+
+        if not animations_enabled():
+            return
+
+        term_w, term_h = get_term_size()
+        content_h = 19
+        top = max(1, (term_h - content_h) // 2)
+        card_row = top + 4
+        money_row = top + 2
+
+        # Pulse a 16-cell wide gold band across the card's top border. We
+        # paint on the same row the card frame currently occupies; the
+        # following `_render()` will fully repaint the area.
+        col = self._card_col(sel_idx, num_items_before, term_w)
+        band = gold_fg() + BOLD + "★" * self._CARD_W + RESET
+        pulse_text(
+            card_row,
+            col,
+            band,
+            frames=4,
+            frame_delay=0.04,
+            reader=self.reader,
+            colors=(gold_fg() + BOLD, white_fg() + BOLD),
+        )
+
+        # Money tick-down via a single-line redraw helper.
+        def _paint_money(val: int) -> None:
+            line = ansi_center(
+                white_fg() + "Money: " + green_fg() + f"${val}" + RESET, term_w
+            )
+            sys.stdout.write(move(money_row, 1) + line)
+            sys.stdout.flush()
+
+        tick_bar(
+            money_before,
+            money_after,
+            render_fn=_paint_money,
+            frames=8,
+            frame_delay=0.03,
+            reader=self.reader,
+        )
+
+    def _animate_reroll(self, num_items: int) -> None:
+        """Briefly dim the existing card row before the new inventory paints.
+
+        The next `_render()` call handles drawing the fresh cards; this
+        helper just supplies the "out" half of the transition. No timing
+        bound other than its own ~150ms.
+        """
+        from belote.ui.anim import animations_enabled, pulse_text
+        from belote.ui.render import get_term_size
+
+        if not animations_enabled():
+            return
+
+        term_w, term_h = get_term_size()
+        content_h = 19
+        top = max(1, (term_h - content_h) // 2)
+        card_row = top + 4
+
+        # Wipe the card row with a centered "rerolling..." marker that
+        # pulses gold→white→gold. Cheap fade-out cue without per-card art.
+        msg = "↻ rerolling..."
+        text = ansi_center(gold_fg() + BOLD + msg + RESET, term_w)
+        pulse_text(
+            card_row + 4,  # mid-height of the 9-row planet card
+            1,
+            text,
+            frames=4,
+            frame_delay=0.03,
+            reader=self.reader,
+            colors=(gold_fg() + BOLD, white_fg() + BOLD),
+        )
