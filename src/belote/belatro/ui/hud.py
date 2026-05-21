@@ -160,15 +160,20 @@ class BelAtroHUD:
         # 3.4.0: joker pip strip on row 1 (above the existing HUD lines), shown
         # in every layout including compact. Cheap — empty inventory still
         # paints the dotted-slot capacity so the player learns the slot count.
+        #
+        # 4.7.3: the strip + tooltip are BUILT into strings here and embedded
+        # in the same write as the rest of the HUD. Pre-4.7.3 each helper
+        # did its own write+flush, so the HUD render syscalled 2–3 times
+        # instead of once. Compact path mirrors this (see `_render_compact`).
+        pip_strip = ""
+        synergy_tip = ""
         if not state.boss_modifiers.hide_hud:
-            render_joker_pip_strip(run, term_w, row=1)
-            # Synergy tooltip below the score line; only fires when at least
-            # one pair is active. Compact layouts get one line; verbose two.
+            pip_strip = build_joker_pip_strip(run, term_w, row=1)
             tooltip_row = 4 if layout.hud_style == "compact" else 5
-            render_synergy_tooltip(list(run.jokers), term_w, row=tooltip_row)
+            synergy_tip = build_synergy_tooltip(list(run.jokers), term_w, row=tooltip_row)
 
         if layout.hud_style == "compact":
-            self._render_compact(acc, state, term_w)
+            self._render_compact(acc, state, term_w, pip_strip, synergy_tip)
             return
 
         # Standard / verbose path (current behaviour, with a small mood glyph
@@ -176,7 +181,12 @@ class BelAtroHUD:
         # write+flush so the BelAtro HUD lays down all rows in one syscall.
         target_str = str(run.target_score)
         mood = _MOOD_GLYPH.get(run.partner_mood, "○")
-        parts: list[str] = [
+        # 4.7.3: prepend the row-1 pip strip + the row-{4|5} synergy tooltip
+        # so the whole HUD ships in one write+flush below.
+        parts: list[str] = []
+        if pip_strip:
+            parts.append(pip_strip)
+        parts.append(
             move(2, 2)
             + white_fg()
             + "Ante: "
@@ -204,7 +214,7 @@ class BelAtroHUD:
             + f"Partner: {mood}"
             + RESET
             + "\n"
-        ]
+        )
 
         # Row 3: Score (hidden by Le Brouillard boss). Also suppressed under
         # La Compétition (`separate_scoring`) because the live running total
@@ -252,13 +262,27 @@ class BelAtroHUD:
         # today but defensive) wouldn't paint either.
         _emit_tally_readout(parts, state, term_w, term_h)
 
+        # 4.7.3: tooltip ships in the same batched write as everything else.
+        if synergy_tip:
+            parts.append(synergy_tip)
+
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
 
-    def _render_compact(self, acc: ScoreAccumulator, state: GameState, term_w: int) -> None:
+    def _render_compact(
+        self,
+        acc: ScoreAccumulator,
+        state: GameState,
+        term_w: int,
+        pip_strip: str = "",
+        synergy_tip: str = "",
+    ) -> None:
         """Compact HUD: single-line summary, joker count instead of names.
 
         Press J for the full joker list (handled by the gameplay loop, not here).
+
+        4.7.3: `pip_strip` / `synergy_tip` are pre-built by the caller so the
+        compact HUD also ships in a single write+flush.
         """
         run = self.run
         mood = _MOOD_GLYPH.get(run.partner_mood, "○")
@@ -277,11 +301,16 @@ class BelAtroHUD:
 
         # Compose both halves on row 2. 3.9.3: batched into a single
         # write/flush so the compact HUD lays down all rows atomically.
+        # 4.7.3: prepend the pip strip so the row-1/row-2 strip + summary
+        # ship in the same write.
         right_col = max(2, term_w - visible_len(joker_label) - 1)
-        parts: list[str] = [
+        parts: list[str] = []
+        if pip_strip:
+            parts.append(pip_strip)
+        parts.extend([
             move(2, 2) + left + "\n",
             move(2, right_col) + joker_label + "\n",
-        ]
+        ])
 
         # Row 3: chips × mult on the right (hidden by Le Brouillard, also
         # suppressed under La Compétition since the running total diverges
@@ -307,6 +336,10 @@ class BelAtroHUD:
         from belote.ui.render import get_term_size as _gt
         _, term_h = _gt()
         _emit_tally_readout(parts, state, term_w, term_h)
+
+        # 4.7.3: synergy tooltip ships in the same batched write.
+        if synergy_tip:
+            parts.append(synergy_tip)
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
@@ -339,21 +372,22 @@ def _edition_color(ed_value: str) -> str:
     return str(white_fg())
 
 
-def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
-    """Render a compact one-row strip of joker slots at `row` (default top).
+def build_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> str:
+    """Build the joker pip strip as a string (caller decides when to write).
 
     Layout: `J: [Co][To*][..][..][..]` — 4 chars per slot, leading "J: " label,
     `*` marker on slots involved in an active synergy pair. Empty slots are
     rendered with `··` so the player sees their capacity at a glance.
 
-    No-ops when `term_w < 24` (not enough room for a 5-slot strip).
+    Returns "" when the strip should be suppressed (HUD toggled off, or
+    `term_w < 24` — not enough room for a 5-slot strip).
     """
     from .announce import is_top_hud_visible
 
     if not is_top_hud_visible():
-        return
+        return ""
     if term_w < 24:
-        return
+        return ""
     slots = max(1, run.joker_slots)
     jokers = list(run.jokers)
     # Detect which joker ids are in an active synergy so we can mark their pips
@@ -379,28 +413,40 @@ def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
             )
         else:
             parts.append(f"{DIM}[··]{RESET}")
-    strip = "".join(parts)
     # Center is overkill; anchor at col 2 so it doesn't fight the score line
-    # on the right of row 2. 3.9.3: single write+flush.
-    sys.stdout.write(move(row, 2) + strip + "\n")
+    # on the right of row 2.
+    strip: str = move(row, 2) + "".join(parts) + "\n"
+    return strip
+
+
+def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
+    """Standalone writer for callers/tests that paint the pip strip directly.
+
+    BelAtroHUD's main render path embeds `build_joker_pip_strip` output in
+    its single batched write (4.7.3) — call this only when there's no
+    surrounding `parts` list to compose into.
+    """
+    strip = build_joker_pip_strip(run, term_w, row=row)
+    if not strip:
+        return
+    sys.stdout.write(strip)
     sys.stdout.flush()
 
 
-def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -> None:
-    """Render one-line synergy descriptions at `row` if any pair is active.
+def build_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -> str:
+    """Build synergy tooltip lines as a single string (caller decides when to write).
 
-    No-ops when there are no active synergies. Truncates each line to the
-    available width so we never wrap.
+    Returns "" when there are no active synergies, the HUD is hidden, or the
+    tooltip should otherwise be suppressed.
     """
     from .announce import is_top_hud_visible
 
     if not is_top_hud_visible():
-        return
+        return ""
     pairs = detect_synergies_full(list(jokers))
     if not pairs:
-        return
+        return ""
     # Show up to two synergies; further ones are summarised as "+N more".
-    # 3.9.3: batched single write/flush.
     max_w = max(20, term_w - 4)
     out: list[str] = []
     for i, (_a, _b, desc) in enumerate(pairs[:2]):
@@ -413,5 +459,17 @@ def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) 
     if len(pairs) > 2:
         extra = f"{DIM}+{len(pairs) - 2} more synergies{RESET}"
         out.append(move(row + 2, 2) + extra + "\n")
-    sys.stdout.write("".join(out))
+    return "".join(out)
+
+
+def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -> None:
+    """Standalone writer for callers/tests that paint the tooltip directly.
+
+    BelAtroHUD's main render path embeds `build_synergy_tooltip` output in
+    its single batched write (4.7.3); use this only for direct callers.
+    """
+    out = build_synergy_tooltip(jokers, term_w, row=row)
+    if not out:
+        return
+    sys.stdout.write(out)
     sys.stdout.flush()

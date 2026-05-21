@@ -104,6 +104,16 @@ class BelAtroRun:
     # future save/load round-trip — gets the same protection automatically.
     _applied_voucher_ids: set[str] = field(default_factory=set)
 
+    # ── Idempotency guard for Joker.on_purchase() ──────────
+    # Corrupted jokers with non-idempotent on_purchase actions (LeDemon's
+    # trust subtraction) record their id here on first apply. Re-application
+    # paths (a future save/load round-trip, replay tooling) consult this set
+    # and short-circuit so a once-paid cost never compounds. Joker on_purchase
+    # actions that are already idempotent (boolean flags like
+    # LeTraitre.partner_throws_trick, LAgentDouble.agent_double_joker) don't
+    # need to consult this set, but adding their id is harmless. 4.7.3.
+    _applied_purchase_ids: set[str] = field(default_factory=set)
+
     # ── Recent-boss tracker (3.9.3 Phase 5) ────────────────
     # Used by the BelAtro main loop to suppress immediate boss repeats in
     # endless mode. The deque holds at most 2 recent boss ids; the selector

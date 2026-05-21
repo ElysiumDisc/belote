@@ -392,6 +392,29 @@ def test_lagent_double_seat_keyed_to_south() -> None:
     assert LAgentDouble().on_trick_won(_trick(winner=Seat.NORTH), {}) is None
 
 
+def test_le_demon_on_purchase_is_idempotent() -> None:
+    """4.7.3: LeDemon.on_purchase degrades trust by 3; re-applying it (e.g.,
+    via a save/load round-trip or replay-resume tool) must NOT compound the
+    cost. The guard lives on `run._applied_purchase_ids`, mirroring
+    `_applied_voucher_ids` from 3.9.3.
+    """
+    from belote.belatro.core.run_state import BelAtroRun
+
+    run = BelAtroRun(seed=1)
+    starting_trust = run.partner.trust.value
+    j = LeDemon()
+    j.on_purchase(run)
+    after_first = run.partner.trust.value
+    assert after_first == max(0, starting_trust - 3)
+    # Second call must be a no-op.
+    j.on_purchase(run)
+    assert run.partner.trust.value == after_first
+    # A fresh LeDemon instance with the same id should also short-circuit on
+    # the same run (save/load → distinct Python object, same logical joker).
+    LeDemon().on_purchase(run)
+    assert run.partner.trust.value == after_first
+
+
 # ── trick_timing.py ────────────────────────────────────────────────────────
 
 

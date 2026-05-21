@@ -84,3 +84,52 @@ def test_trust_bar_paints_when_visible() -> None:
     bar = TrustBar(TrustTrack(value=5))
     out = _capture(bar.render)
     assert "Trust:" in out
+
+
+def test_belatro_hud_render_writes_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4.7.3: BelAtroHUD.render must batch the pip strip, summary rows,
+    score line, joker list, tally readout, and synergy tooltip into a
+    SINGLE sys.stdout.write call. Pre-4.7.3 the pip strip and synergy
+    tooltip each did their own write+flush, costing 2–3 syscalls per HUD
+    refresh.
+
+    Same single-write convention as ShopScreen._render (pinned in
+    test_render_diff.py::test_shop_render_writes_once_per_frame).
+    """
+    from belote.belatro.core.scoring import ScoreAccumulator
+    from belote.belatro.items.registry import register_all_items
+    from belote.belatro.ui.hud import BelAtroHUD
+    from belote.game import new_game
+
+    register_all_items()
+    run = BelAtroRun(seed=1)
+    h = BelAtroHUD(run)
+    acc = ScoreAccumulator()
+    state = new_game()
+    acc.trigger_round_start(state)
+
+    class _CountingBuf(io.StringIO):
+        write_count = 0
+
+        def write(self, s: str) -> int:  # type: ignore[override]
+            self.write_count += 1
+            return super().write(s)
+
+    buf = _CountingBuf()
+    saved = sys.stdout
+    sys.stdout = buf
+    try:
+        # `get_term_size` is imported locally inside BelAtroHUD.render from
+        # `belote.ui.render`; patch the source module so both that import and
+        # the `_render_compact` fallback see the deterministic size.
+        render_mod = sys.modules["belote.ui.render"]
+        monkeypatch.setattr(render_mod, "get_term_size", lambda: (120, 40))
+        h.render(acc, state)
+    finally:
+        sys.stdout = saved
+
+    assert buf.write_count == 1, (
+        f"BelAtroHUD.render must batch into one write; got {buf.write_count}. "
+        f"Pre-4.7.3 this was 2–3 due to the pip-strip / tooltip helpers "
+        f"writing independently."
+    )

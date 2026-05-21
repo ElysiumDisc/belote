@@ -407,13 +407,23 @@ class ScoreAccumulator:
                 # of lead (legal_cards forbids trumping while holding lead).
                 # +2 Mult, +$1.
                 if joker_state.get("ghost_lead") and event.trump is not None:
-                    lead_suit = event.cards[0].suit if event.cards else None
+                    lead_card = event.cards[0] if event.cards else None
+                    lead_suit = lead_card.suit if lead_card else None
                     # Under TOUT_ATOUT every card is trump, so no play can be
                     # "void of the led suit" — is_trump_lead resolves to True
                     # and the bonus is correctly gated off.
+                    # Under La Déluge (seven_eight_trump), a 7 or 8 of any
+                    # suit also functions as trump — a 7-led trick is a
+                    # trump-led trick even when lead_suit != event.trump.
+                    se_lead = (
+                        state.boss_modifiers.seven_eight_trump
+                        and lead_card is not None
+                        and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
+                    )
                     is_trump_lead = (
                         lead_suit == event.trump
                         or event.trump == Suit.TOUT_ATOUT
+                        or se_lead
                     )
                     if lead_suit is not None and not is_trump_lead:
                         seat = event.leader_seat

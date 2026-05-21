@@ -168,6 +168,40 @@ def test_ghost_lead_silent_when_winner_didnt_trump_void() -> None:
     assert out._bonus_money == 0
 
 
+def test_ghost_lead_silent_when_lead_is_seven_under_deluge() -> None:
+    """4.7.3 regression: under La Déluge (seven_eight_trump), a 7 or 8
+    of any suit functions as trump. A 7-led trick is therefore a
+    trump-led trick — L'Infiltré must NOT pay even though
+    `lead_suit != event.trump`. Pre-4.7.3 the is_trump_lead check
+    didn't honour the boss flag and the bonus fired spuriously.
+    """
+    from belote.game import BossModifiers
+
+    state = GameState(
+        hands=((), (), (), ()),
+        _joker_state={"ghost_lead": True},
+        boss_modifiers=BossModifiers(seven_eight_trump=True),
+    )
+    acc = ScoreAccumulator()
+    event = TrickWonEvent(
+        winner=Seat.NORTH,
+        cards=(
+            Card(Suit.HEARTS, Rank.SEVEN),    # SOUTH — leads a 7 = trump under Déluge
+            Card(Suit.HEARTS, Rank.TEN),      # EAST
+            Card(Suit.SPADES, Rank.JACK),     # NORTH — plays trump
+            Card(Suit.HEARTS, Rank.KING),     # WEST
+        ),
+        trick_number=3,
+        is_last=False,
+        card_points=30,
+        trump=Suit.SPADES,
+        leader_seat=Seat.SOUTH,
+    )
+    out = acc.update_state(state, event)
+    assert out._mult == 1.0, "ghost_lead must not fire when lead is a Déluge-trump 7/8"
+    assert out._bonus_money == 0
+
+
 # ── L'Architecte annonce-cash-x2 ────────────────────────────────────────────
 
 

@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.7.3] - 2026-05-21
+
+Patch release: targeted bug-hunt + performance + code-logic audit. Three
+parallel exploration passes (classic engine, BelAtro layer, UI/render)
+surfaced ~30 candidate findings; verifying each against the live code
+rejected the false positives (deck.py "deluge scores 0", LePasseur "missing
+re_emit guard", show_rules "missing invalidate on scroll", show_history
+"missing term_h in cache key", legal_cards "missing trick_rank hoist") and
+shipped only the verified-true delta. All baselines green: `ruff` 0
+violations, `mypy --strict` 0 errors, `pytest` 1007/1007.
+
+### Fixed
+
+- **(Bug) `announce()` did not invalidate the render-diff baseline.** The
+  function paints a transient banner with absolute cursor positioning,
+  bypassing `display()`. Without a post-paint `invalidate_diff()` the next
+  `display()` diffed against `_last_emitted_lines` (which has no record of
+  the banner) and could leave the banner visible as a ghost on the bottom
+  row. Same architectural rule as `show_help` / `show_history` /
+  `show_rules` / `show_card_detail` / `show_round_summary` /
+  `animate_score_update`. `announce()` was the last unfixed site of the
+  4.0.0 / 4.6.4 finally-pattern sweep. Pinned by
+  `test_announce_invalidates_diff_baseline` in `tests/test_render_diff.py`.
+- **(Bug) L'Infiltré × La Déluge interaction.** The `ghost_lead` deck rule
+  paid `+2 Mult / +$1` when NS won a trick by playing trump on a "non-trump
+  lead". The is-trump-lead check at `belatro/core/scoring.py:414-417`
+  considered only `lead_suit == event.trump` and the TOUT_ATOUT case —
+  it did not honour `seven_eight_trump` (La Déluge), so a 7-led or 8-led
+  trick was incorrectly treated as a non-trump lead and the bonus could
+  fire even though the lead was effectively trump. Pinned by
+  `test_ghost_lead_silent_when_lead_is_seven_under_deluge` in
+  `tests/belatro/test_decks_4_5.py`.
+- **(Defensive) `LeDemon.on_purchase` is now idempotent.** Re-running the
+  hook on an already-owned joker (a future save/load round-trip or replay-
+  resume tool) would have compounded the trust subtraction. New
+  `_applied_purchase_ids: set[str]` field on `BelAtroRun` (mirrors
+  `_applied_voucher_ids` from 3.9.3) short-circuits the second call. Pinned
+  by `test_le_demon_on_purchase_is_idempotent` in
+  `tests/belatro/test_joker_contracts.py`.
+
+### Changed
+
+- **AI comment about La Déluge corrected** (`src/belote/ai.py:293-296`).
+  The pre-4.7.3 comment claimed "promotes 7s/8s of trump above the Jack" —
+  but `deck.py::trick_rank` puts the 7 at rank 8 and the 8 at rank 9
+  (the two LOWEST trumps, scoring 0). The boss description in
+  `boss.py:95` ("become trump") matches the code, not the comment. The
+  comment now states the actual behaviour so future maintainers don't
+  chase a phantom bug.
+- **`render_joker_pip_strip` / `render_synergy_tooltip` split into
+  builders + writers** (`belatro/ui/hud.py`). Pre-4.7.3 each helper did
+  its own `sys.stdout.write + flush` outside `BelAtroHUD._render`'s
+  batched parts list, costing 2–3 syscalls per HUD refresh instead of
+  one. New `build_joker_pip_strip` / `build_synergy_tooltip` return
+  strings; the legacy `render_*` wrappers (used by direct callers and
+  tests) still exist for backward compatibility. `BelAtroHUD.render`
+  and `_render_compact` now embed both builders into a single batched
+  write. Pinned by `test_belatro_hud_render_writes_once` in
+  `tests/belatro/test_hud_toggle.py`.
+
+### Performance
+
+- **`_get_card_face` reads `_cached_theme_name` instead of
+  `theme_manager.current_name`** (`belote/ui/render.py:314`). The module
+  already caches the theme name (line 84) and refreshes it via the theme
+  callback (line 95); `_get_card_face` is called ~52 times per game
+  frame, so eliminating the per-call property lookup shaves a few
+  microseconds off the render budget. The cache is kept in sync via the
+  existing theme-change callback. `clear_card_cache` ensures the card
+  face cache is reset on every theme change, so reading the cached name
+  is safe.
+
+### Internal
+
+- New `BelAtroRun._applied_purchase_ids: set[str]` field for joker
+  on_purchase idempotency (analogous to `_applied_voucher_ids`). Empty
+  by default; populated lazily by corrupted jokers with non-idempotent
+  on_purchase actions.
+- `build_joker_pip_strip(...) -> str` / `build_synergy_tooltip(...) -> str`
+  public builder API in `belatro/ui/hud.py`; `render_joker_pip_strip` /
+  `render_synergy_tooltip` retained as thin wrappers around the builders.
+
+### Test count baseline
+
+- 1007 (4.7.2 had 1003; +4 in 4.7.3 across `test_render_diff.py`,
+  `test_decks_4_5.py`, `test_joker_contracts.py`, `test_hud_toggle.py`).
+
 ## [4.7.2] - 2026-05-20
 
 Patch release: external-model audit verification pass. A prior audit (pasted

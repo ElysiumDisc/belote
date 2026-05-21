@@ -377,6 +377,37 @@ def test_shop_render_writes_once_per_frame(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
 
+def test_announce_invalidates_diff_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """4.7.3 regression: `announce()` paints a transient banner at the bottom
+    row via absolute-position writes, bypassing the diff cache. Without a
+    post-paint `invalidate_diff()` the next `display()` could diff the new
+    frame against `_last_emitted_lines` (which has no record of the banner)
+    and leave the banner visible as a ghost overlay.
+
+    Same architectural rule as `show_help`/`show_history`/`show_rules`/
+    `show_card_detail`/`show_round_summary`/`animate_score_update`.
+    """
+    import belote.ui.announce  # noqa: F401
+    announce_mod = _sys.modules["belote.ui.announce"]
+
+    # Seed a non-None diff baseline. If invalidate_diff() runs, this resets to None.
+    render_mod._last_emitted_lines = ("stale row",)
+
+    # Stub the reader-less zero-duration path so the test is instantaneous.
+    monkeypatch.setattr(announce_mod, "get_term_size", lambda: (120, 40))
+    buf = io.StringIO()
+    monkeypatch.setattr(announce_mod.sys, "stdout", buf)
+
+    announce_mod.announce("Trick won!", duration=0.0, reader=None)
+
+    assert render_mod._last_emitted_lines is None, (
+        "announce() must call invalidate_diff() before returning — without "
+        "it, the bottom-row banner persists as a ghost on the next display()."
+    )
+
+
 def test_animate_score_update_invalidates_diff_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -40,7 +40,13 @@ class LeDemon(Joker):
     is_corrupted = True
 
     def on_purchase(self, run: BelAtroRun) -> None:
-        # Degrade trust by 3, making partner play worse
+        # Degrade trust by 3, making partner play worse. 4.7.3: idempotency
+        # guard — without it, a save/load round-trip or replay-resume tool
+        # that re-runs on_purchase on already-owned jokers would compound
+        # the cost. Voucher.apply() solved the same problem in 3.9.3.
+        if self.id in run._applied_purchase_ids:
+            return
+        run._applied_purchase_ids.add(self.id)
         run.partner.trust.value = max(0, run.partner.trust.value - 3)
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:

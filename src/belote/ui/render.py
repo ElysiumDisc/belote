@@ -306,12 +306,18 @@ def _get_card_face(
     legal: bool = True,
     layout: LayoutPreset = STANDARD,
 ) -> list[str]:
-    """Helper to call cached _card_face with current global state."""
+    """Helper to call cached _card_face with current global state.
+
+    Uses the module-local `_cached_theme_name` (kept in sync by the theme
+    callback) instead of the live `theme_manager.current_name` property to
+    skip a property lookup + attribute dereference per card render
+    (~52 calls per game frame).
+    """
     return _card_face_internal(
         card,
         selected,
         legal,
-        theme_manager.current_name,
+        _cached_theme_name,
         TERMINAL.has_utf8,
         layout.card_w,
         layout.card_h,

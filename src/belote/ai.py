@@ -290,9 +290,11 @@ class AIPlayer:
         """Decide which card to play."""
         hand = state.hand_of(self.seat)
         legal = legal_cards(state, self.seat)
-        # La Déluge boss promotes 7s/8s of trump above the Jack — every ranking
-        # / point read in this method must respect that flag or the AI will
-        # pick the wrong cards.
+        # La Déluge boss makes 7s and 8s of any suit rank as trump (the two
+        # LOWEST trumps — 7 at rank 8, 8 at rank 9, both scoring 0 points;
+        # see deck.py::trick_rank and ::card_points). Every ranking / point
+        # read in this method must thread `_se` through or the AI under-
+        # values trump cards that should beat them.
         self._se = state.boss_modifiers.seven_eight_trump
 
         # Boss: L'Agent Double (Partner sabotages on 3 random tricks)

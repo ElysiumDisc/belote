@@ -48,11 +48,18 @@ def announce(
     )
     sys.stdout.write(move(max(1, term_h - 1), 1) + clear_line() + banner)
     sys.stdout.flush()
-    if reader and duration > 0:
-        return interruptible_sleep(duration, reader)
-    if duration > 0:
-        time.sleep(duration)
-    return None
+    # The banner is painted with absolute positioning, bypassing display()'s
+    # diff cache. The next display() would diff against the pre-banner cached
+    # frame and could skip repainting the banner row, leaving the message as a
+    # ghost. Mirrors the finally pattern in animate_score_update (4.6.4).
+    try:
+        if reader and duration > 0:
+            return interruptible_sleep(duration, reader)
+        if duration > 0:
+            time.sleep(duration)
+        return None
+    finally:
+        invalidate_diff()
 
 
 def show_round_summary(
