@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.8.2] - 2026-05-25
+
+Audit-driven correctness + perf-hygiene release. A deep multi-lane audit
+(bug hunt + logic + performance + game-mechanics-implementation review)
+surfaced two real Sans Atout AI bugs, a joker-registry footgun, a
+joker-state alias hazard, and a handful of low-severity loose ends. All
+findings landed; no rules changes; AI play is more accurate under SA.
+
+### Fixed
+
+- **(B1, HIGH) Hard AI no longer mis-scores off-suit cards as "winning" under
+  Sans Atout** (`src/belote/ai.py::_score_winning_strategy`). Pre-4.8.2 the
+  candidate's rank was `_NONTRUMP_ORDER[card.rank]` regardless of suit, while
+  `highest_rank` was computed from lead-suit cards only. An off-suit Ace
+  (rank 7) compared against a lead-suit Jack (rank 3) fired `win_bonus` even
+  though `_card_beats` (game.py) forbids off-suit cards from winning under SA.
+  The AI burned high off-suit cards when forced to discard. Fix: pin `rank=-1`
+  for off-suit candidates so `rank > highest_rank` is unreachable.
+- **(B2, MED) 2-ply opponent-trump-fear penalty suppressed under SA**
+  (`src/belote/ai.py::_score_winning_strategy`). The penalty assumes opponents
+  can trump the winner. Under SA `trump is None`, so the conditions
+  `trump not in opp_voids` (always True for `None`) and
+  `card.suit != trump` (always True) both passed — the AI penalized any
+  winning play by -8 when the right-hand opponent was known void in lead.
+  Wrapped in `if not is_sa:` so the entire block is moot under SA.
+- **(B3, MED) `ScoreAccumulator._handler_index` rebuilds on `_jokers` mutation**
+  (`src/belote/belatro/core/scoring.py::_fire_jokers`). Pre-4.8.2 the lazy
+  gate was `not self._handler_index and self._jokers`, which is False once
+  `attach_jokers([])` ran (the index has 5 truthy keys with empty lists).
+  Tests that appended to `_jokers` after the empty attach were silently
+  ignored. Fix: identity-set comparison (`_attached_joker_ids`) against the
+  current `_jokers` list — any drift triggers `attach_jokers(self._jokers)`.
+- **(B4, MED) `state._joker_state` alias preserved across post-trigger
+  mutations** (`src/belote/belatro/engine/round_driver.py`). The post-
+  `trigger_round_start` agent_double sabotage block used
+  `replace(state, _joker_state={...})`, which broke the ledger alias and
+  forced the heist block into a defensive dual-write. Replaced with in-place
+  mutation; the heist dual-write is gone too. Classic-Belote reads via
+  `state._joker_state.get(...)` once again see live ledger mutations for the
+  rest of the round.
+- **(B5, LOW) `_compute_belote_points` asserts the announcer↔tracker
+  invariant** (`src/belote/scoring.py`). Hand-built states with
+  `belote_announcer` set but `belote_tracker[0]=False` would silently award
+  belote points; now raises AssertionError.
+- **(B6, LOW) `ContractReward.honor_bonus` default switched to `int 0`**
+  (`src/belote/belatro/core/scoring.py`). Default was `0.0` (float) but the
+  TypedDict declared `int` — worked by numeric duck-typing but drifted from
+  the contract. No behavior change.
+
+### Performance
+
+- **(P1) Hard AI rank lookups consolidated** (`src/belote/ai.py::_hard_play`).
+  Pre-4.8.2 `_score_winning_strategy` called `trick_rank(card, trump, ...)`
+  once per candidate plus once per visible partner card — O(legal ×
+  partner_hand) recomputations. Now `_hard_play` builds `candidate_ranks`
+  and `partner_ranks` once, threaded through `_score_card_play` and
+  `_score_winning_strategy` as new kwargs. The SA off-suit `-1` short-circuit
+  from B1 is baked into the cache, so the canonical comparison is a dict
+  lookup.
+- **(P2) Dropped redundant `from collections import Counter` local in
+  `_hard_play`** — `Counter` is already imported at module top.
+
+### Internal / Doc
+
+- **(L1) `GameState._joker_state` docstring spells out the BelAtro
+  ledger-alias contract** (`src/belote/game.py`). After
+  `trigger_round_start` the dict is shared with `acc._ledger.joker_state`;
+  round-driver mutates in place to preserve the alias. Classic callers
+  outside that scope still use `replace()`.
+- **(L2) `UnlockTracker.on_event` logs at DEBUG on unhandled event types**
+  (`src/belote/belatro/progression/unlocks.py`). Silent no-op was the
+  contract, but a new unlock keyed off `TrickWonEvent` or `BeloteAnnouncedEvent`
+  would silently fail — the log line makes the miss visible under
+  `BELOTE_LOG_LEVEL=DEBUG`.
+- **(L3) `AIMemory.last_partner_hand_key` includes `hide_partner_hand`**
+  (`src/belote/ai.py`). Memo invalidates if the boss flag flips mid-round.
+  Defensive — no boss toggles it today, but a future voucher/joker that
+  changes visibility mid-round would otherwise see stale cached partner
+  cards.
+
+### Tests
+
+- **New file `tests/test_ai_sans_atout.py`** (3 tests) — pins B1 (off-suit
+  Ace not burned), B1 unit-level (no `win_bonus` for off-suit candidate),
+  B2 (2-ply penalty suppressed under SA).
+- **New file `tests/test_ai_deluge_voids.py`** (4 tests) — pins void
+  inference under La Déluge alone, Le Républicain alone, and both
+  combined; plus the negative case (non-wild off-lead card still proves
+  void under Le Républicain).
+- **New file `tests/belatro/test_handler_registry.py`** (3 tests) — B3
+  regression pins: `attach_jokers([])` + append, attach + replace, and the
+  no-drift no-rebuild sanity check.
+- **New file `tests/belatro/test_competition_malediction.py`** (3 tests)
+  — documents the actual stacking behaviour of La Compétition + La
+  Malédiction under `score_round`.
+- **Extended `tests/test_belote.py`** with B5 assertion test.
+- **Extended `tests/belatro/test_phase1_plumbing.py`** with B4 alias
+  survival test.
+- **Extended `tests/test_bidding_all_pass.py`** with end-to-end litige
+  pool consume after two all-pass redeals (T1).
+- Test count baseline: **1044** (4.8.1 had 1028; +16 in 4.8.2).
+
+### Speculative perf (measured, not implemented)
+
+Two speculative items from the plan (P4 `legal_cards` key-build cost; P5
+`ledger.transactional` wrapper overhead) were instrumented and closed.
+Measurement: legal_cards is ~3 % of round time (below the 5 % threshold to
+justify a hand-id-on-tuple refactor); BelAtro round mean is 13.69 ms /
+p95 18.49 ms (73 rounds/sec) — well below any user-visible jank threshold.
+
 ## [4.8.1] - 2026-05-21
 
 Maintenance release: outcome of a thorough multi-lane audit (logic / performance / state management, then four deeper passes). Audit headline: **zero critical or high-severity bugs** survived verification. The two micro-fixes below are pure consistency / micro-optimization. No rules, scoring, AI behavior, or UI behavior changes — `belatro` and `belote` play exactly the same.

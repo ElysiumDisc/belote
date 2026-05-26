@@ -162,3 +162,78 @@ def test_litige_pool_survives_two_consecutive_all_pass_redeals() -> None:
     state = start_round(state, random.Random(43))
 
     assert state.litige_points == 162
+
+
+def test_litige_pool_consumed_after_normal_round_following_redeals() -> None:
+    """4.8.2 (T1): end-to-end pin. Round 1 is litige (pool: 80). Round 2 +
+    round 3 both all-pass (pool persists at 80). Round 4 is a normal
+    contract that the taker wins — the consume path runs and the litige
+    pool resets to 0.
+    """
+    from belote.scoring import ScoringBreakdown, apply_round_score
+
+    state = new_game()
+    state = start_round(state, random.Random(37))
+    # Round 1: simulate a litige outcome (don't actually play 32 cards —
+    # just stamp a litige breakdown). apply_round_score then carries the
+    # awarded points into the run-level pool.
+    breakdown = ScoringBreakdown(
+        taker_team=0,
+        table_taker_pts=80,
+        table_defender_pts=80,
+        credit_taker_pts=0,
+        credit_defender_pts=80,
+        last_trick_team=0,
+        taker_declarations=0,
+        defender_declarations=0,
+        taker_belote=0,
+        defender_belote=0,
+        taker_rebelote=False,
+        defender_rebelote=False,
+        taker_total=0,
+        defender_total=80,
+        is_capot=False,
+        is_failed=False,
+        is_litige=True,
+        litige_points_awarded=80,
+    )
+    state = apply_round_score(state, breakdown)
+    assert state.litige_points == 80, "Round 1 litige did not seed the pool"
+
+    # Rounds 2 & 3: all-pass. Pool must survive both.
+    for _ in range(8):
+        state = process_bid(state, None)
+    state = start_round(state, random.Random(41))
+    assert state.litige_points == 80
+    for _ in range(8):
+        state = process_bid(state, None)
+    state = start_round(state, random.Random(43))
+    assert state.litige_points == 80, "Pool dropped across two consecutive all-pass redeals"
+
+    # Round 4: normal contract, taker wins. The breakdown's taker_total
+    # would include the litige_points (added in `_score_normal_outcome`),
+    # and `apply_round_score` then RESETS the pool to 0.
+    success = ScoringBreakdown(
+        taker_team=0,
+        table_taker_pts=100,
+        table_defender_pts=62,
+        credit_taker_pts=100,
+        credit_defender_pts=62,
+        last_trick_team=0,
+        taker_declarations=0,
+        defender_declarations=0,
+        taker_belote=0,
+        defender_belote=0,
+        taker_rebelote=False,
+        defender_rebelote=False,
+        taker_total=180,  # 100 card pts + 80 carried litige
+        defender_total=62,
+        is_capot=False,
+        is_failed=False,
+        is_litige=False,
+    )
+    state = apply_round_score(state, success)
+    assert state.litige_points == 0, (
+        f"litige pool not consumed by normal-round success: "
+        f"litige_points={state.litige_points}"
+    )

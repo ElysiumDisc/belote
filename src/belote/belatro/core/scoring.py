@@ -94,6 +94,13 @@ class ScoreAccumulator:
     # cascade in `_fire_jokers`. Saves ~50–80μs/round (5 jokers × ~25
     # events × ~0.5μs per getattr).
     _handler_index: dict[str, list[tuple[Joker, Any]]] = field(default_factory=dict)
+    # 4.8.2 (B3): identity-set of the jokers passed to the most recent
+    # `attach_jokers` call. Compared against `set(map(id, self._jokers))`
+    # in `_fire_jokers` to detect post-attach mutation. `None` until the
+    # first attach; `set()` after `attach_jokers([])` (which is truthy-
+    # distinguishable from None). Excluded from `compare/repr` so test
+    # state-equality assertions don't break.
+    _attached_joker_ids: set[int] | None = field(default=None, compare=False, repr=False)
     # 4.6.2: RoundLedger lifetime is one round; created in
     # trigger_round_start, sealed in seal_round / materialize. Optional
     # because tests that construct an accumulator without calling
@@ -128,6 +135,12 @@ class ScoreAccumulator:
                     continue  # joker didn't override this handler
                 index[method_name].append((joker, method))
         self._handler_index = index
+        # 4.8.2 (B3): remember exactly which joker objects we registered for so
+        # `_fire_jokers` can detect post-attach mutation of `self._jokers` and
+        # rebuild before firing. A no-override joker still gets tracked here
+        # (so it doesn't trigger spurious rebuilds), even though it has no
+        # entries in `_handler_index`.
+        self._attached_joker_ids = {id(j) for j in jokers}
 
     def _make_ledger(self, state: GameState) -> RoundLedger:
         from .round_ledger import RoundLedger
@@ -283,7 +296,18 @@ class ScoreAccumulator:
             # so the per-event getattr cascade is gone. Lazy build on first
             # use if a caller forgot to call `attach_jokers` (this also
             # protects tests that mutate `self._jokers` directly).
-            if not self._handler_index and self._jokers:
+            #
+            # 4.8.2 (B3): also rebuild if the current `_jokers` list differs
+            # from the identity-set captured at the most recent attach. Pre-
+            # 4.8.2 the gate was `not _handler_index and _jokers` — False once
+            # `attach_jokers([])` runs (the index has 5 truthy keys with empty
+            # lists), so tests that appended to `_jokers` after the empty
+            # attach were silently ignored. Identity-set comparison catches
+            # that case and any other post-attach mutation.
+            if self._attached_joker_ids is None:
+                if self._jokers:
+                    self.attach_jokers(self._jokers)
+            elif self._attached_joker_ids != {id(j) for j in self._jokers}:
                 self.attach_jokers(self._jokers)
             for joker, method in self._handler_index.get(method_name, ()):
                 # 4.6.4: per-joker transactional + EventBus-style isolation.
@@ -379,7 +403,11 @@ class ScoreAccumulator:
                 # The Moon (Sans Atout): honor bonus per honor won
                 if event.trump is None:
                     moon_reward = self.contract_levels.get("sans_atout", {})
-                    honor_bonus = moon_reward.get("honor_bonus", 0.0)
+                    # 4.8.2 (B6): default to `0` (int) so the type-narrowed
+                    # path stays aligned with the `ContractReward.honor_bonus:
+                    # int` TypedDict declaration. The 0.0 default worked by
+                    # accident under Python's numeric duck-typing.
+                    honor_bonus = moon_reward.get("honor_bonus", 0)
                     if honor_bonus:
                         honors = sum(
                             1 for c in event.cards

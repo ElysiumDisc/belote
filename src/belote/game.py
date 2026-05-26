@@ -237,8 +237,18 @@ class GameState:
 
     # Same mutable-dict-inside-frozen contract as `belote_holders`. BelAtro
     # jokers and the round driver write per-round flags here. Values must be
-    # scalars (bool/int/str) — see tests/belatro/test_phase1_plumbing.py
+    # scalars (bool/int/str/frozenset) — see tests/belatro/test_phase1_plumbing.py
     # `test_joker_state_only_contains_scalar_values`.
+    #
+    # 4.8.2 (B4 wiring note): inside a BelAtro round this dict is *aliased*
+    # to `ScoreAccumulator._ledger.joker_state` from `trigger_round_start`
+    # onward. The round driver mutates the dict IN PLACE (heist declaration,
+    # agent_double sabotage sets, etc.) to preserve the alias — `replace(
+    # state, _joker_state={...})` would shallow-copy the dict and break it,
+    # making subsequent ledger writes invisible to classic-Belote reads
+    # (ai.py, scoring.py, game.py via `state._joker_state.get(...)`).
+    # Outside the BelAtro round driver, classic callers should still rebuild
+    # via `replace()` to keep the frozen-dataclass discipline.
     _joker_state: dict[str, object] = field(default_factory=dict)
     _chips: int = 0
     _mult: float = 1.0

@@ -694,6 +694,17 @@ def _compute_belote_points(ctx: _ScoringContext) -> tuple[int, int, bool, bool]:
     Returns (taker_belote, defender_belote, taker_rebelote, defender_rebelote).
     """
     state = ctx.state
+    # 4.8.2 (B5): pin the invariant that `belote_announcer` and
+    # `belote_tracker[0]` advance in lockstep — game.py:_record_belote_announcement
+    # only assigns the announcer at the moment the tracker flips True. A state
+    # with announcer set but tracker[0]=False would be a corruption from
+    # replay tooling or a hand-built fixture, and the scoring branches below
+    # would credit belote points despite no announcement having fired. Surface
+    # this as a hard assertion rather than silently mis-scoring.
+    assert state.belote_announcer is None or state.belote_tracker[0], (
+        "belote_announcer set without belote_tracker[0] flipped — "
+        "GameState invariant violated."
+    )
     # Prefer the captured announcer seat (recorded at the moment belote was
     # declared) over re-deriving from belote_holders — under L'Anarchie the
     # current state.trump differs from the trump at announcement time, and

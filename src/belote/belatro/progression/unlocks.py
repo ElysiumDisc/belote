@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from belote.game import Seat
@@ -9,6 +10,8 @@ from .save import Profile, SaveManager
 
 if TYPE_CHECKING:
     from ..engine.event_bus import EventBus
+
+_log = logging.getLogger(__name__)
 
 
 class UnlockTracker:
@@ -54,6 +57,13 @@ class UnlockTracker:
             dirty |= self._handle_round_end(event)
         elif isinstance(event, DeclarationScoredEvent):
             dirty |= self._handle_declaration(event)
+        else:
+            # 4.8.2 (L2): silent no-op was the contract pre-4.8.2, but it
+            # masked the case where a new unlock keys off a previously-
+            # unhandled event type (e.g. TrickWonEvent). A debug-level log
+            # lets future maintainers see misses via `BELOTE_LOG_LEVEL=DEBUG`
+            # without breaking prod (default log level is WARNING).
+            _log.debug("UnlockTracker: unhandled event type %s", type(event).__name__)
 
         if dirty:
             self.save_manager.save_profile(self.profile)

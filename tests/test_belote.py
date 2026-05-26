@@ -1103,6 +1103,45 @@ def test_package_version_matches_pyproject() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_belote_announcer_without_tracker_flag_raises() -> None:
+    """4.8.2 (B5) regression pin: `belote_announcer` and `belote_tracker[0]`
+    must advance in lockstep — `game.py::_record_belote_announcement` only
+    sets the announcer at the moment the tracker flips True. A state with
+    announcer set but tracker[0]=False would be corruption from replay
+    tooling or a hand-built fixture; `_compute_belote_points` must surface
+    the invariant violation rather than silently credit belote points.
+    """
+    import pytest
+
+    from belote.game import BossModifiers
+    from belote.scoring import _compute_belote_points, _ScoringContext
+
+    bad_state = GameState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        contract="hearts",
+        taker=Seat.SOUTH,
+        belote_holders={Suit.HEARTS: Seat.SOUTH},
+        belote_tracker=(False, False),  # tracker NOT flipped
+        belote_announcer=Seat.SOUTH,  # but announcer set — invariant violated
+        belote_trump=None,
+        boss_modifiers=BossModifiers(),
+    )
+    ctx = _ScoringContext(
+        state=bad_state,
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        taker_team=0,
+        defender_team=1,
+        is_sa=False,
+        winners=[],
+        tricks_ns=0,
+        tricks_ew=0,
+    )
+    with pytest.raises(AssertionError, match="belote_announcer set without belote_tracker"):
+        _compute_belote_points(ctx)
+
+
 def test_anarchie_rebelote_survives_cross_rotation_play() -> None:
     """3.9.3 R2 regression: under `dynamic_trump` (L'Anarchie) the trump
     rotates after every 2 completed tricks. If South played K-trump in

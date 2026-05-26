@@ -218,3 +218,40 @@ def test_joker_state_only_contains_scalar_values() -> None:
             f"{type(value).__name__}. The shallow-copy contract requires "
             "scalar values only."
         )
+
+
+def test_joker_state_alias_survives_post_trigger_mutations() -> None:
+    """4.8.2 (B4 regression pin): after `trigger_round_start` installs the
+    ledger's joker_state dict as `state._joker_state`, any post-trigger
+    mutation in `round_driver` MUST keep the alias intact so classic-Belote
+    reads via `state._joker_state.get(...)` see live ledger mutations.
+
+    The agent_double sabotage block and the heist declaration block used to
+    rebuild the dict via `replace(state, _joker_state={**state._joker_state,
+    ...})`, which broke the alias. 4.8.2 changed both sites to in-place
+    mutation. This test pins the property at the unit level: write to the
+    ledger's dict after `trigger_round_start` and assert the classic read
+    path sees it.
+    """
+    from belote.belatro.core.scoring import ScoreAccumulator
+    from belote.game import GameState
+
+    acc = ScoreAccumulator()
+    base = GameState(hands=((), (), (), ()))
+    state = acc.trigger_round_start(base)
+
+    # Sanity: state._joker_state IS the ledger's dict (alias established).
+    assert acc._ledger is not None
+    assert state._joker_state is acc._ledger.joker_state, (
+        "trigger_round_start did not install the ledger's dict as "
+        "state._joker_state — alias is broken from the start."
+    )
+
+    # Simulate a round-driver-style in-place mutation (this is what the
+    # 4.8.2 agent_double / heist sites do): mutating state._joker_state
+    # must be visible via the ledger's dict, and vice versa.
+    state._joker_state["heist_declared"] = True
+    assert acc._ledger.joker_state.get("heist_declared") is True
+
+    acc._ledger.joker_state["agent_double_tricks"] = frozenset({1, 5})
+    assert state._joker_state.get("agent_double_tricks") == frozenset({1, 5})

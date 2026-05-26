@@ -179,6 +179,13 @@ def drive_round(
     # Sources: L'Agent Double boss (3 random tricks), BetrayalArc (tricks 4-8 via
     # agent_double_late_only flag), traitre joker (already populated above).
     # Reading the flag — not boss.id — keeps this site reusable.
+    #
+    # 4.8.2 (B4): mutate `state._joker_state` IN PLACE rather than via
+    # `replace(state, _joker_state={...})`. Post-`trigger_round_start` the
+    # dict IS `acc._ledger.joker_state`; preserving the alias means future
+    # ledger mutations remain visible to classic-Belote reads via
+    # `state._joker_state.get(...)`. Pre-4.8.2 this site broke the alias,
+    # forcing the heist code (below) into a defensive dual-write.
     if state.boss_modifiers.agent_double_active and not state._joker_state.get(
         "agent_double_tricks"
     ):
@@ -186,8 +193,7 @@ def drive_round(
             sabotage_tricks = frozenset(range(4, 9))
         else:
             sabotage_tricks = frozenset(rng.sample(range(1, 9), 3))
-        new_jstate = {**state._joker_state, "agent_double_tricks": sabotage_tricks}
-        state = replace(state, _joker_state=new_jstate)
+        state._joker_state["agent_double_tricks"] = sabotage_tricks
 
     # B4: Use partner trust-based difficulty for the North (partner) AI seat
     _north_diff_str = partner.difficulty_for(Seat.NORTH)
@@ -387,20 +393,17 @@ def drive_round(
     # AI takers never get the prompt — the UICallbacks default returns False
     # and the BelAtro override also gates on `state.taker == Seat.SOUTH`.
     #
-    # Write to BOTH `acc._ledger.joker_state` (the accumulator's source of
-    # truth read by process_event) and `state._joker_state` (the classic-
-    # read path). These usually alias to the same dict — `trigger_round_start`
-    # installs the ledger's dict as `state._joker_state` — but the post-
-    # trigger agent_double sabotage block at line ~175 does a
-    # `replace(state, _joker_state={**state._joker_state, ...})` that breaks
-    # the alias. Mutating both keeps both observers consistent regardless.
+    # 4.8.2 (B4): single-site mutation. `state._joker_state` IS
+    # `acc._ledger.joker_state` after `trigger_round_start` installs the
+    # alias — and the post-trigger sabotage block above now preserves the
+    # alias too (replaced its `replace(state, _joker_state=...)` with
+    # in-place mutation). The pre-4.8.2 dual-write was a workaround for
+    # the broken alias; with the alias hardened, single-write is enough.
     if (
         state.phase == Phase.PLAYING
         and state.taker == Seat.SOUTH
         and ui_callbacks.prompt_heist(state)
     ):
-        if acc is not None and acc._ledger is not None:
-            acc._ledger.joker_state["heist_declared"] = True
         state._joker_state["heist_declared"] = True
 
     # Phase: PLAYING
