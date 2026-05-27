@@ -84,7 +84,7 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (1044 tests expected)
+# Full test suite (1066 tests expected)
 PYTHONPATH=src pytest
 ```
 
@@ -143,10 +143,15 @@ once at startup; toggling mid-run has no effect.
   `fg()` / `bg()` per the [no-color.org](https://no-color.org/) spec.
   Bold/dim/underline/reverse/strikethrough and cursor sequences remain
   (they aren't color). Added in 3.9.0. Backed by `src/belote/ansi.py`.
-- `BELOTE_NO_ANIM=1` — short-circuit every 4.8.0 animation helper
-  (`pulse_text`, `float_text`, `tick_bar`, the joker callouts, the shop
-  purchase/reroll feedback, the trust-bar tick-up, the classic-mode
-  trail / winner glow) to its end-state with no perceptible delay.
+- `BELOTE_NO_ANIM=1` — short-circuit every animation helper (4.8.0
+  baseline: `pulse_text`, `float_text`, `tick_bar`, the joker callouts,
+  the shop purchase/reroll feedback, the trust-bar tick-up, the
+  classic-mode trail / winner glow) to its end-state with no
+  perceptible delay. 4.9.0's `interruptible_sleep_with_spinner` (G4
+  AI-delay spinner) and `collect_trick_to_winner` (U3 trick-collection
+  animation) were removed entirely in 4.9.3; AI pacing during card
+  play now uses plain `interruptible_sleep`, and trick-end visuals are
+  carried by the existing `pulse_winner_glow` banner alone.
   Useful on slow terminals, in CI, or under scripted runs. Read once at
   import; tests that mutate it must call
   `belote.ui.anim._refresh_animations_enabled_from_env()` after the
@@ -195,4 +200,27 @@ git push origin master
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin master --tags
    ```
+
+## Performance measurement
+
+`tests/test_perf_regression.py` is the in-suite guard: it times a few hot paths
+(`render()`, `legal_cards()`, `score_round()`, `trick_card_points()`) and
+fails only on a >2.5× regression vs `tests/perf_baselines.json`. Set
+`BELOTE_SKIP_PERF=1` on slow CI to skip it.
+
+When you need a deeper read or are about to re-baseline:
+
+```bash
+# Wider micro-benchmarks (render, AI decide, full BelAtro round)
+PYTHONPATH=src python scripts/benchmark.py
+
+# Then update tests/perf_baselines.json with the new medians, and record
+# the date + host in the JSON's _comment field so future drift is interpretable.
 ```
+
+If you suspect a per-frame allocation regression, the canonical hot paths to
+profile live (e.g. with `py-spy record --rate 100`) are `render()` in
+`src/belote/ui/render.py` and `_calculate_legal_cards_impl` in
+`src/belote/game.py`. The 4.9.4 audit pass found no quick wins beyond those
+already landed in the 4.6.x / 4.7.x perf cleanups — start from a profiler
+trace, not from guesswork, before adding new caches.

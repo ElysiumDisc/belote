@@ -269,14 +269,37 @@ def show_stats(reader: KeyReader) -> None:
 
 
 def animate_score_update(
-    state: GameState, target_ns: int, target_ew: int, duration: float = 1.0
+    state: GameState,
+    target_ns: int,
+    target_ew: int,
+    duration: float = 1.0,
+    *,
+    reader: KeyReader | None = None,
 ) -> None:
-    """Animate the team scores rolling up to their new values."""
+    """Animate the team scores rolling up to their new values.
+
+    4.9.2 (A1): honors `BELOTE_NO_ANIM=1` (snap to final frame) and accepts an
+    optional `reader` to make the roll skippable. When a reader is supplied,
+    each step waits via `reader.read_timeout(delay)` so a keypress collapses
+    the animation to its final frame — same idiom as `slot_machine_tally`
+    and `belete_stinger`. Without a reader, falls back to `time.sleep` so
+    existing tests that monkeypatch `announce_mod.time.sleep` continue to
+    work.
+    """
+    from .anim import animations_enabled
+
     start_ns, start_ew = state.team_scores
-    steps = 20
-    delay = duration / steps
 
     try:
+        # 4.9.2 (A1): NO_ANIM short-circuit. Paint the final frame once,
+        # skip the loop entirely.
+        if not animations_enabled():
+            display_hud(state, team_scores_override=(target_ns, target_ew))
+            return
+
+        steps = 20
+        delay = duration / steps
+
         for i in range(1, steps + 1):
             curr_ns = start_ns + (target_ns - start_ns) * i // steps
             curr_ew = start_ew + (target_ew - start_ew) * i // steps
@@ -285,7 +308,13 @@ def animate_score_update(
             # `replace(state, team_scores=...)`. Frozen GameState has ~50
             # fields; `replace` allocated a fresh one per frame × 20 frames.
             display_hud(state, team_scores_override=(curr_ns, curr_ew))
-            time.sleep(delay)
+            if reader is not None and delay > 0:
+                if reader.read_timeout(delay) is not None:
+                    # Snap to final frame on user skip.
+                    display_hud(state, team_scores_override=(target_ns, target_ew))
+                    return
+            elif delay > 0:
+                time.sleep(delay)
     finally:
         # 4.6.4: display_hud writes row 1 directly to stdout, bypassing the
         # render-diff cache. Without this invalidation, a subsequent

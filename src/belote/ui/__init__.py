@@ -6,7 +6,15 @@ from .announce import (
     show_stats,
 )
 from .menu import show_ai_config, show_final_screen, show_main_menu
-from .prompts import prompt_bid, prompt_card, show_help, show_history, show_rules
+from .prompts import (
+    prompt_bid,
+    prompt_card,
+    prompt_coinche,
+    prompt_surcoinche,
+    show_help,
+    show_history,
+    show_rules,
+)
 from .render import (
     display,
     get_term_size,
@@ -25,6 +33,8 @@ __all__ = [
     "slide_card_to_table_hint",
     "prompt_card",
     "prompt_bid",
+    "prompt_coinche",
+    "prompt_surcoinche",
     "show_help",
     "show_rules",
     "show_history",

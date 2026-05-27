@@ -1,4 +1,4 @@
-"""Inventory overlay (4.7.0) — V key.
+"""Inventory overlay (4.7.0; 4.9.0 / U5 — activation merged in) — V key.
 
 A detail-on-select pager listing every owned item across the BelAtro run:
 jokers (with edition), vouchers, consumables (tarots / planets), the
@@ -8,10 +8,15 @@ pattern (clear_screen + vcenter_lines + invalidate_diff in finally),
 but adds a two-view state machine: a navigable list + an Enter-driven
 per-item detail page.
 
-Wired from `belote/ui/prompts.py::prompt_card` via the new `Key.INVENTORY`
+4.9.0 / U5: V is no longer purely read-only. Pressing `1`–`9` activates
+the Nth consumable directly from the list; pressing `A` on a consumable's
+detail page does the same. The shop's `C` key still launches the
+numbered `ConsumablesOverlay` for that quick-pick flow (the two coexist:
+V is the unified screen, C is the in-shop quick path).
+
+Wired from `belote/ui/prompts.py::prompt_card` via the `Key.INVENTORY`
 enum value (V key), with the `belatro/main.py::UICallbacks._show_inventory`
-shim. The C key's `ConsumablesOverlay` continues to serve the
-"activate a tarot/planet" flow separately — V is read-only, C is action.
+shim.
 """
 
 from __future__ import annotations
@@ -46,11 +51,16 @@ class _InventoryEntry:
     in the list view). `detail_lines` is the body of the detail page,
     shown when the player hits Enter on this row. `title` is what the
     list view displays.
+
+    4.9.0 / U5: `consumable_idx` is set for CONSUMABLES rows to the row's
+    index in `run.consumables`. None for non-consumable rows. Lets the
+    activation handler bypass a separate snapshot.
     """
 
     category: str
     title: str
     detail_lines: tuple[str, ...]
+    consumable_idx: int | None = None
 
 
 _CATEGORY_ORDER: tuple[str, ...] = (
@@ -126,18 +136,20 @@ def _build_entries(run: BelAtroRun) -> list[_InventoryEntry]:
             )
         )
 
-    # Consumables — tarots and planets held but not yet activated. Press C
-    # in the shop to use these; V here is read-only.
-    for consumable in run.consumables:
+    # Consumables — tarots and planets held but not yet activated. 4.9.0 /
+    # U5: each entry remembers its index in `run.consumables` so digit-key
+    # and detail-page activation can dispatch without a second snapshot.
+    for idx, consumable in enumerate(run.consumables):
         name = getattr(consumable, "name", "?")
         desc = getattr(consumable, "description", "")
         kind = type(consumable).__name__
-        title = f"{name} ({kind})"
+        title = f"[{idx + 1}] {name} ({kind})"
         entries.append(
             _InventoryEntry(
                 category="CONSUMABLES",
                 title=title,
                 detail_lines=(desc,) if desc else (),
+                consumable_idx=idx,
             )
         )
 
@@ -233,19 +245,54 @@ class InventoryOverlay:
                     selected = (selected - 1) % len(entries)
                 elif event.key in (Key.DOWN, Key.RIGHT):
                     selected = (selected + 1) % len(entries)
+                elif event.key == Key.CHAR and event.char and event.char.isdigit():
+                    # 4.9.0 / U5: digit activates the Nth consumable directly.
+                    idx = int(event.char) - 1
+                    if self._activate_consumable_at(idx):
+                        # Rebuild entries — `consume()` removes the item, so
+                        # the indices shift. Reset selection if past the end.
+                        entries = _build_entries(self.run)
+                        if not entries:
+                            self._render_empty()
+                            self._wait_for_close()
+                            return
+                        selected = min(selected, len(entries) - 1)
                 elif event.key == Key.ENTER:
                     # Detail view loop. ESC / ← / V pop back to the list;
-                    # ENTER on detail does nothing (no further drill-down).
+                    # `A` on a consumable detail page activates it (U5).
+                    detail_idx = selected
                     while True:
-                        self._render_detail(entries[selected])
+                        self._render_detail(entries[detail_idx])
                         de = self.reader.read()
                         if de.key in (
                             Key.ESC, Key.QUIT, Key.EOF,
                             Key.LEFT, Key.INVENTORY,
                         ):
                             break
+                        if (
+                            de.key == Key.CHAR
+                            and de.char
+                            and de.char.lower() == "a"
+                        ):
+                            cidx = entries[detail_idx].consumable_idx
+                            if cidx is not None and self._activate_consumable_at(cidx):
+                                entries = _build_entries(self.run)
+                                if not entries:
+                                    self._render_empty()
+                                    self._wait_for_close()
+                                    return
+                                selected = min(selected, len(entries) - 1)
+                                break  # pop back to list view
         finally:
             invalidate_diff()
+
+    def _activate_consumable_at(self, idx: int) -> bool:
+        """Activate `run.consumables[idx]` if it exists. 4.9.0 / U5."""
+        if not (0 <= idx < len(self.run.consumables)):
+            return False
+        item = self.run.consumables[idx]
+        self.run.consume(item, context=self.run)
+        return True
 
     # ── rendering ────────────────────────────────────────────────────────
 
@@ -311,12 +358,16 @@ class InventoryOverlay:
             lines.append(ansi_center(tint + f"{marker} {entry.title}" + RESET, term_w))
 
         lines.append("")
-        lines.append(
-            ansi_center(
-                DIM + "[↑/↓] move   [Enter] detail   [Esc/V/Q] close" + RESET,
-                term_w,
+        # 4.9.0 / U5: surface the digit-activate path when consumables exist.
+        has_consumables = any(e.consumable_idx is not None for e in entries)
+        if has_consumables:
+            footer = (
+                "[↑/↓] move   [Enter] detail   [1-9] activate consumable   "
+                "[Esc/V/Q] close"
             )
-        )
+        else:
+            footer = "[↑/↓] move   [Enter] detail   [Esc/V/Q] close"
+        lines.append(ansi_center(DIM + footer + RESET, term_w))
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
@@ -337,9 +388,17 @@ class InventoryOverlay:
         if not entry.detail_lines:
             lines.append(ansi_center(DIM + "(no description)" + RESET, term_w))
         lines.append("")
-        lines.append(
-            ansi_center(DIM + "[Esc/←/V] back to list" + RESET, term_w)
-        )
+        # 4.9.0 / U5: show activate hint on consumable detail pages.
+        if entry.consumable_idx is not None:
+            lines.append(
+                ansi_center(
+                    DIM + "[A] activate   [Esc/←/V] back to list" + RESET, term_w
+                )
+            )
+        else:
+            lines.append(
+                ansi_center(DIM + "[Esc/←/V] back to list" + RESET, term_w)
+            )
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()

@@ -43,6 +43,8 @@ from .ui import (
     patch_trick_card,
     prompt_bid,
     prompt_card,
+    prompt_coinche,
+    prompt_surcoinche,
     pulse_winner_glow,
     show_round_summary,
     slide_card_to_table_hint,
@@ -153,7 +155,71 @@ def run_bidding(
         history.append(current)
         current = process_bid(current, bid)
 
+    # 4.9.0 / G1: post-bid coinche flow. Only fires when a taker exists
+    # (i.e. the bidding produced a real contract, not an all-pass). One
+    # defender-side coinche check, then if coinched, one taker-side
+    # surcoinche check. Updates `current.coinche_level` in place via
+    # `dataclasses.replace`. AI heuristic in `ai.decide_coinche`.
+    if current.taker is not None:
+        current = _run_coinche_flow(current, reader, ai_players)
+
     return current
+
+
+def _run_coinche_flow(
+    state: GameState,
+    reader: KeyReader,
+    ai_players: dict[Seat, AIPlayer],
+) -> GameState:
+    """4.9.0 / G1: after a bid locks, ask the defending side about coinche
+    and (if coinched) the taker side about surcoinche. Returns the state
+    with `coinche_level` updated."""
+    from .game import team_of
+
+    if state.taker is None:
+        return state
+    taker_team = team_of(state.taker)
+    defenders = [s for s in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST) if team_of(s) != taker_team]
+
+    # Defender-side coinche check. SOUTH gets the interactive prompt; AI
+    # defenders use `decide_coinche`. First defender to choose to coinche
+    # locks it in (no need to poll the second defender — it's the team's
+    # call, not the individual's).
+    coincheur: Seat | None = None
+    for seat in defenders:
+        if seat == Seat.SOUTH:
+            if prompt_coinche(state, reader):
+                coincheur = seat
+                break
+        else:
+            ai = ai_players[seat]
+            if ai.decide_coinche(state):
+                coincheur = seat
+                break
+
+    if coincheur is None:
+        return state
+
+    state = replace(state, coinche_level=1)
+    announce(f"{coincheur.name} coinches! (×2)", duration=0.6, reader=reader)
+
+    # Taker-side surcoinche check. Mirror logic: poll taker team in order.
+    takers = [s for s in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST) if team_of(s) == taker_team]
+    for seat in takers:
+        if seat == Seat.SOUTH:
+            if prompt_surcoinche(state, reader, coincheur.name):
+                state = replace(state, coinche_level=2)
+                announce(f"{seat.name} surcoinches! (×4)", duration=0.6, reader=reader)
+                break
+        else:
+            ai = ai_players[seat]
+            # Reuse the same heuristic — symmetric on hand strength.
+            if ai.decide_coinche(state):
+                state = replace(state, coinche_level=2)
+                announce(f"{seat.name} surcoinches! (×4)", duration=0.6, reader=reader)
+                break
+
+    return state
 
 
 def run_play(
@@ -471,7 +537,7 @@ def run_round(
                 target_ew = ew_old + breakdown.taker_total
 
             if not skip_round_pause:
-                animate_score_update(current, target_ns, target_ew)
+                animate_score_update(current, target_ns, target_ew, reader=reader)
 
             # 4.6.5 a11y: speak the round result. Helper existed since 3.0.0
             # but had no caller; screen-reader users heard trick-by-trick

@@ -334,8 +334,10 @@ class ScoreAccumulator:
                         # `partner_jokers_double` is the legacy boolean flag (pre-3.5.0
                         # back-compat for tests that set it directly). When both are
                         # set, `max()` picks whichever is larger; a one-shot
-                        # DeprecationWarning fires so callers migrate to tier. The flag
-                        # is slated for removal in 4.0; new code should use `partner_tier`.
+                        # DeprecationWarning fires so callers migrate to tier. Kept
+                        # for back-compat with external test fixtures — remove when
+                        # bumping the major (the 4.0 removal target was missed; 4.9.x
+                        # is the current line).
                         if getattr(joker, "is_partner_joker", False):
                             # Clamp to the documented [0, 4] tier range; out-of-band
                             # values from corrupted save state or future mutations

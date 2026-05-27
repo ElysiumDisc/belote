@@ -45,6 +45,13 @@ class AIMemory:
         # `last_voids_key`. The third element (`hide_partner_hand`) is the
         # 4.8.2 L3 addition — invalidates the memo if the boss flag flips.
         self.last_partner_hand_key: tuple[int, int, bool] | None = None
+        # 4.9.0 / G2: partner-signal tally per suit. Positive = partner
+        # signaled "lead this suit"; negative = "don't". Populated by
+        # `_process_trick_signals`; read by `_hard_lead` as a tiebreaker.
+        # `signals_emitted` caps how many of our own discards become signals
+        # per round (preserves tactical value: max 2 per round).
+        self.signals: dict[Suit, int] = dict.fromkeys(Suit, 0)
+        self.signals_emitted: int = 0
 
 
 class AIPlayer:
@@ -84,6 +91,11 @@ class AIPlayer:
             self.memory.processed_tricks_count = 0
             self.memory.last_voids_key = None
             self.memory.last_partner_hand_key = None
+            # 4.9.0 / G2: partner-signal tally and our emit-counter follow
+            # the same triple-reset pattern as the void cache.
+            for suit in Suit:
+                self.memory.signals[suit] = 0
+            self.memory.signals_emitted = 0
         elif (
             self.memory.last_voids_key is not None
             and (completed_count, current_count) < self.memory.last_voids_key
@@ -128,6 +140,48 @@ class AIPlayer:
                 for card in state.hand_of(p):
                     self.memory.partner_hand.add(card)
             self.memory.last_partner_hand_key = partner_key
+
+    def decide_coinche(self, state: GameState) -> bool:
+        """4.9.0 / G1: decide whether to coinche (or 4.9.4: surcoinche).
+
+        Dual-purpose, dispatched on ``state.coinche_level``:
+
+        - level 0 (initial coinche): only the defender team responds; if our
+          team is the taker we never coinche our own bid.
+        - level 1 (surcoinche): only the taker team responds, redoubling
+          back at the defenders who just coinched.
+        - level 2+ (already surcoinched): nobody redoubles further.
+
+        Only HARD-tier players act. The hand-strength heuristic is symmetric
+        — three+ trumps OR holding the trump Jack signals "we expect to
+        win this", which is the same intuition whether you're breaking
+        the contract (coinche) or redoubling the breaker (surcoinche).
+        EASY / MEDIUM never coinche or surcoinche.
+        """
+        from .deck import Rank
+        from .game import team_of
+
+        if self.difficulty != Difficulty.HARD:
+            return False
+        if state.taker is None or state.trump is None:
+            return False
+        if state.coinche_level == 0:
+            if team_of(self.seat) == team_of(state.taker):
+                return False
+        elif state.coinche_level == 1:
+            if team_of(self.seat) != team_of(state.taker):
+                return False
+        else:
+            return False
+        hand = state.hand_of(self.seat)
+        trump = state.trump
+        # TOUT_ATOUT: every suit is trump — fall back to total hand strength.
+        if trump == Suit.TOUT_ATOUT:
+            jacks = sum(1 for c in hand if c.rank == Rank.JACK)
+            return jacks >= 2  # two jacks on a TA hand is a real threat
+        trump_count = sum(1 for c in hand if c.suit == trump)
+        has_jack = any(c.rank == Rank.JACK and c.suit == trump for c in hand)
+        return trump_count >= 3 or has_jack
 
     def decide_bid(self, state: GameState) -> BidValue:
         """Decide whether to bid and which contract.
@@ -700,7 +754,64 @@ class AIPlayer:
                 best_score = score
                 best_card = card
 
-        return best_card
+        # 4.9.0 / G2: on forced discards, optionally swap rank within the
+        # chosen 0-point set (7/8/9) to signal partner. No tactical change
+        # (same suit, same point value); capped at 2 emits per round.
+        return self._maybe_signal_swap(best_card, legal, state, trump)
+
+    def _maybe_signal_swap(
+        self,
+        best_card: Card,
+        legal: tuple[Card, ...],
+        state: GameState,
+        trump: Suit | None,
+    ) -> Card:
+        """4.9.0 / G2: peter-convention signal swap.
+
+        When `best_card` is a forced off-suit non-trump discard AND we have
+        2+ same-suit 0-point alternatives, swap to the high (9 = "lead this
+        suit back") or low (7 = "don't") variant based on whether we hold
+        a high non-trump (A/10) in that suit. Hard tier only; capped at
+        2 emits per round (`memory.signals_emitted`) so we don't sacrifice
+        all rank flexibility for signaling.
+        """
+        if self.difficulty != Difficulty.HARD:
+            return best_card
+        if self.memory.signals_emitted >= 2:
+            return best_card
+        trick = state.current_trick
+        if not trick:
+            return best_card  # leading, not a discard
+        lead_suit = trick[0].card.suit
+        if best_card.suit == lead_suit:
+            return best_card  # followed suit, not a discard
+        if trump is not None and best_card.suit == trump:
+            return best_card  # we trumped
+        if trump == Suit.TOUT_ATOUT:
+            return best_card  # every suit is trump
+        # Same-suit 0-point alternatives among legal cards.
+        candidates = [
+            c for c in legal
+            if c.suit == best_card.suit
+            and c.rank in (Rank.SEVEN, Rank.EIGHT, Rank.NINE)
+        ]
+        if len(candidates) < 2:
+            return best_card
+        # Direction: "like" iff we still hold a non-trump A or 10 in that
+        # suit (a strong card worth leading toward).
+        my_hand = state.hand_of(self.seat)
+        likes = any(
+            c.suit == best_card.suit and c.rank in (Rank.ACE, Rank.TEN)
+            for c in my_hand
+        )
+        order = {Rank.SEVEN: 0, Rank.EIGHT: 1, Rank.NINE: 2}
+        if likes:
+            chosen = max(candidates, key=lambda c: order[c.rank])
+        else:
+            chosen = min(candidates, key=lambda c: order[c.rank])
+        if chosen != best_card:
+            self.memory.signals_emitted += 1
+        return chosen
 
     def _score_card_play(
         self,
@@ -953,7 +1064,20 @@ class AIPlayer:
         is no trump. The `card.suit != trump` comparisons degrade gracefully
         when `trump` is `None` (every card is treated as non-trump), so the
         function returns a sensible lead in both cases.
+
+        4.9.0 / G2: when partner has signaled a "lead this suit" preference
+        (`memory.signals[suit] > 0`) and we hold a non-trump card in that
+        suit, prefer it. Inserted before the void-based bias so an explicit
+        partner signal outweighs an inferred void.
         """
+        # 4.9.0 / G2: honor partner's signal first (HARD tier only — only
+        # HARD AI populates the signals dict).
+        if self.difficulty == Difficulty.HARD:
+            liked = {s for s, v in self.memory.signals.items() if v > 0}
+            for card in legal:
+                if card.suit in liked and card.suit != trump:
+                    return card
+
         # Prefer leading suit where opponent is known void
         for card in legal:
             if card.suit != trump:
@@ -994,14 +1118,48 @@ class AIPlayer:
         wild_active = bool(state._joker_state.get("republicain_wild"))
 
         # 1. Process new completed tricks
+        trump = state.trump
         while self.memory.processed_tricks_count < completed_count:
             trick = state.completed_tricks[self.memory.processed_tricks_count]
             self._process_trick_voids(trick, wild_active)
+            # 4.9.0 / G2: read partner's signals from completed tricks only.
+            # Current-trick signals are partial (partner may not have played
+            # yet) and would update mid-decision — only completed tricks are
+            # stable.
+            if self.difficulty == Difficulty.HARD:
+                self._process_trick_signals(trick, trump)
             self.memory.processed_tricks_count += 1
 
         # 2. Process current trick (transient, so we don't increment processed_tricks_count)
         self._process_trick_voids(state.current_trick, wild_active)
         self.memory.last_voids_key = key
+
+    def _process_trick_signals(
+        self, trick: tuple[TrickCard, ...], trump: Suit | None
+    ) -> None:
+        """4.9.0 / G2: scan a trick for partner's signal cards.
+
+        A partner play counts as a signal when it is an off-suit, non-trump
+        7/8/9 (zero-point card). Rank 9 = "lead this suit"; 7 = "don't";
+        8 is neutral. Tally accrues in `memory.signals[suit]` and is read
+        by `_hard_lead` as a tiebreaker.
+        """
+        if len(trick) < 2 or trump == Suit.TOUT_ATOUT:
+            return
+        p = partner(self.seat)
+        lead_suit = trick[0].card.suit
+        for tc in trick[1:]:
+            if tc.seat != p:
+                continue
+            if tc.card.suit == lead_suit:
+                continue  # followed suit — not a signal
+            if trump is not None and tc.card.suit == trump:
+                continue  # partner trumped — not a signal
+            if tc.card.rank == Rank.NINE:
+                self.memory.signals[tc.card.suit] += 1
+            elif tc.card.rank == Rank.SEVEN:
+                self.memory.signals[tc.card.suit] -= 1
+            # Rank.EIGHT is neutral — no tally change.
 
     def _process_trick_voids(
         self, trick: tuple[TrickCard, ...], wild_active: bool = False

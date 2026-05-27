@@ -445,3 +445,93 @@ def test_animate_score_update_invalidates_diff_baseline(
         "display_hud loop — pre-4.6.4 the diff cache held stale baselines "
         "after the animation."
     )
+
+
+def test_animate_score_update_short_circuits_under_no_anim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """4.9.2 (A1): with BELOTE_NO_ANIM=1, the score-roll paints exactly one
+    final HUD frame instead of running the 20-step loop. Pre-4.9.2 the
+    animation ignored the env var and slept for the full duration.
+    """
+    import belote.ui.anim
+    import belote.ui.announce  # noqa: F401
+    anim_mod = _sys.modules["belote.ui.anim"]
+    announce_mod = _sys.modules["belote.ui.announce"]
+
+    paint_count = [0]
+    last_override: list[tuple[int, int]] = []
+
+    def _spy_display_hud(_s: object, **kw: object) -> None:
+        paint_count[0] += 1
+        override = kw.get("team_scores_override")
+        if isinstance(override, tuple):
+            last_override.append(override)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(announce_mod, "display_hud", _spy_display_hud)
+
+    monkeypatch.setenv("BELOTE_NO_ANIM", "1")
+    anim_mod._refresh_animations_enabled_from_env()
+    try:
+        state = new_game()
+        announce_mod.animate_score_update(state, target_ns=20, target_ew=10, duration=1.0)
+    finally:
+        monkeypatch.delenv("BELOTE_NO_ANIM", raising=False)
+        anim_mod._refresh_animations_enabled_from_env()
+
+    assert paint_count[0] == 1, (
+        f"NO_ANIM must paint exactly one final frame; got {paint_count[0]}"
+    )
+    assert last_override == [(20, 10)], (
+        f"NO_ANIM must paint the final target scores directly; got {last_override}"
+    )
+
+
+def test_animate_score_update_skips_on_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4.9.2 (A1): when a reader is supplied and the user presses a key
+    mid-animation, the function snaps to the final frame and exits the
+    loop instead of completing all 20 steps.
+    """
+    import belote.ui.anim
+    import belote.ui.announce  # noqa: F401
+    anim_mod = _sys.modules["belote.ui.anim"]
+    announce_mod = _sys.modules["belote.ui.announce"]
+
+    paints: list[tuple[int, int] | None] = []
+
+    def _spy_display_hud(_s: object, **kw: object) -> None:
+        paints.append(kw.get("team_scores_override"))  # type: ignore[arg-type]
+
+    monkeypatch.setattr(announce_mod, "display_hud", _spy_display_hud)
+    # Ensure NO_ANIM is not active so we exercise the loop path.
+    monkeypatch.delenv("BELOTE_NO_ANIM", raising=False)
+    anim_mod._refresh_animations_enabled_from_env()
+
+    # Reader yields a KeyEvent on the first read_timeout — caller must snap.
+    from belote.input import Key, KeyEvent
+
+    class _SkipReader:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def read_timeout(self, _delay: float) -> KeyEvent | None:
+            self.calls += 1
+            # Skip on the very first wait.
+            return KeyEvent(Key.SPACE, " ")
+
+    reader = _SkipReader()
+    state = new_game()
+    announce_mod.animate_score_update(
+        state, target_ns=20, target_ew=10, duration=1.0, reader=reader  # type: ignore[arg-type]
+    )
+
+    # At least one intermediate paint + one final-snap paint, but
+    # strictly fewer than 20 frames (the full loop). The exact intermediate
+    # count is 1 — one frame painted before read_timeout returns the skip.
+    assert reader.calls == 1, f"reader should be consulted once before skip; got {reader.calls}"
+    assert paints[-1] == (20, 10), (
+        f"final paint must be the target scores; got {paints[-1]}"
+    )
+    assert len(paints) < 20, (
+        f"skip should short-circuit the 20-step loop; got {len(paints)} paints"
+    )

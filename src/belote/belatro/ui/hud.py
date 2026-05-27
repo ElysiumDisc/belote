@@ -236,8 +236,27 @@ class BelAtroHUD:
                     f"{acc.current_mult(state):.1f} = "
                     f"{acc.get_total(state)}"
                 )
-                score_col = max(2, term_w - len(score_str) - 2)
-                parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
+                # 4.9.0 / U4: inline most-recent-contributor annotation.
+                # `acc._log` entries are shaped "JokerName: +25 chips" /
+                # ":x2.5 Mult" / ":+$3". Display only the payload + source
+                # so the line stays scannable. Skip if the log is empty.
+                contrib_str = ""
+                if acc._log:
+                    raw = acc._log[-1]
+                    if ":" in raw:
+                        name_part, payload_part = raw.split(":", 1)
+                        contrib_str = f"  ({payload_part.strip()} from {name_part.strip()})"
+                full = score_str + contrib_str
+                score_col = max(2, term_w - len(full) - 2)
+                if contrib_str:
+                    parts.append(
+                        move(3, score_col)
+                        + red_fg() + BOLD + score_str + RESET
+                        + DIM + contrib_str + RESET
+                        + "\n"
+                    )
+                else:
+                    parts.append(move(3, score_col) + red_fg() + BOLD + score_str + RESET + "\n")
 
         # Show jokers on row 2 right side as compact list (full names at standard,
         # truncated names at compact widths).

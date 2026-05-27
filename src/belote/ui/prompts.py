@@ -146,6 +146,59 @@ def prompt_card(
     raise AssertionError("prompt_card loop fell through without returning")
 
 
+def prompt_coinche(state: GameState, reader: KeyReader) -> bool:
+    """4.9.0 / G1: ask SOUTH (defender) whether to coinche the locked bid.
+
+    Called from `gameflow.py::run_bidding` after a bid is taken and SOUTH
+    is on the defending team. Returns True iff the player chose to coinche.
+    Pressing C / ENTER without C / ESC all keep behavior simple: C =
+    coinche, anything else = pass.
+    """
+    if state.taker is None:
+        return False
+    taker_label = "EW" if state.taker.name in ("EAST", "WEST") else "NS"
+    prompt = (
+        f"{BOLD}{gold_fg()}Coinche?{RESET}  {white_fg()}{taker_label} took the bid. "
+        f"Press [C] to coinche (×2), [Enter] to accept.{RESET}"
+    )
+    term_w, term_h = get_term_size()
+    row = max(1, term_h - 2)
+    sys.stdout.write(f"\x1b[{row};1H\x1b[2K{ansi_center(prompt, term_w)}")
+    sys.stdout.flush()
+    invalidate_diff()
+    while True:
+        event = reader.read()
+        if event.key in (Key.QUIT, Key.EOF, Key.ESC, Key.ENTER):
+            return False
+        if event.key == Key.CHAR and event.char and event.char.lower() == "c":
+            return True
+
+
+def prompt_surcoinche(
+    state: GameState, reader: KeyReader, coincheur_label: str
+) -> bool:
+    """4.9.0 / G1: ask SOUTH (taker team) whether to surcoinche a coinche.
+
+    Only called when SOUTH is on the taker team and the opposing team just
+    coinched. Returns True iff the player surcoinches (×4 multiplier).
+    """
+    prompt = (
+        f"{BOLD}{gold_fg()}Surcoinche?{RESET}  {white_fg()}{coincheur_label} "
+        f"coinched! Press [S] to surcoinche (×4), [Enter] to accept ×2.{RESET}"
+    )
+    term_w, term_h = get_term_size()
+    row = max(1, term_h - 2)
+    sys.stdout.write(f"\x1b[{row};1H\x1b[2K{ansi_center(prompt, term_w)}")
+    sys.stdout.flush()
+    invalidate_diff()
+    while True:
+        event = reader.read()
+        if event.key in (Key.QUIT, Key.EOF, Key.ESC, Key.ENTER):
+            return False
+        if event.key == Key.CHAR and event.char and event.char.lower() == "s":
+            return True
+
+
 def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
     """Interactive bid selection. Returns 'QUIT' if QUIT is pressed.
 

@@ -138,7 +138,7 @@ def _card_symbol(card: Card) -> str:
     return f"{card.rank.value}{suit_str}"
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=8192)
 def _card_face_internal(
     card: Card,
     selected: bool,
@@ -505,7 +505,7 @@ _BRAILLE_DOTS: Final = "⠁⠂⠄⡀⠈⠐⠠⢀"
 _VIGNETTE_WIDTH: Final = 2
 
 
-@lru_cache(maxsize=1024)
+@lru_cache(maxsize=4096)
 def _pip_at(row_id: int, col: int) -> str | None:
     # Pure deterministic function of (row_id, col). Called once per non-edge
     # felt cell on a cache-miss path of `_felt_segment_cached`; the lru_cache
@@ -519,7 +519,7 @@ def _pip_at(row_id: int, col: int) -> str | None:
     return _BRAILLE_DOTS[(row_id * 7 + col * 13) % 8]
 
 
-@lru_cache(maxsize=2048)
+@lru_cache(maxsize=4096)
 def _felt_segment_cached(
     width: int,
     row_id: int,
@@ -848,9 +848,27 @@ def _render_hand_horizontal(
     # Compute left padding that ansi_center will add — we need this for the cursor
     left_pad = max(0, (term_w - total_hand_w) // 2)
 
+    # 4.9.0 / U1: lift selected card 1 row above the others (deferred C1).
+    # When `selection` is set, output has card_h + 1 rows; the selected card
+    # paints at rows [0..card_h-1] while the others paint at rows [1..card_h].
+    # Blank cells are bare spaces so the felt background shows through.
+    has_lift = selection is not None and 0 <= selection < len(cards)
+    n_rows = layout.card_h + 1 if has_lift else layout.card_h
+    blank_card_line = " " * layout.card_w
+
     rows: list[str] = []
-    for row_idx in range(layout.card_h):
-        raw = gap.join(group[row_idx] for group in card_line_groups)
+    for row_idx in range(n_rows):
+        if has_lift:
+            parts: list[str] = []
+            for i, group in enumerate(card_line_groups):
+                src_idx = row_idx if i == selection else row_idx - 1
+                if 0 <= src_idx < layout.card_h:
+                    parts.append(group[src_idx])
+                else:
+                    parts.append(blank_card_line)
+            raw = gap.join(parts)
+        else:
+            raw = gap.join(group[row_idx] for group in card_line_groups)
         rows.append(ansi_center(raw, term_w))  # ← ANSI-aware centering
 
     if selection is not None and 0 <= selection < len(cards):
@@ -1014,6 +1032,16 @@ def _build_hud(
 
     left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
 
+    # 4.9.0 / G3: surface the carried-over litige pool. The pool is team-
+    # neutral — it accrues across all-pass-litige rounds and is absorbed by
+    # whichever team fulfills the next non-litige contract (see
+    # `scoring.py::_score_normal_outcome` line ~911).
+    litige_chip_compact = ""
+    litige_chip_full = ""
+    if state.litige_points > 0:
+        litige_chip_compact = f"  {DIM}{gold_fg()}Lit:{state.litige_points}{RESET}"
+        litige_chip_full = f"{DIM}{gold_fg()}Litige: {state.litige_points}{RESET}   "
+
     if layout.hud_style == "compact":
         # Abbreviated form: "BELOTE  T:♥  NS:200(+50)  EW:80(+30)  5/8  Tk:S"
         # Drops keyboard hints and theme name; both still reachable via H/help.
@@ -1024,6 +1052,7 @@ def _build_hud(
             f"NS:{BOLD}{ns}{RESET}{white_fg()}(+{ns_pts})  "
             f"EW:{BOLD}{ew}{RESET}{white_fg()}(+{ew_pts})  "
             f"{trick_num}/8  Tk:{taker_short}{RESET}"
+            f"{litige_chip_compact}"
         )
         return ansi_ljust(bar, term_w)
 
@@ -1033,6 +1062,7 @@ def _build_hud(
         f"{white_fg()}Trump: {trump_sym}   "
         f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
         f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
+        f"{litige_chip_full}"
         f"Trick {trick_num}/8   Taker: {taker_name}   "
         f"{DIM}[H]Hist [T]Theme [Z]Undo [I]HUD{RESET}"
     )

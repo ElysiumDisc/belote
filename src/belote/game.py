@@ -232,6 +232,10 @@ class GameState:
     belote_trump: Suit | None = None
     first_trick_done: bool = False
     litige_points: int = 0
+    # 4.9.0 / G1: 0 = normal, 1 = coinched (×2), 2 = surcoinched (×4).
+    # Set by the post-bid coinche flow in `gameflow.py::run_bidding`. Applied
+    # to the winning team's credit in `scoring.py::apply_round_score`.
+    coinche_level: int = 0
 
     boss_modifiers: BossModifiers = field(default_factory=BossModifiers)
 
@@ -292,6 +296,8 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "belote_trump": None,
         "first_trick_done": False,
         "boss_modifiers": BossModifiers(),
+        # 4.9.0 / G1: coinche state is per-round, reset to neutral.
+        "coinche_level": 0,
     }
     reset_values.update(kwargs)
     return replace(state, **reset_values)  # type: ignore[arg-type]

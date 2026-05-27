@@ -1,6 +1,6 @@
 # Belote – 4-Player Terminal Card Game
 
-Complete implementation of the French card game Belote for the terminal, with a full-screen themed felt table (12 palettes), full card graphics at compass positions (N/W/E/S), vignette and braille pip-texture polish, and an optional decorative outer frame.
+Complete implementation of the French card game Belote for the terminal, with a full-screen themed felt table (13 palettes), full card graphics at compass positions (N/W/E/S), vignette and braille pip-texture polish, and an optional decorative outer frame.
 
 ## BelAtro Expansion
 
@@ -133,7 +133,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 **General:**
 - `?`: Show keyboard shortcut help
 - `I` *(BelAtro only)*: Toggle the BelAtro top HUD overlay AND the persistent slot-machine tally readout — see the BelAtro gameplay note below for details
-- `V` *(4.7.0, BelAtro only)*: Open the **Inventory** overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). ↑/↓ navigate, Enter for detail, Esc/V/Q close. Distinct from `C` (Consumables tray, action-oriented); `V` is read-only inspection.
+- `V` *(4.7.0; 4.9.0 / U5: activation merged in, BelAtro only)*: Open the **Inventory** overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). ↑/↓ navigate, Enter for detail, Esc/V/Q close. **`1`–`9` activates the Nth consumable directly**; `A` on a consumable's detail page does the same. `C` in the shop still launches the standalone numbered Consumables tray for quick-pick activation.
 - `Q`: Quit to main menu or exit
 - `H`: View Game History (round-by-round, with contract / taker / tricks / declarations)
 - `T`: Cycle UI Theme
@@ -156,22 +156,22 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - `Space` or `Esc`: Skip animations
 - During bidding round 2: `P` = Pass, `X` = Tout Atout, `N` = Sans Atout *(remapped from A/S in 4.5.0 to make room for WASD nav)*
 - `I` *(4.6.3, BelAtro only)*: Toggle the BelAtro top HUD (joker pip strip, ante/blind/target line, chips×mult score, trust bar, synergy tooltip) AND, since 4.7.0, the persistent slot-machine tally readout at the bottom. Visible by default; press `I` to hide both and reveal the classic Belote HUD's `Trump:` / `Taker:` fields underneath. Press `I` again to bring them back.
-- `V` *(4.7.0, BelAtro only)*: Open the read-only inventory overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). Pre-4.7.0 this was an alias of `I`; it's now its own thing.
+- `V` *(4.7.0; 4.9.0 / U5: activation merged in, BelAtro only)*: Open the inventory overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). Since 4.9.0 also activates consumables: `1`–`9` from the list or `A` on a detail page. Pre-4.7.0 this was an alias of `I`; it's now its own thing.
 
 ## Features
 
 - **BelAtro Roguelite Mode:** A massive expansion featuring 42 jokers, 12 tarots, 8 planets, 12 vouchers, 12 decks, 21 bosses, and permanent upgrades.
 - **Dix de Der Heist (4.7.0):** Take a contract and declare a heist before trick 1 — win trick 8 for a `×(1 + interest_rate)` Mult multiplier on your round score; lose it and forfeit your card chips from tricks 1–7. Gated on owning **La Voûte** voucher (`interest_rate > 0`). AI never declares.
 - **Slot-Machine Score Tally (4.7.0):** Per-trick odometer animation replaces the static popup. Chip-bucket fills, mult pulses, total ticks toward target, and a flame row crowns the odometer when you blow past 120% of the blind. Skippable on SPACE / ESC / ENTER. Final readout persists in the HUD between tricks (toggled by `I` alongside the top HUD). Suppressed under Le Brouillard (`hide_hud`) and La Compétition (`separate_scoring`).
-- **Inventory Overlay on V (4.7.0):** Press `V` mid-game to inspect everything you own — jokers (with edition tags + per-edition bonus blurb), vouchers, consumables, permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter for detail, Esc/V/Q close. Read-only counterpart to the `C` consumables-action tray.
-- **Animation Polish (4.8.0):** Per-joker callouts float above the slot-machine tally as each joker fires, target-crossing pops a `★ TARGET ★` flag, shop purchases pulse + tick the money down, rerolls fade, and the trust bar ticks up between rounds. Belote / Rebelote now get a dramatic 4-row centered stinger. Classic-mode SOUTH plays paint a tactile sparkle trail; the trick winner glows briefly before the trick clears. All animations skip on any key press and respect `BELOTE_NO_ANIM=1` for slow terminals.
+- **Inventory Overlay on V (4.7.0; 4.9.0 / U5):** Press `V` mid-game to inspect everything you own — jokers (with edition tags + per-edition bonus blurb), vouchers, consumables, permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter for detail, Esc/V/Q close. Since 4.9.0 also activates consumables: `1`–`9` from the list or `A` on a detail page (the shop's standalone `C` tray remains for in-shop quick-pick).
+- **Animation Polish (4.8.0, extended 4.9.0):** Per-joker callouts float above the slot-machine tally as each joker fires, target-crossing pops a `★ TARGET ★` flag, shop purchases pulse + tick the money down, rerolls fade, and the trust bar ticks up between rounds. Belote / Rebelote now get a dramatic 4-row centered stinger. Classic-mode SOUTH plays paint a tactile sparkle trail; the trick winner glows briefly before the trick clears. **4.9.0 adds U1's card-lift on selection.** (4.9.0's G4 AI-delay spinner and 4.9.1's U3 trick-collection convergence were both removed in 4.9.3 as too noisy.) All animations skip on any key press and respect `BELOTE_NO_ANIM=1` for slow terminals.
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
 - **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
 - **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
 - **Rich Terminal UI:** Full-screen themed felt table with detailed card graphics and "You" vs "Partner" terminology.
 - **Enhanced Hard AI**: Advanced void inference and 2-ply lookahead for critical tricks (Dix de Der).
-- **Customizable Themes:** Switch between twelve color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind, Forest Night, Moonlit Tavern, Royal Purple, Emerald Isle, Sunset Magma) using the `T` key during gameplay.
+- **Customizable Themes:** Switch between thirteen color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind, Forest Night, Moonlit Tavern, Royal Purple, Emerald Isle, Sunset Magma, Provence Lavande) using the `T` key during gameplay.
 - **Polished Felt Mat (3.9.4):** The trick mat now has a subtle vignette at its edges, a faint deterministic braille pip-dot texture (fabric-weave feel without intrusive glyphs), and — at standard/spacious terminal sizes — a decorative `╔═══◆═══...═══◆═══╗` outer frame with corner ornaments.
 - **Selection HUD (3.9.4):** Selecting a card in hand now paints a highlighted bar under it AND a centered `► A♠ — Trump ◄` readout below, color-coded by suit / trump / legality.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
@@ -221,7 +221,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (1044 tests)
+├── tests/             # Comprehensive test suite (1069 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -236,7 +236,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1044 tests** passing with 100% coverage on game-logic modules (4.8.2).
+Currently **1069 tests** passing with 100% coverage on game-logic modules (4.9.4).
 
 ## Technical Integrity
 

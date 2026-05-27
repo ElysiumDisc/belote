@@ -278,6 +278,34 @@ THEMES: dict[str, Theme] = {
         menu_art_fg=(232, 168, 78),
         menu_border_fg=(228, 88, 78),
     ),
+    # 4.9.1: sun-soaked Provençal lavender field — vivid lavender felt,
+    # sun-parchment cards, aubergine card backs, mauve-wine suits, honey-gold
+    # highlights, deep indigo banners. 4.9.1 second pass: pushed felt and
+    # accents purplier per user feedback; the original terracotta accents
+    # were overwhelming the lavender and reading as red. Real lavender
+    # fields are unambiguously purple — the palette now coordinates around
+    # that with warm honey-gold (NOT terracotta) as the only warm accent
+    # for selection visibility.
+    "provence_lavande": Theme(
+        name="Provence Lavande",
+        felt_bg=(160, 130, 210),        # vivid lavender field
+        felt_edge_bg=(95, 70, 135),     # deep mauve vignette
+        card_face_bg=(248, 240, 220),   # sun-parchment
+        face_card_bg=(252, 235, 195),   # warmer parchment for face cards
+        card_back_bg=(95, 65, 130),     # aubergine plum back
+        highlight_bg=(225, 185, 105),   # honey-gold (warm + visible on lavender)
+        red_fg=(170, 50, 95),           # mauve-wine ♥/♦
+        black_fg=(45, 35, 65),          # deep aubergine-noir ♠/♣
+        white_fg=(248, 240, 220),       # parchment
+        gold_fg=(225, 185, 105),        # honey-gold
+        light_gray_fg=(185, 170, 205),  # lilac-gray
+        green_fg=(130, 150, 100),       # herb green
+        banner_bg=(55, 40, 115),        # deep indigo-violet
+        banner_fg=(248, 240, 220),      # parchment
+        felt_placeholder_fg=(110, 85, 150),
+        menu_art_fg=(225, 185, 105),    # honey-gold
+        menu_border_fg=(175, 130, 200), # soft orchid
+    ),
 }
 
 
