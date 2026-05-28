@@ -505,13 +505,16 @@ _BRAILLE_DOTS: Final = "⠁⠂⠄⡀⠈⠐⠠⢀"
 _VIGNETTE_WIDTH: Final = 2
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=8192)
 def _pip_at(row_id: int, col: int) -> str | None:
     # Pure deterministic function of (row_id, col). Called once per non-edge
     # felt cell on a cache-miss path of `_felt_segment_cached`; the lru_cache
     # collapses the second-and-later hits within a frame. UTF-8 fallback is
     # captured in `TERMINAL.has_utf8` which is process-constant, so the cache
     # entry is stable for the process lifetime. 4.1.0.
+    # 4.9.5 (P1): bumped 4096→8192 — a spacious-layout mat (term_w ≥ 120) can
+    # need >5000 distinct (row_id, col) keys per frame, which thrashed the
+    # 4096 cache and recomputed ~1000 cells every frame.
     if not TERMINAL.has_utf8:
         return None
     if ((row_id * 31 + col * 17) % 23) >= 2:

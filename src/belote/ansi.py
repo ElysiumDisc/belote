@@ -101,12 +101,23 @@ _RESET_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 RESET = "\x1b[0m"
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=2048)
+def _visible_len_ansi(s: str) -> int:
+    return len(_RESET_RE.sub("", s))
+
+
 def visible_len(s: str) -> int:
-    """Return length of string with ANSI escape codes stripped."""
+    """Return length of string with ANSI escape codes stripped.
+
+    4.9.5 (P3): only the regex-stripping path is cached. Plain (no-ESC) strings
+    return ``len(s)`` directly instead of occupying cache slots, so the bounded
+    cache is reserved for the ANSI strings that actually benefit from memoising
+    the regex sub (static glyphs, frames). Keeps the cache small and the
+    hit-rate high.
+    """
     if "\x1b" not in s:
         return len(s)
-    return len(_RESET_RE.sub("", s))
+    return _visible_len_ansi(s)
 
 
 def ansi_center(s: str, width: int) -> str:

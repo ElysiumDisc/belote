@@ -10,8 +10,13 @@ class Config:
     # Game rules
     TARGET_SCORE: int = 1000
     LAST_TRICK_BONUS: int = 10
+    # Official French Belote: holding the King AND Queen of trump (announced
+    # "Belote" on the first played, "Rebelote" on the second) is worth 20
+    # points TOTAL — not 20 each. BELOTE_POINTS is the provisional credit once
+    # the first card is announced; REBELOTE_POINTS is the final value once the
+    # pair is complete. Both are 20 so the completed pair scores the official 20.
     BELOTE_POINTS: int = 20
-    REBELOTE_POINTS: int = 40
+    REBELOTE_POINTS: int = 20
     CAPOT_BASE: int = 252
     # Capot bases for special contracts. Standard FFB practice scales the
     # Capot reward to the contract's total card points: Capot pays the deck

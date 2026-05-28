@@ -351,3 +351,29 @@ def test_phase_4_5_jokers_registered() -> None:
     assert "le_mathematicien" in registry.jokers
     assert "l_eclat" in registry.jokers
     assert "le_preteur" in registry.jokers
+
+
+def test_reconcile_bonus_money_helper_credits_and_debits() -> None:
+    """4.9.5 (D1): BelAtroGame._reconcile_bonus_money applies signed joker
+    money to the wallet — positive credits, negative debits via spend_money
+    (which no-ops when the wallet can't cover it). This is the shared helper
+    now used on BOTH the success path and the failed-but-survived (capot
+    insurance) path, so LePreteur's -$5 skim is no longer a free ×1.2."""
+    from belote.belatro.core.economy import Economy
+    from belote.belatro.core.run_state import BelAtroRun
+    from belote.belatro.main import BelAtroGame
+
+    game = BelAtroGame()
+    game.run = BelAtroRun()
+
+    game.run.economy = Economy(money=60)
+    game._reconcile_bonus_money(-5)
+    assert game.run.economy.money == 55  # skim debited
+
+    game.run.economy = Economy(money=0)
+    game._reconcile_bonus_money(15)
+    assert game.run.economy.money == 15  # bailout credited
+
+    game.run.economy = Economy(money=2)
+    game._reconcile_bonus_money(-5)
+    assert game.run.economy.money == 2  # broke: debit safely no-ops, no crash

@@ -73,15 +73,19 @@ class TrustTrack:
     def tier(self) -> int:
         """Five-tier bucketing for partner-joker effect scaling.
 
-        0 (degraded, value 0–2) — partner-joker effects halved
-        1 (base, value 3–4)     — baseline
-        2 (boost, value 5–6)    — +25%
-        3 (strong, value 7–8)   — +50%
-        4 (elite, value 9–10)   — +100%
+        Scaling is implemented as N *extra* applications of the joker's
+        JokerResult on top of the baseline one (see
+        ``ScoreAccumulator._fire_jokers``; ``tier_extras = (0, 0, 1, 1, 2)``):
+
+        0 (degraded, value 0–2) — baseline only (no bonus, no penalty)
+        1 (base,     value 3–4) — baseline only
+        2 (boost,    value 5–6) — +1 apply  (≈ ×2 effect)
+        3 (strong,   value 7–8) — +1 apply  (≈ ×2 effect)
+        4 (elite,    value 9–10) — +2 applies (≈ ×3 effect)
 
         Used by partner_jokers/* to scale their JokerResult payloads. The
         legacy `partner_jokers_double` flag (value≥7) still exists for backward
-        compatibility but tier_for is the new path.
+        compatibility but tier is the new path.
         """
         if self.value <= 2:
             return 0

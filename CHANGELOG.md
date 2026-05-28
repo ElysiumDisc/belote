@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.5] - 2026-05-28
+
+Bug-hunt, logic, and performance audit pass. Three parallel Explore agents
+swept the classic engine, BelAtro mechanics, and the UI/render layer; every
+finding below was traced to exact code and the high-severity ones reproduced at
+runtime before fixing. Test count 1066 → 1079.
+
+### Fixed
+
+- **Crash: `legal_cards` returned an empty set under La Déluge**
+  (`src/belote/game.py`). With the `seven_eight_trump` boss active, every 7/8
+  is a trump — but the trump-follow set was built from `c.suit == lead_suit`,
+  which dropped off-suit 7/8s. A player void of the trump *suit* but holding
+  only off-suit 7/8 (which ARE trumps) got zero legal cards on a trump lead,
+  tripping `AIPlayer.decide_card`'s empty-legal assertion. A single
+  `is_trump_card` predicate now drives both the trump-led and non-trump-led
+  follow/overtrump paths. Regression tests in `tests/test_deluge_legal_cards.py`.
+- **AI partner-signal double-count after a mid-round undo** (`src/belote/ai.py`).
+  The undo-regression branch reset the void cache and `processed_tricks_count`
+  but not the partner-signal tally; because `_update_voids` re-walks surviving
+  tricks from zero, their signals were counted twice. Both reset paths now share
+  a single `_reset_round_memory()` helper so they can't drift again.
+- **Belote + Rebelote scored 40 instead of the official 20** (`src/belote/config.py`).
+  Holding the King and Queen of trump is worth 20 points *total* in official
+  French Belote — and the in-game Rules screen already said 20. `REBELOTE_POINTS`
+  is now 20, matching both.
+- **Coinche round-end animation showed the pre-multiplier score**
+  (`src/belote/gameflow.py`). The score counter animated to the raw breakdown
+  total while the stored score applied `2 ** coinche_level`. Both now use the
+  shared `scoring.coinche_adjusted_credits()` helper, so the animation lands on
+  the real total.
+- **Joker money not reconciled on a failed-but-survived round**
+  (`src/belote/belatro/main.py`). Signed `JokerResult.add_money` (e.g.
+  LePrêteur's −$5 skim, baked into the round's ×Mult) was only applied on the
+  success path, handing a free multiplier when a chute was survived via Capot
+  Insurance. A shared `_reconcile_bonus_money()` helper now runs on both paths.
+- **La Symbiose fired ×1.2 Mult on zero-point declarations under Le Mime**
+  (`src/belote/belatro/items/partner_jokers/passive.py`). Now gated on
+  `event.points > 0`, mirroring Le Mathématicien.
+
+### Changed
+
+- **BelAtro HUD / TrustBar now invalidate the render diff** after their direct
+  stdout writes (`belatro/ui/hud.py`, `trust_bar.py`), matching the 4.0.0
+  overlay convention so a static-state `display()` can't leave a stale top bar.
+  The convention is now enforced for both files by
+  `tests/test_alt_screen_scroll.py`.
+- **Performance**: `_pip_at`'s LRU cache raised 4096 → 8192 so wide-terminal
+  felt mats (>5000 cells/frame) stop thrashing it (`ui/render.py`);
+  `visible_len` no longer spends cache slots on plain (no-ANSI) strings
+  (`ansi.py`); the BelAtro [H] history overlay caches its line list on
+  `(term_w, entry_count)` instead of rebuilding every keystroke
+  (`belatro/ui/history.py`).
+- **Docs**: corrected the trust tier-0 docstring (it claimed "effects halved";
+  the implementation applies the baseline once with no penalty) and the tier
+  bonus percentages to match the `(0, 0, 1, 1, 2)` extra-applies model.
+
 ## [4.9.4] - 2026-05-26
 
 Audit + maintenance pass. Three parallel Explore agents reviewed game-logic

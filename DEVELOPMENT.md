@@ -84,7 +84,7 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (1066 tests expected)
+# Full test suite (1079 tests expected)
 PYTHONPATH=src pytest
 ```
 
@@ -221,6 +221,8 @@ PYTHONPATH=src python scripts/benchmark.py
 If you suspect a per-frame allocation regression, the canonical hot paths to
 profile live (e.g. with `py-spy record --rate 100`) are `render()` in
 `src/belote/ui/render.py` and `_calculate_legal_cards_impl` in
-`src/belote/game.py`. The 4.9.4 audit pass found no quick wins beyond those
-already landed in the 4.6.x / 4.7.x perf cleanups — start from a profiler
-trace, not from guesswork, before adding new caches.
+`src/belote/game.py`. The 4.9.4 / 4.9.5 audit passes found only minor wins
+beyond those already landed in the 4.6.x / 4.7.x perf cleanups (4.9.5 bumped
+the `_pip_at` cache to 8192, trimmed `visible_len`'s cache to ANSI strings,
+and memoised the BelAtro history overlay) — start from a profiler trace, not
+from guesswork, before adding new caches.

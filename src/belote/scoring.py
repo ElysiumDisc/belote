@@ -1075,23 +1075,33 @@ def _decl_short_label(d: Declaration) -> str:
     return d.kind
 
 
-def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameState:
-    """Apply round scoring result to team scores and advance state."""
-    # 4.9.0 / G1: coinche multiplier — the winning side's credit is doubled
-    # at coinche_level=1, quadrupled at level=2. Common-variant rule: only
-    # the winning team's points are multiplied. Litige rounds skip the
-    # multiplier (no winner yet; pool already accrues by design).
-    coinche_mult = 2 ** state.coinche_level if state.coinche_level > 0 else 1
+def coinche_adjusted_credits(
+    breakdown: ScoringBreakdown, coinche_level: int
+) -> tuple[int, int]:
+    """Return ``(taker_credit, defender_credit)`` after the coinche multiplier.
+
+    4.9.0 / G1: the winning side's credit is doubled at coinche_level=1,
+    quadrupled at level=2. Common-variant rule — only the winning team's points
+    are multiplied. Litige rounds skip the multiplier (no winner yet; the pool
+    already accrues by design).
+
+    Shared by :func:`apply_round_score` (which stores the score) and the
+    gameflow round-end animation, so the on-screen counter lands on exactly the
+    value that gets stored.
+    """
+    coinche_mult = 2 ** coinche_level if coinche_level > 0 else 1
     if coinche_mult > 1 and not breakdown.is_litige:
         if breakdown.is_failed:
-            taker_credit = breakdown.taker_total
-            defender_credit = breakdown.defender_total * coinche_mult
-        else:
-            taker_credit = breakdown.taker_total * coinche_mult
-            defender_credit = breakdown.defender_total
-    else:
-        taker_credit = breakdown.taker_total
-        defender_credit = breakdown.defender_total
+            return breakdown.taker_total, breakdown.defender_total * coinche_mult
+        return breakdown.taker_total * coinche_mult, breakdown.defender_total
+    return breakdown.taker_total, breakdown.defender_total
+
+
+def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameState:
+    """Apply round scoring result to team scores and advance state."""
+    taker_credit, defender_credit = coinche_adjusted_credits(
+        breakdown, state.coinche_level
+    )
 
     ns, ew = state.team_scores
     if breakdown.taker_team == 0:

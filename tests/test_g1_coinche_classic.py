@@ -162,3 +162,33 @@ def test_no_re_surcoinche_at_level_2() -> None:
     for seat in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST):
         ai = AIPlayer(seat=seat, difficulty=Difficulty.HARD)
         assert ai.decide_coinche(s) is False
+
+
+def test_animation_targets_match_stored_score_under_coinche() -> None:
+    """Regression: the round-end animation must target the coinche-adjusted
+    credits (the same ones apply_round_score stores), not the raw breakdown
+    totals. Pre-fix the counter animated to 100 while the score jumped to 200.
+    """
+    from belote.scoring import coinche_adjusted_credits
+
+    for level, taker_failed in ((1, False), (2, False), (1, True)):
+        s = _state(coinche_level=level)
+        b = _breakdown(taker_total=0 if taker_failed else 100,
+                       defender_total=162 if taker_failed else 62,
+                       failed=taker_failed)
+        ns_old, ew_old = s.team_scores
+        taker_credit, defender_credit = coinche_adjusted_credits(b, s.coinche_level)
+        if b.taker_team == 0:
+            target_ns, target_ew = ns_old + taker_credit, ew_old + defender_credit
+        else:
+            target_ns, target_ew = ns_old + defender_credit, ew_old + taker_credit
+        stored_ns, stored_ew = apply_round_score(s, b).team_scores
+        assert (target_ns, target_ew) == (stored_ns, stored_ew)
+
+
+def test_litige_unaffected_by_coinche_credits_helper() -> None:
+    from belote.scoring import coinche_adjusted_credits
+
+    b = _breakdown(taker_total=80, defender_total=80, failed=False)
+    b = dataclasses.replace(b, is_litige=True)
+    assert coinche_adjusted_credits(b, 2) == (80, 80)

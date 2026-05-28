@@ -74,6 +74,10 @@ class TrustBar:
             + white_fg() + "] " + RESET
             + status
         )
+        # Bypasses display(); invalidate the render-diff baseline so the next
+        # display() repaints row 4 (4.0.0 convention).
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()
 
     # 4.8.0 / B4: tick-up / tick-down animation between two trust values.
     # ──────────────────────────────────────────────────────────────────

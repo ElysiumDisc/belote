@@ -126,3 +126,52 @@ def test_emit_cap_prevents_more_than_two_signals() -> None:
     )
     # Past the cap, no swap happens — returns input unchanged.
     assert chosen == Card(Suit.DIAMONDS, Rank.SEVEN)
+
+
+def test_undo_does_not_double_count_partner_signals() -> None:
+    """Regression: a mid-round undo must clear the signal tally, not just the
+    void cache. `_update_voids` re-walks surviving tricks (processed count is
+    reset to 0), so leaving `signals` populated would double-count them.
+    """
+    import dataclasses
+
+    from belote.game import Phase, new_game, start_round
+
+    p = _player()
+    base = start_round(new_game(), random.Random(0))
+
+    # Trick where partner (NORTH) signals diamonds with an off-suit 9.
+    signal_trick = (
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),     # lead ♥
+        TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.SEVEN)),
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
+        TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.NINE)),  # signal: like ♦
+    )
+    second_trick = (
+        TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.ACE)),
+        TrickCard(Seat.SOUTH, Card(Suit.CLUBS, Rank.SEVEN)),
+        TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.KING)),
+        TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.QUEEN)),    # no signal
+    )
+
+    two_tricks = dataclasses.replace(
+        base,
+        trump=Suit.SPADES,
+        contract="spades",
+        taker=Seat.SOUTH,
+        phase=Phase.PLAYING,
+        completed_tricks=(signal_trick, second_trick),
+        current_trick=(),
+    )
+    p.update_memory(two_tricks)
+    p._update_voids(two_tricks)
+    assert p.memory.signals[Suit.DIAMONDS] == 1
+
+    # Undo back to a state holding only the first (signal) trick.
+    one_trick = dataclasses.replace(two_tricks, completed_tricks=(signal_trick,))
+    p.update_memory(one_trick)   # triggers the mid-round-undo reset
+    p._update_voids(one_trick)   # re-walks the surviving signal trick
+
+    assert p.memory.signals[Suit.DIAMONDS] == 1, (
+        "partner signal double-counted after undo — undo reset must clear signals"
+    )

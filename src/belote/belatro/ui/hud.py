@@ -287,6 +287,10 @@ class BelAtroHUD:
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
+        # This write bypasses display(); invalidate the render-diff baseline so
+        # the next display() repaints rows the HUD overwrote (4.0.0 convention).
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()
 
     def _render_compact(
         self,
@@ -362,6 +366,9 @@ class BelAtroHUD:
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
+        # Bypasses display(); invalidate the render-diff baseline (4.0.0 conv).
+        from belote.ui.render import invalidate_diff
+        invalidate_diff()
 
 
 # ── 3.4.0: joker pip strip + synergy tooltip ────────────────────────────────
@@ -450,6 +457,8 @@ def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
         return
     sys.stdout.write(strip)
     sys.stdout.flush()
+    from belote.ui.render import invalidate_diff
+    invalidate_diff()
 
 
 def build_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -> str:
@@ -492,3 +501,5 @@ def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) 
         return
     sys.stdout.write(out)
     sys.stdout.flush()
+    from belote.ui.render import invalidate_diff
+    invalidate_diff()

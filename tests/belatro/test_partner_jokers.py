@@ -98,6 +98,17 @@ def test_lasymbiose_silent_on_self_declaration():
     assert res is None
 
 
+def test_lasymbiose_silent_on_zero_point_declaration():
+    """Le Mime (declarations_zero) emits declarations worth 0 points; LaSymbiose
+    must not grant ×1.2 for a declaration that scored nothing (mirrors
+    LeMathematicien's points guard)."""
+    j = LaSymbiose()
+    res = j.on_declaration(
+        DeclarationScoredEvent(seat=Seat.NORTH, declaration_type="Tierce", points=0), {}
+    )
+    assert res is None
+
+
 # ── passive.LeRelais ──────────────────────────────────────────────────────
 
 

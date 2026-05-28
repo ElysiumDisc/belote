@@ -326,6 +326,22 @@ class BelAtroGame:
         for msg in self.unlock_tracker.drain_announcements():
             BelAtroAnnounce.banner(msg, self.reader, hold=1.5)
 
+    def _reconcile_bonus_money(self, bonus_money: int) -> None:
+        """Apply a round's signed joker money to the wallet.
+
+        ``final_state._bonus_money`` accumulates ``JokerResult.add_money`` over
+        the round (positive = credit, negative = debit such as LePreteur's -$5
+        skim). Positive amounts credit; negative amounts route through
+        ``spend_money`` (which no-ops if the wallet can't cover it) so the
+        Economy's non-negative guard on ``add_money`` is respected.
+        """
+        if self.run is None:
+            return
+        if bonus_money > 0:
+            self.run.economy.add_money(bonus_money)
+        elif bonus_money < 0:
+            self.run.economy.spend_money(-bonus_money)
+
     def _run_loop(self) -> None:
         """Main game loop: Blind -> Shop -> Next."""
         if self.run is None:
@@ -617,6 +633,12 @@ class BelAtroGame:
                     color="red",
                     hold=2.5,
                 )
+            else:
+                # The run continues past this chute. Reconcile signed joker
+                # money (e.g. LePreteur's -$5 skim, which was baked into the
+                # round's ×Mult) so the player isn't handed a free multiplier
+                # for the surviving round. spend_money no-ops if broke.
+                self._reconcile_bonus_money(final_state._bonus_money)
             if not lock_trust:
                 trust.blind_failed()
         else:
@@ -624,16 +646,7 @@ class BelAtroGame:
             payout = self.run.economy.process_round_end(total - self.run.target_score)
             if auto_coinche_active:
                 self.run.economy.add_money(payout * 2)  # L'Avocat: triple total payout
-            # JokerResult.add_money is signed: positive = credit, negative = debit.
-            # Pre-4.6.5 this branch was `> 0`, which silently dropped LePreteur's
-            # `-5` cost (and any other negative-add_money joker) while still
-            # applying the multiplier — free ×1.2 Mult on every $50+ round.
-            if final_state._bonus_money > 0:
-                self.run.economy.add_money(final_state._bonus_money)
-            elif final_state._bonus_money < 0:
-                # Route through spend_money so the Economy negative guard fires
-                # if accumulated debit somehow exceeds wallet (caller's bug).
-                self.run.economy.spend_money(-final_state._bonus_money)
+            self._reconcile_bonus_money(final_state._bonus_money)
             if final_state._joker_state.get("puriste_triggered"):
                 extra = max(0, (total - self.run.target_score) // 10)
                 self.run.economy.add_money(extra)  # Le Puriste: double base payout

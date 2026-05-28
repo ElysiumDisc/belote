@@ -606,35 +606,41 @@ def _calculate_legal_cards_impl(
             res_cards = hand
         return tuple(_CARD_TO_ID[c] for c in res_cards)
 
+    # A card is trump if it's the trump suit, or — under La Déluge
+    # (seven_eight_trump) — any 7 or 8 regardless of suit. Following a trump
+    # lead means following with ANY trump, not just lead-suit cards: an off-suit
+    # 7/8 is a trump too. Using `c.suit == lead_suit` here would drop those and
+    # wrongly report the player as void (empty legal set → crash).
+    def is_trump_card(c: Card) -> bool:
+        return c.suit == trump or (
+            seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT)
+        )
+
     is_trump_lead = (lead_suit == trump) or (
         seven_eight_trump and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
     )
 
     if is_trump_lead:
-        # Trump led: must follow if possible, must overtrump if possible
-        if my_suit_cards:
+        # Trump led: must follow with a trump if possible, must overtrump if possible
+        my_trumps = [c for c in hand if is_trump_card(c)]
+        if my_trumps:
             highest_in_trick = max(
                 (trick_rank(tc.card, trump, seven_eight_trump) for tc in played_cards), default=-1
             )
             must_overtrump = any(
-                trick_rank(c, trump, seven_eight_trump) > highest_in_trick for c in my_suit_cards
+                trick_rank(c, trump, seven_eight_trump) > highest_in_trick for c in my_trumps
             )
             if must_overtrump:
                 res_cards = tuple(
                     c
-                    for c in my_suit_cards
+                    for c in my_trumps
                     if trick_rank(c, trump, seven_eight_trump) > highest_in_trick
                 )
             else:
-                res_cards = tuple(my_suit_cards)
+                res_cards = tuple(my_trumps)
         else:
-            # Void in trump (led suit) - can only play non-trump
-            res_cards = tuple(
-                c
-                for c in hand
-                if c.suit != trump
-                and not (seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT))
-            )
+            # No trumps at all - can play anything (every card is non-trump)
+            res_cards = hand
     else:
         # Non-trump led
         if my_suit_cards:
@@ -647,11 +653,7 @@ def _calculate_legal_cards_impl(
                 res_cards = hand
             else:
                 # Must trump if possible
-                my_trumps = [
-                    c
-                    for c in hand
-                    if c.suit == trump or (seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT))
-                ]
+                my_trumps = [c for c in hand if is_trump_card(c)]
                 if my_trumps:
                     # Must trump; also must overtrump if possible
                     highest_trump_in_trick = max(

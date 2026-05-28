@@ -68,9 +68,10 @@ def test_rebelote_scoring() -> None:
     )
 
     breakdown = score_round(state)
-    assert breakdown.taker_belote == 40
+    # Official rule: completed Belote+Rebelote (K+Q of trump) = 20 points total.
+    assert breakdown.taker_belote == 20
     assert breakdown.taker_rebelote is True
-    assert breakdown.taker_total >= 40
+    assert breakdown.taker_total >= 20
 
 
 def test_illegal_move_error() -> None:

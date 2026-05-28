@@ -90,90 +90,109 @@ def _money_cell(delta: int) -> str:
     return f"{DIM}$0{RESET}"
 
 
+def _build_history_lines(entries: list[BelAtroHistoryEntry], term_w: int) -> list[str]:
+    """Build the full (pre-scroll) line list for the overlay.
+
+    Pure function of ``(entries, term_w)`` — the scroll position doesn't affect
+    it — so ``show_belatro_history`` memoises the result across keystrokes
+    instead of rebuilding ~3 lines per entry on every ↑/↓ (mirrors the classic
+    ``belote.ui.prompts._build_history_lines`` caching).
+    """
+    lines: list[str] = []
+    lines.append(f"{BOLD}{gold_fg()}BELATRO RUN HISTORY{RESET}")
+    lines.append("=" * 19)
+    lines.append("")
+
+    if not entries:
+        lines.append(f"{DIM}No blinds completed yet.{RESET}")
+    else:
+        # Wide layout: single-row record. ~84 visible chars at minimum.
+        wide = term_w >= 90
+        if wide:
+            w_no, w_ante, w_bl, w_tgt, w_boss, w_tkr, w_con, w_trk, w_score, w_st, w_money = (
+                3, 4, 5, 5, 14, 7, 4, 7, 7, 8, 6,
+            )
+            header_cells = [
+                _ljust_visible("#", w_no),
+                _ljust_visible("ANTE", w_ante),
+                _ljust_visible("BLIND", w_bl),
+                _ljust_visible("TGT", w_tgt),
+                _ljust_visible("BOSS", w_boss),
+                _ljust_visible("TAKER", w_tkr),
+                _ljust_visible("CON", w_con),
+                _ljust_visible("TRICKS", w_trk),
+                _ljust_visible("SCORE", w_score),
+                _ljust_visible("STATUS", w_st),
+                _ljust_visible("$Δ", w_money),
+            ]
+            header = " │ ".join(header_cells)
+            lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
+            lines.append("─" * visible_len(header))
+
+            for i, e in enumerate(entries):
+                boss = e.boss_name or "─"
+                if visible_len(boss) > w_boss:
+                    boss = boss[: w_boss - 1] + "…"
+                row_cells = [
+                    _ljust_visible(f"{i + 1:02d}", w_no),
+                    _ljust_visible(str(e.ante), w_ante),
+                    _ljust_visible(e.blind_label, w_bl),
+                    _ljust_visible(str(e.target), w_tgt),
+                    _ljust_visible(boss, w_boss),
+                    _ljust_visible(e.taker_label, w_tkr),
+                    _ljust_visible(e.contract, w_con),
+                    _ljust_visible(f"{e.tricks_ns}/{e.tricks_ew}", w_trk),
+                    _ljust_visible(f"{BOLD}{e.score}{RESET}", w_score),
+                    _ljust_visible(_status_cell(e.status), w_st),
+                    _ljust_visible(_money_cell(e.money_delta), w_money),
+                ]
+                lines.append(" │ ".join(row_cells))
+        else:
+            # Compact three-line-per-row layout for narrow terminals.
+            lines.append(
+                f"{BOLD}{white_fg()}{'#':<3} {'A.B':<4} {'TGT':<5} "
+                f"{'SCORE':<7} STATUS{RESET}"
+            )
+            lines.append("─" * 40)
+            for i, e in enumerate(entries):
+                a_b = f"{e.ante}.{e.blind_label[0]}"
+                lines.append(
+                    f"{i + 1:02d}  {a_b:<4} {e.target:<5} "
+                    f"{BOLD}{e.score:<7}{RESET}{_status_cell(e.status)}"
+                )
+                boss = e.boss_name or "─"
+                lines.append(
+                    f"     boss: {boss}  taker: {e.taker_label}  con: {e.contract}  "
+                    f"tricks: {e.tricks_ns}/{e.tricks_ew}  {_money_cell(e.money_delta)}"
+                )
+                decl_n = _decl_str(e.decl_summary_ns, 14)
+                decl_e = _decl_str(e.decl_summary_ew, 14)
+                lines.append(f"     decl: {decl_n} / {decl_e}")
+                lines.append("")
+
+    lines.append("")
+    lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
+    return lines
+
+
 def show_belatro_history(reader: KeyReader, entries: list[BelAtroHistoryEntry]) -> None:
     """Scrollable BelAtro round-by-round overlay; called via the [H] hook."""
     from belote.ui.fit_guard import require_minimum
 
     scroll = 0
+    cached_key: tuple[int, int] | None = None
+    lines: list[str] = []
 
     while True:
         require_minimum(reader)
         term_w, term_h = get_term_size()
 
-        lines: list[str] = []
-        lines.append(f"{BOLD}{gold_fg()}BELATRO RUN HISTORY{RESET}")
-        lines.append("=" * 19)
-        lines.append("")
-
-        if not entries:
-            lines.append(f"{DIM}No blinds completed yet.{RESET}")
-        else:
-            # Wide layout: single-row record. ~84 visible chars at minimum.
-            wide = term_w >= 90
-            if wide:
-                w_no, w_ante, w_bl, w_tgt, w_boss, w_tkr, w_con, w_trk, w_score, w_st, w_money = (
-                    3, 4, 5, 5, 14, 7, 4, 7, 7, 8, 6,
-                )
-                header_cells = [
-                    _ljust_visible("#", w_no),
-                    _ljust_visible("ANTE", w_ante),
-                    _ljust_visible("BLIND", w_bl),
-                    _ljust_visible("TGT", w_tgt),
-                    _ljust_visible("BOSS", w_boss),
-                    _ljust_visible("TAKER", w_tkr),
-                    _ljust_visible("CON", w_con),
-                    _ljust_visible("TRICKS", w_trk),
-                    _ljust_visible("SCORE", w_score),
-                    _ljust_visible("STATUS", w_st),
-                    _ljust_visible("$Δ", w_money),
-                ]
-                header = " │ ".join(header_cells)
-                lines.append(f"{BOLD}{white_fg()}{header}{RESET}")
-                lines.append("─" * visible_len(header))
-
-                for i, e in enumerate(entries):
-                    boss = e.boss_name or "─"
-                    if visible_len(boss) > w_boss:
-                        boss = boss[: w_boss - 1] + "…"
-                    row_cells = [
-                        _ljust_visible(f"{i + 1:02d}", w_no),
-                        _ljust_visible(str(e.ante), w_ante),
-                        _ljust_visible(e.blind_label, w_bl),
-                        _ljust_visible(str(e.target), w_tgt),
-                        _ljust_visible(boss, w_boss),
-                        _ljust_visible(e.taker_label, w_tkr),
-                        _ljust_visible(e.contract, w_con),
-                        _ljust_visible(f"{e.tricks_ns}/{e.tricks_ew}", w_trk),
-                        _ljust_visible(f"{BOLD}{e.score}{RESET}", w_score),
-                        _ljust_visible(_status_cell(e.status), w_st),
-                        _ljust_visible(_money_cell(e.money_delta), w_money),
-                    ]
-                    lines.append(" │ ".join(row_cells))
-            else:
-                # Compact three-line-per-row layout for narrow terminals.
-                lines.append(
-                    f"{BOLD}{white_fg()}{'#':<3} {'A.B':<4} {'TGT':<5} "
-                    f"{'SCORE':<7} STATUS{RESET}"
-                )
-                lines.append("─" * 40)
-                for i, e in enumerate(entries):
-                    a_b = f"{e.ante}.{e.blind_label[0]}"
-                    lines.append(
-                        f"{i + 1:02d}  {a_b:<4} {e.target:<5} "
-                        f"{BOLD}{e.score:<7}{RESET}{_status_cell(e.status)}"
-                    )
-                    boss = e.boss_name or "─"
-                    lines.append(
-                        f"     boss: {boss}  taker: {e.taker_label}  con: {e.contract}  "
-                        f"tricks: {e.tricks_ns}/{e.tricks_ew}  {_money_cell(e.money_delta)}"
-                    )
-                    decl_n = _decl_str(e.decl_summary_ns, 14)
-                    decl_e = _decl_str(e.decl_summary_ew, 14)
-                    lines.append(f"     decl: {decl_n} / {decl_e}")
-                    lines.append("")
-
-        lines.append("")
-        lines.append(f"{DIM}[↑↓] Scroll  [Any Key] Return{RESET}")
+        # The line list only depends on (term_w, entry count); rebuild it only
+        # when one of those changes, not on every scroll keystroke.
+        key = (term_w, len(entries))
+        if key != cached_key:
+            lines = _build_history_lines(entries, term_w)
+            cached_key = key
 
         view_h = max(1, term_h - 4)
         max_scroll = max(0, len(lines) - view_h)

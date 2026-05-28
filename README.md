@@ -221,7 +221,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (1069 tests)
+├── tests/             # Comprehensive test suite (1079 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -236,7 +236,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1069 tests** passing with 100% coverage on game-logic modules (4.9.4).
+Currently **1079 tests** passing with 100% coverage on game-logic modules (4.9.5).
 
 ## Technical Integrity
 

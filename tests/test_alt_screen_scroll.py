@@ -161,6 +161,12 @@ def test_belatro_overlays_invalidate_diff() -> None:
         # branches each end with `invalidate_diff()` in the `finally`
         # block, mirroring ConsumablesOverlay.
         "src/belote/belatro/ui/inventory.py": 1,
+        # 4.9.5 (D4): BelAtroHUD.render / _render_compact and the standalone
+        # pip-strip / synergy-tooltip writers paint rows 1–5 directly; each
+        # must invalidate so a static-state display() repaints the top bar.
+        "src/belote/belatro/ui/hud.py": 4,
+        # TrustBar.render paints row 4 directly.
+        "src/belote/belatro/ui/trust_bar.py": 1,
     }
     repo_root = Path("/home/mrrobot/belote/")
     invalidate_re = re.compile(r"invalidate_diff\s*\(\s*\)")

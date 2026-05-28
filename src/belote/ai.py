@@ -74,6 +74,27 @@ class AIPlayer:
         # All ranking helpers in this class read it via self._se.
         self._se = False
 
+    def _reset_round_memory(self) -> None:
+        """Clear all per-round derived memory back to a clean slate.
+
+        Shared by the new-round and mid-round-undo paths in ``update_memory`` so
+        the two can't drift: a partial reset (e.g. clearing the void cache but
+        not the partner-signal tally) would let ``_update_voids`` re-walk the
+        surviving tricks and double-count their signals.
+        """
+        self.memory.played.clear()
+        for s in Seat:
+            self.memory.known_voids[s].clear()
+        self.memory.partner_hand.clear()
+        self.memory.processed_tricks_count = 0
+        self.memory.last_voids_key = None
+        self.memory.last_partner_hand_key = None
+        # 4.9.0 / G2: partner-signal tally and our emit-counter follow
+        # the same reset pattern as the void cache.
+        for suit in Suit:
+            self.memory.signals[suit] = 0
+        self.memory.signals_emitted = 0
+
     def update_memory(self, state: GameState) -> None:
         """Update memory with currently visible information."""
         completed_count = len(state.completed_tricks)
@@ -84,18 +105,7 @@ class AIPlayer:
             # this a (0, 0) / (0, 1) key from the first decision of *this* round
             # could coincidentally match a leftover from the previous round and
             # cause _update_voids to skip processing entirely.
-            self.memory.played.clear()
-            for s in Seat:
-                self.memory.known_voids[s].clear()
-            self.memory.partner_hand.clear()
-            self.memory.processed_tricks_count = 0
-            self.memory.last_voids_key = None
-            self.memory.last_partner_hand_key = None
-            # 4.9.0 / G2: partner-signal tally and our emit-counter follow
-            # the same triple-reset pattern as the void cache.
-            for suit in Suit:
-                self.memory.signals[suit] = 0
-            self.memory.signals_emitted = 0
+            self._reset_round_memory()
         elif (
             self.memory.last_voids_key is not None
             and (completed_count, current_count) < self.memory.last_voids_key
@@ -104,13 +114,12 @@ class AIPlayer:
             # we've processed. `known_voids` and `processed_tricks_count`
             # are monotonic and would carry stale inferences forward
             # (a void inferred from a now-rolled-back trick). Rebuild from
-            # the current state instead of trying to subtract.
-            self.memory.played.clear()
-            for s in Seat:
-                self.memory.known_voids[s].clear()
-            self.memory.processed_tricks_count = 0
-            self.memory.last_voids_key = None
-            self.memory.last_partner_hand_key = None
+            # the current state instead of trying to subtract. The signal
+            # tally is rebuilt by _update_voids' re-walk (processed count is
+            # reset to 0), so it MUST be cleared here too — otherwise the
+            # surviving tricks' signals are double-counted. Same full reset
+            # as a new round.
+            self._reset_round_memory()
 
         # Track all cards in completed tricks. N is small (max 32 cards), so
         # the O(N) re-walk is fine and keeps this in sync with the transient

@@ -579,3 +579,24 @@ def test_hud_running_total_under_multi_boss_ban_clubs_plus_kings_zero() -> None:
         f"HUD over-credited trick points: got {new_state.current_round_points}. "
         "ban_clubs zeroing was overwritten by the kings_zero recompute."
     )
+
+
+def test_completed_belote_rebelote_scores_20_total() -> None:
+    """Official French Belote: holding the King AND Queen of trump and playing
+    both (Belote + Rebelote) is worth 20 points TOTAL, not 40."""
+    trump = Suit.SPADES
+    state = GameState(
+        hands=((), (), (), ()),
+        initial_hands=((), (), (), ()),
+        trump=trump,
+        taker=Seat.SOUTH,
+        turn=Seat.SOUTH,
+        phase=Phase.SCORING,
+        belote_holders={trump: Seat.SOUTH},
+        belote_tracker=(True, True),  # both K and Q announced
+        completed_tricks=(),
+        last_trick_winner=Seat.SOUTH,
+    )
+    breakdown = score_round(state)
+    assert breakdown.taker_belote == 20
+    assert breakdown.taker_rebelote is True

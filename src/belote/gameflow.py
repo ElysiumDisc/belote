@@ -28,6 +28,7 @@ from .game import (
 from .input import KeyReader, interruptible_sleep
 from .scoring import (
     apply_round_score,
+    coinche_adjusted_credits,
     detect_carres,
     detect_sequences,
     get_declaration_points,
@@ -527,14 +528,19 @@ def run_round(
                 replay_summary=replay_str,
             )
 
-            # Animate score update
+            # Animate score update. Use the same coinche-adjusted credits that
+            # apply_round_score stores, so the counter lands on the real total
+            # (raw breakdown totals are pre-multiplier).
             ns_old, ew_old = current.team_scores
+            taker_credit, defender_credit = coinche_adjusted_credits(
+                breakdown, current.coinche_level
+            )
             if breakdown.taker_team == 0:
-                target_ns = ns_old + breakdown.taker_total
-                target_ew = ew_old + breakdown.defender_total
+                target_ns = ns_old + taker_credit
+                target_ew = ew_old + defender_credit
             else:
-                target_ns = ns_old + breakdown.defender_total
-                target_ew = ew_old + breakdown.taker_total
+                target_ns = ns_old + defender_credit
+                target_ew = ew_old + taker_credit
 
             if not skip_round_pause:
                 animate_score_update(current, target_ns, target_ew, reader=reader)
