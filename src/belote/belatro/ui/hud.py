@@ -9,6 +9,7 @@ from belote.ansi import (
     DIM,
     RESET,
     ansi_center,
+    ansi_truncate,
     gold_fg,
     green_fg,
     move,
@@ -262,7 +263,10 @@ class BelAtroHUD:
         # truncated names at compact widths).
         if run.jokers:
             names = "  ".join(j.name for j in run.jokers)
-            parts.append(move(2, max(2, term_w // 2)) + gold_fg() + names[: term_w // 2 - 2] + RESET + "\n")
+            parts.append(
+                move(2, max(2, term_w // 2))
+                + gold_fg() + ansi_truncate(names, term_w // 2 - 2) + RESET + "\n"
+            )
             # 3.0.0: synergy badge — render below the joker line if any pair
             # matches. Cheap O(N) per render; the table is short.
             synergies = detect_synergies(list(run.jokers))
@@ -480,9 +484,8 @@ def build_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) -
     for i, (_a, _b, desc) in enumerate(pairs[:2]):
         line = f"{green_fg()}♦{RESET} {white_fg()}{desc}{RESET}"
         if visible_len(line) > max_w:
-            # crude trim — fall back to plain ASCII to make ansi-stripping
-            # unnecessary (we never split mid-escape).
-            line = desc[: max_w - 2] + ".."
+            # Cell-aware trim that never splits a wide glyph or an escape.
+            line = ansi_truncate(desc, max_w - 2) + ".."
         out.append(move(row + i, 2) + line + "\n")
     if len(pairs) > 2:
         extra = f"{DIM}+{len(pairs) - 2} more synergies{RESET}"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -101,27 +102,53 @@ _RESET_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 RESET = "\x1b[0m"
 
 
+@lru_cache(maxsize=4096)
+def char_width(ch: str) -> int:
+    """Terminal display width of a single character, in cells.
+
+    4.9.6: minimal, dependency-free wcwidth using only the stdlib
+    ``unicodedata``. Combining marks and zero-width codepoints occupy 0 cells;
+    East-Asian Wide/Fullwidth glyphs (CJK, many emoji) occupy 2; everything
+    else 1. Not a full Unicode-grapheme/emoji-ZWJ implementation — it is the
+    pragmatic subset the UI needs so ``visible_len`` reports *cells*, not
+    codepoints, and centering/padding/truncation stay aligned.
+    """
+    # C0/C1 controls (other than handled escapes) have no width here.
+    if ch == "\x00":
+        return 0
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+        return 0
+    if unicodedata.east_asian_width(ch) in ("W", "F"):
+        return 2
+    return 1
+
+
 @lru_cache(maxsize=2048)
 def _visible_len_ansi(s: str) -> int:
-    return len(_RESET_RE.sub("", s))
+    return sum(char_width(c) for c in _RESET_RE.sub("", s))
 
 
 def visible_len(s: str) -> int:
-    """Return length of string with ANSI escape codes stripped.
+    """Return the terminal *cell* width of a string, ignoring ANSI escapes.
 
-    4.9.5 (P3): only the regex-stripping path is cached. Plain (no-ESC) strings
-    return ``len(s)`` directly instead of occupying cache slots, so the bounded
-    cache is reserved for the ANSI strings that actually benefit from memoising
-    the regex sub (static glyphs, frames). Keeps the cache small and the
-    hit-rate high.
+    4.9.5 (P3): only the regex-stripping path is cached — plain (no-ESC)
+    strings skip the bounded cache so it stays reserved for ANSI strings that
+    benefit from memoising the regex sub (static glyphs, frames).
+
+    4.9.6: width is measured in display cells (see ``char_width``), not
+    codepoints. Pure-ASCII *escape-free* strings — the overwhelmingly common
+    case — take the allocation-free ``len(s)`` fast path since every such char
+    is exactly one cell. Anything with an ESC (note: ESC is itself ASCII, so it
+    must be excluded explicitly) or any non-ASCII char pays for the strip +
+    per-char width sum.
     """
-    if "\x1b" not in s:
+    if "\x1b" not in s and s.isascii():
         return len(s)
     return _visible_len_ansi(s)
 
 
 def ansi_center(s: str, width: int) -> str:
-    """Center a string by visible width, padding both sides."""
+    """Center a string by visible cell width, padding both sides."""
     vlen = visible_len(s)
     pad = max(0, width - vlen)
     left = pad // 2
@@ -130,12 +157,45 @@ def ansi_center(s: str, width: int) -> str:
 
 
 def ansi_ljust(s: str, width: int) -> str:
-    """Left-justify a string to `width` visible characters, ANSI-aware.
+    """Left-justify a string to `width` visible cells, ANSI-aware.
     Never use str.ljust() on ANSI strings — it counts escape bytes as chars.
     """
     vlen = visible_len(s)
     pad = max(0, width - vlen)
     return s + " " * pad
+
+
+def ansi_truncate(s: str, width: int) -> str:
+    """Truncate `s` to at most `width` visible cells, skipping ANSI escapes.
+
+    Cell-aware: a wide (2-cell) glyph that would straddle the boundary is
+    dropped rather than split. ASCII strings without escapes take a plain slice
+    fast path. Returns the original string untouched when it already fits.
+    """
+    if s.isascii() and "\x1b" not in s:
+        return s if len(s) <= width else s[:width]
+    if visible_len(s) <= width:
+        return s
+    out: list[str] = []
+    used = 0
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch == "\x1b":
+            # Copy the whole escape sequence verbatim (zero width).
+            m = _RESET_RE.match(s, i)
+            if m:
+                out.append(m.group())
+                i = m.end()
+                continue
+        w = char_width(ch)
+        if used + w > width:
+            break
+        out.append(ch)
+        used += w
+        i += 1
+    return "".join(out)
 
 
 @lru_cache(maxsize=512)

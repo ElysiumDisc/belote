@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.6] - 2026-06-01
+
+Follow-up bug-hunt, logic, and performance audit. Three parallel Explore agents
+re-swept the classic engine, BelAtro mechanics, and the UI/render layer; every
+"major" finding was then traced to exact code and verified before acting. The
+result: **no critical or major bug survived verification.** The flagged items
+were all either false positives (Le Passeur "double-payout" — the post-coinche
+`BidMadeEvent` re-emit carries the taker's seat + a real trump, so the
+North-pass gate never matches; Le Carnet's +1 Mult *is* wired via
+`acc.carnet_active`; Tout Streak / Quinte Royale re-emit guards are already
+present; `modifier_patch` is a fresh per-instance proxy each round) or
+intentional, test-pinned behaviour (Le Patriote's `// 2`). Benchmarks confirmed
+the render/scoring/AI paths are already well within budget (render ≈0.4 ms, E2E
+round ≈4–6 ms). This release therefore lands the one genuine latent gap the
+audit surfaced plus a layer of behaviour-locking tests. Test count 1079 → 1111.
+
+### Added
+
+- **Minimal wide-character (wcwidth) support** (`src/belote/ansi.py`). `visible_len()`
+  previously counted codepoints, so `ansi_center()` / `ansi_ljust()` and the
+  render diff's per-row width would mis-align by one cell per wide glyph (emoji,
+  CJK). A new dependency-free `char_width()` (stdlib `unicodedata`) returns 0
+  for combining/zero-width marks, 2 for East-Asian Wide/Fullwidth, 1 otherwise,
+  and `visible_len()` now measures display **cells**. A pure-ASCII escape-free
+  fast path keeps the hot render path allocation-free and byte-identical, so
+  there is no performance regression. A new `ansi_truncate()` (cell-aware,
+  escape-skipping) replaces the raw byte-slices that trimmed BelAtro HUD joker
+  names and synergy lines (`belatro/ui/hud.py`), which could previously split a
+  wide glyph.
+- **Behaviour-locking tests** that freeze what the audit confirmed correct:
+  `tests/test_render_golden.py` (full-frame snapshot + per-row cell-width
+  fingerprint — the regression guard for the wcwidth change),
+  `tests/test_wcwidth.py` (per-character widths and helper cell-correctness),
+  `tests/test_scoring_totals.py` (the canonical 152 / 120 / 248 point totals,
+  belote 20, capot bases 252 / 220 / 348, dix de der +10), and
+  `tests/belatro/test_registry_integrity.py` (item-census counts 42 jokers /
+  8 planets / 12 tarots / 12 vouchers, id↔key consistency, no duplicate display
+  names — so a duplicate-id registration that silently overwrites an item now
+  fails a test).
+
 ## [4.9.5] - 2026-05-28
 
 Bug-hunt, logic, and performance audit pass. Three parallel Explore agents
