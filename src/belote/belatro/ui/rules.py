@@ -62,7 +62,7 @@ BELATRO_RULES: dict[str, RulesPage] = {
                 "text": (
                     "Your partner relationship is tracked on a 0–10 Trust scale. "
                     "Win Blinds together to raise Trust; fail to raise it or get Chuted to lower it. "
-                    "High Trust unlocks: Void Information (3+), Duo Contracts (5+), Partner Joker doubles (7+), Auto-Capot (9+). "
+                    "High Trust unlocks: Void Information (3+), Duo Contracts (5+), Partner Joker doubles (7+). "
                     "Low Trust (≤2) degrades partner AI quality."
                 ),
             },
@@ -136,7 +136,7 @@ BELATRO_RULES: dict[str, RulesPage] = {
                 "text": (
                     "La relation avec votre partenaire est mesurée sur une échelle 0–10. "
                     "Gagnez des Donnes ensemble pour augmenter la Confiance. "
-                    "Haute Confiance débloque: Info Coupe-Sèche (3+), Contrats Duo (5+), Jokers doublés (7+), Auto-Capot (9+). "
+                    "Haute Confiance débloque: Info Coupe-Sèche (3+), Contrats Duo (5+), Jokers doublés (7+). "
                     "Basse Confiance (≤2) dégrade l'IA partenaire."
                 ),
             },

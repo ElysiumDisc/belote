@@ -18,6 +18,7 @@ from .game import (
     Sequence,
     TrickCard,
     compute_trick_winners,
+    per_trick_trumps,
     reset_round_fields,
     team_of,
 )
@@ -278,7 +279,7 @@ def resolve_declarations(
             )
             for s in decls["sequences"]
         ]
-        carres = list(decls["carres"])
+        carres = [c for c in decls["carres"] if _carre_points(c) > 0]
         has_belote = decls["belote"]
 
         if team_of(seat) == 0:
@@ -470,7 +471,9 @@ def _detect_all_declarations(
             continue
 
         seqs = detect_sequences(hand)
-        carres = detect_carres(hand)
+        # 7/8 carrés are detected (detect_carres) but are not declarations:
+        # a 0-point carré must not outrank the other team's sequences.
+        carres = [c for c in detect_carres(hand) if _carre_points(c) > 0]
         has_belote = False if no_belote_contract else detect_belote(hand, trump)  # type: ignore[arg-type]
         decls_per_seat[seat] = {
             "sequences": seqs,
@@ -575,10 +578,11 @@ def _calculate_base_points(
     if winners is None:
         winners = compute_trick_winners(state, trump, is_sa)
 
-    for trick, winner in zip(state.completed_tricks, winners, strict=True):
+    trumps = per_trick_trumps(state, trump, len(state.completed_tricks))
+    for trick, winner, t_trump in zip(state.completed_tricks, winners, trumps, strict=True):
         if winner is None:
             continue
-        trick_pts = _trick_points_with_modifiers(trick, trump, bm)
+        trick_pts = _trick_points_with_modifiers(trick, t_trump, bm)
         if team_of(winner) == taker_team:
             taker_pts += trick_pts
         else:
@@ -612,10 +616,13 @@ def _apply_scoring_modifiers(
     if state.boss_modifiers.separate_scoring and state.contract is not None:
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
         bm = state.boss_modifiers
-        for trick, winner in zip(state.completed_tricks, winners, strict=True):
+        trumps = per_trick_trumps(state, trump, len(state.completed_tricks))
+        for trick, winner, t_trump in zip(
+            state.completed_tricks, winners, trumps, strict=True
+        ):
             if winner is None:
                 continue
-            scores[winner] += _trick_points_with_modifiers(trick, trump, bm)
+            scores[winner] += _trick_points_with_modifiers(trick, t_trump, bm)
 
         # Add 10 de der to individual winner (suppressed by Le Zéro Final).
         if (
@@ -1070,7 +1077,7 @@ def _decl_short_label(d: Declaration) -> str:
         rank = _VALUE_TO_RANK.get(d.detail.rank)
         return f"Carré-{rank.value}" if rank else "Carré"
     if d.kind == "sequence" and isinstance(d.detail, Sequence):
-        pts = _SEQUENCE_POINTS.get(d.detail.length, 0)
+        pts = _sequence_points(d.detail)
         return f"{pts}{d.detail.suit.symbol}"
     return d.kind
 

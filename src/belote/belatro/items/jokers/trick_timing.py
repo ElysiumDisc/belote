@@ -33,10 +33,16 @@ class LePremierSang(Joker):
         return None
 
 
+_SERGENT_MAX_MULT = 2.0
+
+
 class LeSergent(Joker):
     id = "le_sergent"
     name = "Le Sergent"
-    description = "Each consecutive trick win: +0.5 Mult. Resets on losing."
+    description = (
+        "Each consecutive trick win: +0.5 Mult more than the last (max +2). "
+        "Resets on losing."
+    )
     cost = 7
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
@@ -47,7 +53,10 @@ class LeSergent(Joker):
         if team_of(event.winner) == 0:
             streak = state.get(f"{self.id}_streak", 0) + 1
             state[f"{self.id}_streak"] = streak
-            return JokerResult(add_mult=0.5)
+            # +0.5 Mult per consecutive win (+0.5, +1.0, +1.5, ...), capped at
+            # +2.0 per trick so a full 8-trick streak can't snowball (uncapped
+            # it would total +18 Mult on a 7-cost joker).
+            return JokerResult(add_mult=min(0.5 * streak, _SERGENT_MAX_MULT))
         state[f"{self.id}_streak"] = 0
         return None
 

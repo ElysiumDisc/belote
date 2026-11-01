@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+class _NewerSchemaError(ValueError):
+    """Save file was written by a newer build (schema_version too high)."""
 
 
 @dataclass
@@ -52,6 +57,8 @@ class SaveManager:
 
     def __init__(self, app_name: str = "belote") -> None:
         self._save_path = self._get_save_path(app_name) / "profile.json"
+        # Set by load_profile when the file was written by a newer build.
+        self._newer_schema = False
 
     def _get_save_path(self, app_name: str) -> Path:
         """Resolve XDG-compliant data path."""
@@ -75,6 +82,11 @@ class SaveManager:
         import dataclasses
         import tempfile
 
+        if self._newer_schema:
+            # The on-disk profile came from a newer build; this session runs
+            # on a throwaway default profile and must not clobber it.
+            return
+
         payload = {"schema_version": self.SCHEMA_VERSION, **dataclasses.asdict(profile)}
         # Atomic write: dump to a sibling tmp file, fsync, then os.replace
         # which is atomic on POSIX/NTFS. A crash mid-write leaves the original
@@ -91,30 +103,77 @@ class SaveManager:
         tmp_path.replace(self._save_path)
 
     def load_profile(self) -> Profile:
+        """Load the profile, never raising on a bad file.
+
+        - Missing file → fresh Profile.
+        - Unreadable / non-UTF-8 / invalid JSON / wrong shape or types →
+          the bad file is moved to ``profile.json.bak`` and a fresh Profile
+          is returned (so the next save doesn't silently destroy evidence).
+        - Written by a NEWER build (schema_version too high) → a fresh
+          in-memory Profile is returned but the file is left untouched:
+          `_newer_schema` is set so `save_profile` refuses to overwrite it.
+          Callers (BelAtroGame.__init__, belote/ui/announce.py) therefore
+          never see the ValueError `_migrate` raises for that case.
+        """
+        self._newer_schema = False
         try:
-            with self._save_path.open() as f:
-                data = json.load(f)
-            data = self._migrate(data)
-            _default_stats = dict.fromkeys(
-                ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
-            )
-            # When a saved profile is missing `unlocked_ids` (older saves,
-            # manual edits, partial writes), fall back to the Profile
-            # dataclass default rather than an empty list — otherwise the
-            # player loses their starter unlocks on reload.
-            unlocked_ids = (
-                list(data["unlocked_ids"])
-                if "unlocked_ids" in data
-                else Profile().unlocked_ids
-            )
-            return Profile(
-                unlocked_ids=unlocked_ids,
-                discovered_items=data.get("discovered_items", []),
-                stats={**_default_stats, **data.get("stats", {})},
-                seen_heist_hint=bool(data.get("seen_heist_hint", False)),
-            )
-        except (FileNotFoundError, json.JSONDecodeError):
+            raw = self._save_path.read_bytes()
+        except FileNotFoundError:
             return Profile()
+        except OSError:
+            return Profile()
+        try:
+            data = json.loads(raw.decode("utf-8"))
+            if not isinstance(data, dict):
+                raise TypeError(f"profile root must be an object, got {type(data).__name__}")
+            data = self._migrate(data)
+            return self._profile_from_dict(data)
+        except _NewerSchemaError:
+            self._newer_schema = True
+            return Profile()
+        except (UnicodeDecodeError, ValueError, TypeError):
+            # json.JSONDecodeError is a ValueError subclass.
+            self._quarantine()
+            return Profile()
+
+    @staticmethod
+    def _profile_from_dict(data: dict[str, Any]) -> Profile:
+        """Build a Profile from a migrated save dict, validating types.
+
+        Raises TypeError on a field of the wrong type (e.g. a string where a
+        list is expected — `list("abc")` would otherwise load as chars).
+        """
+        def _str_list(key: str, default: list[str]) -> list[str]:
+            if key not in data:
+                return default
+            value = data[key]
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise TypeError(f"{key!r} must be a list of strings")
+            return list(value)
+
+        stats = data.get("stats", {})
+        if not isinstance(stats, dict):
+            raise TypeError("'stats' must be an object")
+        default = Profile()
+        for key in default.stats:  # counters are incremented with `+= 1`
+            value = stats.get(key, 0)
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise TypeError(f"stats[{key!r}] must be an integer")
+        # When a saved profile is missing `unlocked_ids` (older saves,
+        # manual edits, partial writes), fall back to the Profile
+        # dataclass default rather than an empty list — otherwise the
+        # player loses their starter unlocks on reload.
+        return Profile(
+            unlocked_ids=_str_list("unlocked_ids", default.unlocked_ids),
+            discovered_items=_str_list("discovered_items", []),
+            stats={**default.stats, **stats},
+            seen_heist_hint=bool(data.get("seen_heist_hint", False)),
+        )
+
+    def _quarantine(self) -> None:
+        """Move a corrupt profile aside to ``profile.json.bak`` (best-effort)."""
+        with contextlib.suppress(OSError):
+            self._save_path.replace(self._save_path.with_name(self._save_path.name + ".bak"))
 
     def _migrate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Upgrade older save dicts to the current schema.
@@ -127,9 +186,9 @@ class SaveManager:
         this guard, a forward-incompatible field change (e.g. renaming a stat,
         repurposing a list) would silently load as garbage.
         """
-        version = int(data.get("schema_version", 0))
+        version = int(data.get("schema_version", 0))  # garbage → ValueError/TypeError
         if version > self.SCHEMA_VERSION:
-            raise ValueError(
+            raise _NewerSchemaError(
                 f"Save file schema_version={version} is newer than this "
                 f"build's SCHEMA_VERSION={self.SCHEMA_VERSION}. Upgrade the "
                 "game to load this profile."

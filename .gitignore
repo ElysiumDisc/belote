@@ -147,3 +147,7 @@ cython_debug/
 
 # PyCharm
 .idea/
+
+# Editor swap files
+*.kate-swp
+*.swp

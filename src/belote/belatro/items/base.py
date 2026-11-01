@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from belote.deck import Card, Suit
+
 if TYPE_CHECKING:
     from ..core.run_state import BelAtroRun
     from ..engine.event_bus import (
@@ -15,6 +17,16 @@ if TYPE_CHECKING:
         TrickWonEvent,
     )
 
+
+
+def is_trump_card(card: Card, trump: Suit | None) -> bool:
+    """Does `card` count as trump under `trump`?
+
+    Under Tout Atout every card is trump, but `trump` is the `Suit.TOUT_ATOUT`
+    marker that no card carries, so a bare `card.suit == trump` is always
+    False there. Sans Atout (`trump=None`) has no trump at all.
+    """
+    return trump is not None and (trump == Suit.TOUT_ATOUT or card.suit == trump)
 
 class Rarity(str, Enum):
     """Item rarity for shop weighting and unlock-gating."""

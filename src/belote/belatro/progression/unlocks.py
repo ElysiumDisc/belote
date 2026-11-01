@@ -89,8 +89,9 @@ class UnlockTracker:
     def _handle_round_end(self, event: RoundEndEvent) -> bool:
         dirty = False
 
-        # 1. Update Stats
-        if event.capot:
+        # 1. Update Stats — only the player's team's capots count (`capot`
+        # is also True when EW capots NS).
+        if event.ns_capot:
             self.profile.stats["total_capots"] += 1
             dirty = True
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -349,10 +351,11 @@ class ThemeManager:
                 f"Unknown theme {name!r}. Available: {sorted(THEMES.keys())}"
             )
         self._current_theme_name = name
-        self.save_selection()
-        # Execute registered callbacks (e.g., to clear UI caches)
+        # Execute registered callbacks (e.g., to clear UI caches) before
+        # persisting, so a failed save can never leave caches stale.
         for callback in self._on_change_callbacks:
             callback()
+        self.save_selection()
 
     def list_themes(self) -> list[str]:
         return list(THEMES.keys())
@@ -367,10 +370,27 @@ class ThemeManager:
                     self._current_theme_name = name
 
     def save_selection(self) -> None:
+        """Persist the theme choice. Best-effort: a read-only or missing
+        config dir must not crash the app when the player presses T, so every
+        filesystem step (including mkdir) is inside the OSError guard. Written
+        to a sibling tmp file then os.replace'd so a crash can't truncate it."""
         path = self._get_config_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with contextlib.suppress(Exception), path.open("w") as f:
-            json.dump({"theme": self._current_theme_name}, f)
+        tmp_path: Path | None = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=str(path.parent), prefix=".theme-", suffix=".json.tmp",
+                delete=False,
+            ) as tf:
+                tmp_path = Path(tf.name)
+                json.dump({"theme": self._current_theme_name}, tf)
+                tf.flush()
+                os.fsync(tf.fileno())
+            tmp_path.replace(path)
+        except OSError:
+            if tmp_path is not None:
+                with contextlib.suppress(OSError):
+                    tmp_path.unlink()
 
     def _get_config_path(self) -> Path:
         return Path.home() / ".config" / "belote" / "theme.json"

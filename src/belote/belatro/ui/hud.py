@@ -170,7 +170,9 @@ class BelAtroHUD:
         synergy_tip = ""
         if not state.boss_modifiers.hide_hud:
             pip_strip = build_joker_pip_strip(run, term_w, row=1)
-            tooltip_row = 4 if layout.hud_style == "compact" else 5
+            # Row 5 in both layouts: TrustBar.render() paints row 4 col 2 right
+            # after the HUD, which used to overwrite the compact tooltip.
+            tooltip_row = 5
             synergy_tip = build_synergy_tooltip(list(run.jokers), term_w, row=tooltip_row)
 
         if layout.hud_style == "compact":

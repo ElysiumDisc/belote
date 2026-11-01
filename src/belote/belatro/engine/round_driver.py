@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from ..run.boss import BossModifier
 
 
+# Defensive bound on consecutive all-pass redeals inside one drive_round call.
+_MAX_REDEALS = 32
+
+
 def _ew_should_coinche(state: GameState, rng: random.Random) -> bool:
     """Defender-side AI for the EW seats when NS is taker.
 
@@ -100,6 +104,13 @@ class RoundUICallbacks(ABC):
         """
         return False
 
+    def on_redeal(self, state: GameState) -> None:  # noqa: B027 - optional hook
+        """Notify the UI that everyone passed and the cards were redealt.
+
+        ``state`` is the fresh deal, already back in Phase.BIDDING. Default
+        no-op; BelAtro main shows a short banner.
+        """
+
     def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
         """Ask the player whether to surcoinche (NS-taker path, 3.7.1 D3).
 
@@ -110,6 +121,41 @@ class RoundUICallbacks(ABC):
         Override in concrete UI (e.g. BelAtro main).
         """
         return False
+
+
+def _diable_overcut(state: GameState) -> Card | None:
+    """Le Diable tarot: North over-cuts whenever it legally can (one round).
+
+    When North is following and some legal trump would take the trick, play
+    the lowest such trump — even over South's winning card, which is the
+    "sometimes ruinous" half of the card. Returns None (keep the AI's choice)
+    when North leads, holds no winning trump, or under Sans Atout.
+    """
+    from belote.deck import Contract, Rank, trick_rank
+    from belote.game import TrickCard, legal_cards, trick_winner_seat
+
+    trick = state.current_trick
+    trump = state.trump
+    if not trick or trump is None or state.contract == Contract.SANS_ATOUT:
+        return None
+    se = state.boss_modifiers.seven_eight_trump
+
+    def _is_trump(c: Card) -> bool:
+        return (
+            trump == Suit.TOUT_ATOUT
+            or c.suit == trump
+            or (se and c.rank in (Rank.SEVEN, Rank.EIGHT))
+        )
+
+    winning_trumps = [
+        c
+        for c in legal_cards(state, Seat.NORTH)
+        if _is_trump(c)
+        and trick_winner_seat(trick + (TrickCard(Seat.NORTH, c),), trump, se) == Seat.NORTH
+    ]
+    if not winning_trumps:
+        return None
+    return min(winning_trumps, key=lambda c: trick_rank(c, trump, se))
 
 
 def drive_round(
@@ -137,9 +183,28 @@ def drive_round(
         new_jstate = {**state._joker_state, **card_enhancements}
         state = replace(state, _joker_state=new_jstate)
 
+    # B1: Apply boss modifier flags onto the frozen GameState so play_card sees them.
+    # Must run BEFORE acc.trigger_round_start so the accumulator's snapshot of
+    # boss-derived flags (e.g. joker_state["no_dix_de_der"]) reflects the live
+    # boss state instead of the BossModifiers defaults.
+    if boss is not None:
+        from ..engine.modifier_patch import PatchedGameState
+
+        _proxy = PatchedGameState(state)
+        boss.apply(_proxy)
+        _patches = dict(object.__getattribute__(_proxy, "_patches"))
+        state = replace(state, **_patches)
+
+        # Ensure boss modifiers don't use stale cached logic/values
+        clear_legal_cards_cache()
+
     # Le Traître joker (corrupted, partner_throws_trick): pick one random trick
     # for partner sabotage and reuse the existing agent_double AI path. Skip if
     # a boss already activates agent_double — its 3-trick set takes precedence.
+    # These joker blocks MUST run after boss.apply() above: before, the
+    # boss flag was never set yet, so the guard always passed and the joker's
+    # 1-2 trick set pre-filled agent_double_tricks, suppressing the boss's.
+    # (boss.apply() draws no RNG, so the seeded sequence is unchanged.)
     if state._joker_state.get("traitre_active") and not state.boss_modifiers.agent_double_active:
         sabotage = frozenset({rng.randint(1, 8)})
         new_bm = replace(state.boss_modifiers, agent_double_active=True)
@@ -156,21 +221,6 @@ def drive_round(
         new_bm2 = replace(state.boss_modifiers, agent_double_active=True)
         new_jstate3 = {**state._joker_state, "agent_double_tricks": sabotage2}
         state = replace(state, boss_modifiers=new_bm2, _joker_state=new_jstate3)
-
-    # B1: Apply boss modifier flags onto the frozen GameState so play_card sees them.
-    # Must run BEFORE acc.trigger_round_start so the accumulator's snapshot of
-    # boss-derived flags (e.g. joker_state["no_dix_de_der"]) reflects the live
-    # boss state instead of the BossModifiers defaults.
-    if boss is not None:
-        from ..engine.modifier_patch import PatchedGameState
-
-        _proxy = PatchedGameState(state)
-        boss.apply(_proxy)
-        _patches = dict(object.__getattribute__(_proxy, "_patches"))
-        state = replace(state, **_patches)
-
-        # Ensure boss modifiers don't use stale cached logic/values
-        clear_legal_cards_cache()
 
     if acc is not None:
         state = acc.trigger_round_start(state)
@@ -238,6 +288,7 @@ def drive_round(
         return s
 
     # Phase: BIDDING
+    redeals = 0
     while state.phase == Phase.BIDDING:
         bidder = state.turn
         bid: BidValue = None
@@ -261,13 +312,18 @@ def drive_round(
                 is_special = p_bid == Suit.TOUT_ATOUT or p_bid == SANS_ATOUT_BID
                 if is_special and not partner.trust.duo_contracts_available:
                     p_bid = None
-                # Ensure the bid is legal for the current round (round 1 = up
-                # card suit only). TA/SA are also rejected in round 1 by
-                # place_bid, but we filter early to keep the bid legal here.
-                forbidden = state.up_card.suit if state.up_card else None
-                if p_bid != forbidden and not (
-                    is_special and state.bidding_round == 1
-                ):
+                # Ensure the bid is legal for the current round: round 1 may
+                # only take the up-card suit; round 2 may name any other suit
+                # (or TA/SA). place_bid only enforces the TA/SA rule, so the
+                # suit rule is filtered here. Previously the up-card suit was
+                # forbidden in *both* rounds, letting round-1 partners take an
+                # arbitrary suit and blocking up-card-only personalities.
+                up_suit = state.up_card.suit if state.up_card else None
+                if state.bidding_round == 1:
+                    legal_bid = p_bid is None or p_bid == up_suit
+                else:
+                    legal_bid = is_special or p_bid != up_suit
+                if legal_bid:
                     bid = p_bid
         else:
             # Standard AI for EAST/WEST
@@ -290,6 +346,21 @@ def drive_round(
                 trump=state.trump.name.lower() if state.trump is not None else None,
                 contract=state.contract or "normal",
             )
+
+        # All four seats passed in both bidding rounds: classic Belote
+        # redeals (dealer already rotated by place_bid) and bidding restarts.
+        # Previously the round ended here with 0 tricks, which BelAtro scored
+        # as a failed blind (run over). start_round resets boss_modifiers, so
+        # carry the boss/joker flags applied above over instead of re-running
+        # that setup; _joker_state (the ledger alias, incl. sabotage tricks) is
+        # not reset by start_round. No RoundEndEvent fires for the abandoned
+        # deal, so round-end jokers never score an unplayed hand. The cap is
+        # purely defensive (e.g. tests that mock every seat to pass); past it
+        # we return at Phase.DEAL with 0 tricks, as before.
+        if state.phase == Phase.DEAL and redeals < _MAX_REDEALS:
+            redeals += 1
+            state = replace(start_round(state, rng), boss_modifiers=state.boss_modifiers)
+            ui_callbacks.on_redeal(state)
 
     # ── Coinche / surcoinche flow ────────────────────────────────────────
     # Either defending team may coinche the taker's bid. The branches below
@@ -367,29 +438,11 @@ def drive_round(
             state,
         )
 
-    # If round ended early (everyone passed), emit RoundEndEvent
-    if state.phase == Phase.DEAL and len(state.bids) == 0:
-        # Everyone passed; state moved back to DEAL by process_bid
-        # We need a breakdown to emit.
-        breakdown = score_round(state)
-        state = _emit(
-            RoundEndEvent(
-                breakdown=breakdown,
-                taker_seat=None,
-                trump=None,
-                capot=False,
-                hand_remainder=tuple(state.hand_of(Seat.SOUTH)),
-                contract=state.contract or "normal",
-                coinche_level=coinche_level,
-            ),
-            state
-        )
-
     # 4.7.0: Dix de Der Heist declaration site. Fires after the bidding /
     # coinche / surcoinche flow has settled all derived state (taker, trump,
     # coinche_level, joker_state["contract"]) and before trick 1. Gated on
     # SOUTH being the taker; the `phase == PLAYING` guard naturally skips
-    # the all-pass branch (which ends the round at Phase.DEAL above).
+    # the (capped-out) all-pass case, which leaves the round at Phase.DEAL.
     # AI takers never get the prompt — the UICallbacks default returns False
     # and the BelAtro override also gates on `state.taker == Seat.SOUTH`.
     #
@@ -416,6 +469,8 @@ def drive_round(
         else:
             # AI Play
             card = ai_players[player].decide_card(state)
+            if player == Seat.NORTH and state._joker_state.get("partner_overcut_round"):
+                card = _diable_overcut(state) or card
 
         # Before playing, track points to emit TrickWonEvent with diff
         old_pts_total = sum(state.current_round_points)
@@ -521,12 +576,14 @@ def drive_round(
     if state.phase == Phase.SCORING:
         breakdown = score_round(state)
         hand_remainder = tuple(state.hand_of(Seat.SOUTH))
+        capot_team = is_capot(state)  # 0=NS, 1=EW, None
         state = _emit(
             RoundEndEvent(
                 breakdown=breakdown,
                 taker_seat=state.taker,
                 trump=state.trump,
-                capot=is_capot(state) is not None,
+                capot=capot_team is not None,
+                capot_team=capot_team,
                 hand_remainder=hand_remainder,
                 contract=state.contract or "normal",
                 coinche_level=coinche_level,

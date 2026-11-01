@@ -106,8 +106,10 @@ def _build_history_lines(entries: list[BelAtroHistoryEntry], term_w: int) -> lis
     if not entries:
         lines.append(f"{DIM}No blinds completed yet.{RESET}")
     else:
-        # Wide layout: single-row record. ~84 visible chars at minimum.
-        wide = term_w >= 90
+        # Wide layout: single-row record — 70 cells of columns + 10 " │ "
+        # separators = 100 visible cells, so it needs >= 100 columns (at 90-99
+        # every row wrapped and broke the view).
+        wide = term_w >= 100
         if wide:
             w_no, w_ante, w_bl, w_tgt, w_boss, w_tkr, w_con, w_trk, w_score, w_st, w_money = (
                 3, 4, 5, 5, 14, 7, 4, 7, 7, 8, 6,

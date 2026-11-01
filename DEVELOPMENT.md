@@ -2,6 +2,61 @@
 
 Welcome to the Belote development guide. This project is structured as a standard Python package.
 
+## Cheat Sheet
+
+Everything below assumes you're in the repo with the venv active:
+
+```bash
+cd ~/Projects/belote
+source .venv/bin/activate        # gives you `python`, `pip`, pytest, mypy, ruff
+```
+
+**1. Check everything is green (do this before every commit):**
+```bash
+PYTHONPATH=src python -m pytest -q && \
+  PYTHONPATH=src python -m mypy --strict src/ && \
+  python -m ruff check src/ tests/
+```
+
+**2. Push code to GitHub (no PyPI release):**
+```bash
+git status                       # see what changed — don't commit editor swap files
+git add <files>                  # or: git add -A   (after checking git status)
+git commit -m "what changed"
+git push origin master
+```
+
+**3. Release a new version to PyPI** (example: 4.9.7):
+```bash
+# a) bump the version in BOTH files (they must match):
+#      pyproject.toml          ->  version = "4.9.7"
+#      src/belote/__init__.py  ->  __version__ = "4.9.7"
+# b) add a "## 4.9.7" entry at the top of CHANGELOG.md
+# c) run the gates (step 1), then commit, tag and push:
+git add -A
+git commit -m "Release v4.9.7"
+git tag -a v4.9.7 -m "v4.9.7"
+git push origin master --tags
+# d) build, check and upload:
+rm -rf dist/ build/ *.egg-info/
+pipx run build --sdist --wheel
+pipx run twine check dist/*
+pipx run twine upload dist/*
+#    username: __token__
+#    password: your PyPI API token (starts with pypi-)
+#    make one at https://pypi.org/manage/account/token/
+```
+
+**4. Update the game installed with pipx** (from PyPI — https://pypi.org/project/belote-cli/):
+```bash
+pipx install belote-cli          # first time only
+pipx upgrade belote-cli          # after each release
+belote --version                 # confirm the new version
+```
+PyPI can take a minute to show a new upload. If `pipx upgrade` says you're
+already on the latest, wait a moment and retry, or force it with
+`pipx install --force belote-cli`.
+
 ## Setup
 
 1. **Clone the repository:**
@@ -10,15 +65,17 @@ Welcome to the Belote development guide. This project is structured as a standar
    cd belote
    ```
 
-2. **Create a virtual environment:**
+2. **Create a virtual environment** (use `python3` — many Linux distros don't
+   ship a bare `python` or `pip` outside a venv):
    ```bash
-   python -m venv .venv
+   python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-3. **Install in editable mode:**
+3. **Install in editable mode with the test + dev tools** (pytest, pytest-cov,
+   mypy, ruff):
    ```bash
-   pip install -e .
+   pip install -e ".[test,dev]"
    ```
 
 ## Running the Game
@@ -42,29 +99,31 @@ PYTHONPATH=src python3 -m belote.main
 
 ## Testing
 
-We use `pytest` for testing. Install it if you haven't already:
-```bash
-pip install pytest
-```
+We use `pytest` (installed by `pip install -e ".[test,dev]"` above).
+
+`tests/conftest.py` points `HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` at a
+throwaway temp dir for the whole run, so the suite never reads or writes your
+real `~/.config/belote/theme.json`, stats or BelAtro saves, and always renders
+with the default theme (the golden-frame snapshot depends on that).
 
 Run tests:
 ```bash
 # Run all tests (Classic + BelAtro)
 PYTHONPATH=src pytest
 
-# Run only Classic Belote tests
-PYTHONPATH=src pytest tests/
+# Run only Classic Belote tests (tests/belatro/ lives inside tests/)
+PYTHONPATH=src pytest tests/ --ignore=tests/belatro
 
 # Run only BelAtro tests
 PYTHONPATH=src pytest tests/belatro/
 
 # Run a single test file
-PYTHONPATH=src pytest tests/test_game.py
-PYTHONPATH=src pytest tests/belatro/test_scoring.py
+PYTHONPATH=src pytest tests/test_game_logic.py
+PYTHONPATH=src pytest tests/belatro/test_round_driver.py
 
 # Run a single test by name
-PYTHONPATH=src pytest tests/test_game.py::test_play_card_legal
-PYTHONPATH=src pytest -k "test_scoring"
+PYTHONPATH=src pytest tests/test_render_golden.py::test_golden_frame_sha256
+PYTHONPATH=src pytest -k "capot"
 
 # Run with verbose output
 PYTHONPATH=src pytest -v
@@ -84,7 +143,7 @@ PYTHONPATH=src mypy --strict src/
 # Linting (0 violations expected)
 ruff check src/ tests/
 
-# Full test suite (1111 tests expected)
+# Full test suite (1228 tests expected)
 PYTHONPATH=src pytest
 ```
 
@@ -92,7 +151,7 @@ Run all gates before committing:
 
 ```bash
 PYTHONPATH=src python -m pytest --tb=short -q && \
-  python -m mypy --strict src/ && \
+  PYTHONPATH=src python -m mypy --strict src/ && \
   python -m ruff check src/ tests/
 ```
 
@@ -116,8 +175,18 @@ Use these as a regression-detection floor for future changes.
 
 Set `BELOTE_A11Y=1` to emit one-line plain-text descriptions of card plays,
 trick winners, locked contracts (4.6.5), declarations (4.6.5), and round
-results to stderr — readable by terminal screen readers (Orca, NVDA over
-WSL, VoiceOver via iTerm2).
+results — readable by terminal screen readers (Orca, NVDA over WSL,
+VoiceOver via iTerm2).
+
+Where the lines go (4.9.7 — writing them onto the full-screen game used to
+scroll and scramble the frame):
+
+- `BELOTE_A11Y_OUT=/path` — appended to that file or terminal device, e.g.
+  run `tty` in a second terminal and use its `/dev/pts/N`.
+- otherwise stderr, when it's redirected (`belote 2>a11y.txt`) or is a
+  different terminal from the game.
+- otherwise `~/.local/share/belote/a11y.log` (`%APPDATA%\belote\a11y.log` on
+  Windows) — follow it with `tail -f` in another terminal.
 
 The env var is read once at import; tests that mutate it must call
 `belote.a11y._refresh_enabled_from_env()` after the patch. Hook points live
@@ -136,8 +205,8 @@ once at startup; toggling mid-run has no effect.
   affects scoring. Backed by `src/belote/replay.py`.
 - `BELOTE_GHOST=1` — silently record every BelAtro run (seed, deck,
   bids, plays, round outcomes) to
-  `~/.local/share/belote/ghosts/<label>-<seed>.json`. The file is written
-  once when the run ends. Useful for sharing or replaying interesting
+  `~/.local/share/belote/ghosts/<label>-<seed>-<timestamp>.json`. The file
+  is written once when the run ends and never overwrites an earlier one. Useful for sharing or replaying interesting
   runs. Backed by `src/belote/belatro/ghost_run.py`.
 - `NO_COLOR=<any-non-empty>` — suppress truecolor SGR escapes from
   `fg()` / `bg()` per the [no-color.org](https://no-color.org/) spec.
@@ -164,9 +233,9 @@ once at startup; toggling mid-run has no effect.
 
 ## Releasing a New Version
 
-### Code-only update (push to GitHub without releasing a new PyPI version)
+The short version is in the [Cheat Sheet](#cheat-sheet) at the top. Details:
 
-If you're just iterating on code, fixing typos, updating docs, etc., and don't want to cut a new PyPI release yet:
+### Code-only update (push to GitHub without releasing a new PyPI version)
 
 ```bash
 git add <files>
@@ -174,32 +243,32 @@ git commit -m "<what changed>"
 git push origin master
 ```
 
-## Releasing a New Version (Manual)
+### Full release (GitHub + PyPI)
 
-1. **Bump the version** in BOTH `pyproject.toml` AND `src/belote/__init__.py`
+1. **Run all gates** (see Code Quality) — don't release a red build.
+2. **Bump the version** in BOTH `pyproject.toml` AND `src/belote/__init__.py`
    (they must stay in sync — `belote --version` / `belatro --version` read
    `__version__` while PyPI / pipx read `pyproject.toml`).
-2. **Add a CHANGELOG entry** at the top of `CHANGELOG.md`.
-3. **Clean stale build artifacts:**
+3. **Add a CHANGELOG entry** at the top of `CHANGELOG.md`.
+4. **Commit, tag and push:**
    ```bash
-   rm -rf dist/ build/ *.egg-info/
-   ```
-4. **Build, validate, and upload:**
-   ```bash
-   pipx run build --sdist --wheel
-   pipx run twine check dist/*
-   pipx run twine upload dist/*
-   ```
-
-   *Note: `twine upload` will prompt for your PyPI credentials or use your `~/.pypirc` file.*
-
-5. **Commit and tag in git:**
-   ```bash
-   git add pyproject.toml CHANGELOG.md
+   git add -A          # check `git status` first
    git commit -m "Release vX.Y.Z"
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin master --tags
    ```
+5. **Clean stale build artifacts, then build, validate and upload:**
+   ```bash
+   rm -rf dist/ build/ *.egg-info/
+   pipx run build --sdist --wheel
+   pipx run twine check dist/*
+   pipx run twine upload dist/*
+   ```
+   `twine upload` uses `~/.pypirc` if present; otherwise it prompts — enter
+   `__token__` as the username and a PyPI API token as the password.
+   PyPI never accepts the same version twice, so a botched upload means
+   bumping to the next patch version.
+6. **Update your own install:** `pipx upgrade belote-cli`.
 
 ## Performance measurement
 

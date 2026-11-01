@@ -6,7 +6,7 @@ from belote.deck import Rank, Suit, card_points
 from belote.game import Seat, team_of
 
 from ...engine.event_bus import BeloteAnnouncedEvent, RoundEndEvent, TrickWonEvent
-from ..base import Joker, JokerResult
+from ..base import Joker, JokerResult, is_trump_card
 
 
 class LIdeologue(Joker):
@@ -80,7 +80,7 @@ class LePatriote(Joker):
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) == 0 and event.trump:
             trump_pts = sum(
-                card_points(c, event.trump) for c in event.cards if c.suit == event.trump
+                card_points(c, event.trump) for c in event.cards if is_trump_card(c, event.trump)
             )
             if trump_pts > 0:
                 return JokerResult(add_chips=trump_pts // 2)
@@ -132,7 +132,9 @@ class LIllusionniste(Joker):
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) == 0 and event.trump:
             extra_pts = sum(
-                18 for c in event.cards if c.rank == Rank.JACK and c.suit != event.trump
+                18
+                for c in event.cards
+                if c.rank == Rank.JACK and not is_trump_card(c, event.trump)
             )
             if extra_pts > 0:
                 return JokerResult(add_chips=extra_pts)

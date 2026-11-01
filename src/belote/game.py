@@ -200,6 +200,11 @@ class GameState:
     taker: Seat | None = None
     current_trick: tuple[TrickCard, ...] = field(default_factory=tuple)
     completed_tricks: tuple[tuple[TrickCard, ...], ...] = field(default_factory=tuple)
+    # Trump in force when each completed trick was played (aligned with
+    # `completed_tricks`). Only differs from `trump` under L'Anarchie
+    # (`dynamic_trump`), which rotates trump every 2 tricks; final scoring must
+    # resolve each trick with the trump it was actually played under.
+    trick_trumps: tuple[Suit | None, ...] = field(default_factory=tuple)
     last_trick_winner: Seat | None = None
     declarations: tuple[Declaration, ...] = field(default_factory=tuple)
     team_scores: tuple[int, int] = (0, 0)
@@ -285,6 +290,7 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "taker": None,
         "current_trick": (),
         "completed_tricks": (),
+        "trick_trumps": (),
         "last_trick_winner": None,
         "bids": (),
         "bidder_index": 0,
@@ -797,6 +803,21 @@ _NONTRUMP_RANK: dict[Rank, int] = {
 }
 
 
+def per_trick_trumps(state: GameState, trump: Suit | None, n: int) -> list[Suit | None]:
+    """Trump in force for each of the first `n` tricks of the round.
+
+    Only L'Anarchie (`dynamic_trump`) changes trump mid-round; it is resolved
+    from `state.trick_trumps`, recorded by `play_card`. Tricks not yet recorded
+    (an in-flight projection that includes the current trick) use `trump`,
+    which is the trump in force right now. Every other mode returns `trump`
+    for all tricks, exactly as before.
+    """
+    if not state.boss_modifiers.dynamic_trump:
+        return [trump] * n
+    recorded = state.trick_trumps
+    return [recorded[i] if i < len(recorded) else trump for i in range(n)]
+
+
 def compute_trick_winners(
     state: GameState,
     trump: Suit | None,
@@ -822,8 +843,9 @@ def compute_trick_winners(
     source = state.completed_tricks if tricks is None else tricks
     winners: list[Seat | None] = []
     prev_winner: Seat | None = None
-    for trick in source:
-        w = trick_winner_seat(trick, trump, se_trump, is_sans_atout)
+    trumps = per_trick_trumps(state, trump, len(source))
+    for trick, t_trump in zip(source, trumps, strict=True):
+        w = trick_winner_seat(trick, t_trump, se_trump, is_sans_atout)
         if (
             rupture
             and prev_winner is not None
@@ -833,10 +855,10 @@ def compute_trick_winners(
             other_team_cards = [
                 tc for tc in trick if team_of(tc.seat) != team_of(prev_winner)
             ]
-            if other_team_cards and (trump is not None or is_sans_atout):
+            if other_team_cards and (t_trump is not None or is_sans_atout):
                 best_other = _current_trick_winner(
                     other_team_cards,
-                    trump,
+                    t_trump,
                     trick[0].card.suit,
                     se_trump,
                     is_sans_atout,
@@ -1029,11 +1051,15 @@ def _compute_live_round_points(
 
 
 def _rotate_dynamic_trump(ctx: _PlayContext, tricks_count: int) -> Suit | None:
-    """L'Anarchie boss: rotate trump every 2 tricks (suppressed under SA)."""
+    """L'Anarchie boss: rotate trump every 2 tricks (suppressed under SA and TA).
+
+    Tout Atout has no single trump suit to rotate away from; rotating would
+    silently turn it into a one-suit game while still scoring it as TA.
+    """
     state = ctx.state
     if (
         state.boss_modifiers.dynamic_trump
-        and state.contract != Contract.SANS_ATOUT
+        and state.contract not in (Contract.SANS_ATOUT, Contract.TOUT_ATOUT)
         and tricks_count % 2 == 0
         and tricks_count < 8
     ):
@@ -1093,6 +1119,7 @@ def play_card(state: GameState, card: Card) -> GameState:
     winner = _resolve_trick_winner(ctx, new_trick)
 
     new_completed = state.completed_tricks + (new_trick,)
+    new_trick_trumps = state.trick_trumps + (ctx.trump,)
     tricks_count = len(new_completed)
 
     new_round_points = _compute_live_round_points(ctx, new_trick, winner, tricks_count)
@@ -1105,6 +1132,7 @@ def play_card(state: GameState, card: Card) -> GameState:
             hands=tuple(new_hands),
             current_trick=(),
             completed_tricks=new_completed,
+            trick_trumps=new_trick_trumps,
             last_trick_winner=winner,
             leader=winner,
             turn=winner,
@@ -1125,6 +1153,7 @@ def play_card(state: GameState, card: Card) -> GameState:
         hands=tuple(new_hands),
         current_trick=(),
         completed_tricks=new_completed,
+        trick_trumps=new_trick_trumps,
         last_trick_winner=winner,
         leader=winner,
         turn=winner,

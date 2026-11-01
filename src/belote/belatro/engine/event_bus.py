@@ -63,6 +63,26 @@ class RoundEndEvent:
     hand_remainder: tuple[Card, ...] = ()
     contract: str = "normal"
     coinche_level: int = 0  # 0=none, 1=coinche, 2=surcoinche
+    # Which team won all 8 tricks (0=NS, 1=EW), or None. `capot` alone is
+    # True for EITHER team's capot; consumers rewarding the player must use
+    # `ns_capot`. Defaulted (and inferred when absent) so older call sites
+    # that only pass `capot=` keep working.
+    capot_team: int | None = None
+
+    @property
+    def ns_capot(self) -> bool:
+        """True only when the player's team (NS) took all 8 tricks."""
+        if not self.capot:
+            return False
+        if self.capot_team is not None:
+            return self.capot_team == 0
+        # Legacy construction without capot_team: the breakdown pins it down —
+        # a capot with is_failed=True means the defenders capot'd the taker.
+        taker_team = getattr(self.breakdown, "taker_team", None)
+        if not isinstance(taker_team, int):
+            taker_team = 0 if self.taker_seat in (Seat.SOUTH, Seat.NORTH) else 1
+        failed = getattr(self.breakdown, "is_failed", False) is True
+        return (taker_team if not failed else 1 - taker_team) == 0
 
 
 @dataclass(frozen=True)

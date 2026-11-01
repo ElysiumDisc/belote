@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _is_windows() -> bool:
+    # Indirection so tests can exercise the Windows branch without patching
+    # os.name globally (pathlib picks its flavour from it).
+    return os.name == "nt"
+
+
 @dataclass(frozen=True)
 class Config:
     # Game rules
@@ -61,7 +67,12 @@ class Config:
     @property
     def stats_path(self) -> Path:
         xdg_data = os.environ.get("XDG_DATA_HOME")
-        if xdg_data:
+        appdata = os.environ.get("APPDATA")
+        if _is_windows() and appdata:
+            # Mirror belatro.progression.save.SaveManager so classic stats and
+            # the BelAtro profile live side by side under %APPDATA%\belote.
+            base = Path(appdata) / "belote"
+        elif xdg_data:
             base = Path(xdg_data) / "belote"
         else:
             base = Path.home() / ".local" / "share" / "belote"

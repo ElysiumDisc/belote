@@ -13,6 +13,7 @@ from ..ansi import (
     UNDERLINE,
     ansi_center,
     ansi_ljust,
+    ansi_truncate,
     banner_bg,
     banner_fg,
     black_fg,
@@ -1021,11 +1022,7 @@ def _build_hud(
         if layout.hud_style == "compact":
             return ansi_ljust(left + "   " + mid, term_w)
         theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
-        bar = left + "   " + mid
-        vlen_bar = visible_len(bar)
-        vlen_theme = visible_len(theme_label)
-        pad = max(0, term_w - vlen_bar - vlen_theme - 1)
-        return bar + " " * pad + theme_label
+        return _fit_hud(left + "   " + mid, theme_label, term_w)
 
     trump_sym = state.trump.symbol if state.trump else "?"
     ns, ew = team_scores_override if team_scores_override is not None else state.team_scores
@@ -1061,19 +1058,39 @@ def _build_hud(
 
     # Standard / verbose: full labels, hints, theme on the right.
     theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
-    mid = (
+    core = (
+        f"{left}   "
         f"{white_fg()}Trump: {trump_sym}   "
         f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
         f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
         f"{litige_chip_full}"
-        f"Trick {trick_num}/8   Taker: {taker_name}   "
-        f"{DIM}[H]Hist [T]Theme [Z]Undo [I]HUD{RESET}"
+        f"Trick {trick_num}/8   Taker: {taker_name}"
     )
-    bar = left + "   " + mid
+    bar = core + f"   {DIM}[H]Hist [T]Theme [Z]Undo [I]HUD{RESET}"
+    return _fit_hud(bar, theme_label, term_w, fallback=core + RESET)
+
+
+def _fit_hud(bar: str, theme_label: str, term_w: int, *, fallback: str | None = None) -> str:
+    """Lay out `bar` + right-aligned `theme_label` in exactly `term_w` cells.
+
+    At 120-143 cols, 3-digit scores / the litige chip / a long theme name
+    pushed the spacious HUD past term_w, so the row wrapped and the alt screen
+    scrolled. Optional segments are dropped in order — theme label, then the
+    key-hint tail (`bar` -> `fallback`) — and the result is finally clamped.
+    """
     vlen_bar = visible_len(bar)
     vlen_theme = visible_len(theme_label)
-    pad = max(0, term_w - vlen_bar - vlen_theme - 1)
-    return bar + " " * pad + theme_label
+    # Historical layout leaves the last column free (width term_w - 1); the
+    # extra +1 keeps at least one space so the hints never run into "Theme:".
+    if vlen_bar + vlen_theme + 2 <= term_w:
+        pad = term_w - vlen_bar - vlen_theme - 1
+        return bar + " " * pad + theme_label
+    for cand in (bar, fallback):
+        if cand is not None and visible_len(cand) <= term_w:
+            return ansi_ljust(cand, term_w)
+    # RESET after the cut so a truncated colour span can't bleed onward.
+    clamped = ansi_truncate(fallback if fallback is not None else bar, term_w) + RESET
+    return ansi_ljust(clamped, term_w)
 
 
 def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -> list[str]:

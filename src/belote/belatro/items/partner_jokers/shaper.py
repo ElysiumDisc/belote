@@ -5,7 +5,7 @@ from typing import Any
 from belote.game import Seat
 
 from ...engine.event_bus import RoundEndEvent, TrickWonEvent
-from ..base import Joker, JokerResult
+from ..base import Joker, JokerResult, is_trump_card
 
 
 class LeGenereux(Joker):
@@ -38,7 +38,7 @@ class LaSentinelleP(Joker):
             event.leader_seat == Seat.NORTH
             and event.trump is not None
             and event.cards
-            and event.cards[0].suit == event.trump
+            and is_trump_card(event.cards[0], event.trump)
         ):
             state[f"{self.id}_trump_led"] = True
         return None

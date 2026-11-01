@@ -56,8 +56,16 @@ class GhostRecorder:
         self.events.append({"type": "round_end", "breakdown": breakdown})
 
     def save(self, label: str = "run") -> Path:
-        """Write the recorded events to ``<ghosts>/<label>-<seed>.json``."""
-        path = _ghost_dir() / f"{label}-{self.seed}.json"
+        """Write the recorded events to ``<ghosts>/<label>-<seed>-<ms>.json``.
+
+        The millisecond timestamp keeps runs that share a label + seed (e.g.
+        two "ante3" losses) from overwriting each other's file.
+        """
+        stamp = int(time.time() * 1000)
+        path = _ghost_dir() / f"{label}-{self.seed}-{stamp}.json"
+        while path.exists():
+            stamp += 1
+            path = _ghost_dir() / f"{label}-{self.seed}-{stamp}.json"
         record = {
             "version": 1,
             "seed": self.seed,

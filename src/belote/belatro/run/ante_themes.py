@@ -27,6 +27,10 @@ class AnteTheme:
         """Per-blind multiplier on the target score. Default 1.0 (no change)."""
         return 1.0
 
+    def chips_bonus(self, blind_index: int) -> int:
+        """Extra starting chips for one blind of this ante. Default 0."""
+        return 0
+
     def on_blind_won(self, run: BelAtroRun, blind_index: int, blind_payout: int) -> None:
         """Hook fired after a blind is won under this theme.
 
@@ -37,7 +41,7 @@ class AnteTheme:
 
 
 class CafeAnte(AnteTheme):
-    """+25% chips on blind 0; +1 trust on blind 1 win; gentler boss on blind 2.
+    """+25 chips on blind 0; +1 trust on blind 1 win; gentler boss on blind 2.
 
     The "gentler boss" effect is implemented via a soft target reduction (5%)
     on blind 2 — keeps the implementation simple without needing per-boss
@@ -52,8 +56,10 @@ class CafeAnte(AnteTheme):
         "Boss-blind: target 5% softer."
     )
 
-    def on_ante_start(self, run: BelAtroRun) -> None:
-        run.permanent_chips += 25  # +25 chips one-shot at theme roll
+    def chips_bonus(self, blind_index: int) -> int:
+        # Petit-blind only. Pre-4.9.7 this was added to run.permanent_chips at
+        # theme roll, so it applied to every later round and stacked per roll.
+        return 25 if blind_index == 0 else 0
 
     def target_multiplier(self, blind_index: int) -> float:
         return 0.95 if blind_index == 2 else 1.0
@@ -79,6 +85,16 @@ class TournoiAnte(AnteTheme):
         # True 50% of the round's actual payout (all sources summed).
         # `blind_payout` is computed by the caller from the economy delta.
         run.economy.add_money(max(1, blind_payout // 2))
+
+
+# card_enhancements keys set by themes; cleared when the next theme is rolled.
+_THEME_FLAGS = ("always_offer_coinche",)
+
+
+def clear_theme_flags(run: BelAtroRun) -> None:
+    """Remove the previous ante theme's flags before a new theme is rolled."""
+    for key in _THEME_FLAGS:
+        run.card_enhancements.pop(key, None)
 
 
 ALL_ANTE_THEMES: list[type[AnteTheme]] = [CafeAnte, TournoiAnte]

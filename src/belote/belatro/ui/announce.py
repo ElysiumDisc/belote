@@ -8,6 +8,8 @@ from belote.input import Key
 from belote.ui.render import invalidate_diff
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from belote.game import GameState
     from belote.input import KeyReader
 
@@ -236,7 +238,9 @@ class BelAtroAnnounce:
         invalidate_diff()
 
     @staticmethod
-    def buy_contract_picker(reader: KeyReader) -> object:
+    def buy_contract_picker(
+        reader: KeyReader, allowed: Collection[object] | None = None
+    ) -> object:
         """L'Architecte buy-contract picker.
 
         Returns a contract value compatible with `process_bid`:
@@ -244,6 +248,9 @@ class BelAtroAnnounce:
         - `Suit.TOUT_ATOUT` for Tout Atout
         - the `SANS_ATOUT_BID` string sentinel for Sans Atout
         - `None` if the user cancels (Esc / Q / EOF)
+
+        `allowed` restricts the menu to the bids legal in the current bidding
+        round (the caller computes it); None shows every option.
 
         4.5.0 — UI lives here (not `belote/ui/prompts.py`) because the buy is
         a BelAtro-only deck rule.
@@ -260,6 +267,10 @@ class BelAtroAnnounce:
             ("Tout Atout", Suit.TOUT_ATOUT),
             ("Sans Atout", SANS_ATOUT_BID),
         ]
+        if allowed is not None:
+            options = [opt for opt in options if opt[1] in allowed]
+            if not options:
+                return None
         sel = 0
         term_w, term_h = get_term_size()
         row = max(1, term_h // 2 - 1)

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .ui.hud import BelAtroHUD
     from .ui.trust_bar import TrustBar
 
+from ..ui.fit_guard import FitAbortedError
 from .core.run_state import BelAtroRun
 from .core.scoring import ScoreAccumulator
 from .engine.event_bus import EventBus
@@ -26,6 +27,18 @@ from .progression.unlocks import UnlockTracker
 from .run.shop import Shop
 from .ui.menu import BelAtroMainMenu
 from .ui.shop import ShopScreen
+
+
+def _legal_bids(state: GameState) -> list[object]:
+    """Non-pass bids legal for SOUTH in the current bidding round."""
+    from belote.deck import Suit
+    from belote.game import SANS_ATOUT_BID
+
+    up_suit = state.up_card.suit if state.up_card is not None else None
+    suits = (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS)
+    if state.bidding_round == 1:
+        return [up_suit] if up_suit is not None else []
+    return [s for s in suits if s != up_suit] + [Suit.TOUT_ATOUT, SANS_ATOUT_BID]
 
 
 class UICallbacks(RoundUICallbacks):
@@ -74,7 +87,7 @@ class UICallbacks(RoundUICallbacks):
         invalidate_diff()
         display(state, show_north_hand=self.show_north)
         self.hud.render(self.acc, state)
-        self.trust_bar.render()
+        self.trust_bar.render(state)
 
     def prompt_bid(self, state: GameState) -> object:
         from ..ui.prompts import prompt_bid
@@ -91,8 +104,13 @@ class UICallbacks(RoundUICallbacks):
                 "L'Architecte: buy the contract for $10?", self.reader
             )
         ):
-            chosen = BelAtroAnnounce.buy_contract_picker(self.reader)
-            if chosen is not None:
+            # Offer only bids legal this bidding round — round 1: the up-card
+            # suit only; round 2: any other suit, or TA/SA. Money is taken only
+            # once the pick is known legal: an illegal pick used to be paid for
+            # and then crash in place_bid (IllegalMoveError).
+            legal = _legal_bids(state)
+            chosen = BelAtroAnnounce.buy_contract_picker(self.reader, legal)
+            if chosen is not None and chosen in legal:
                 self.run.economy.money -= 10
                 BelAtroAnnounce.banner(
                     "Contract bought — $10 spent",
@@ -123,7 +141,7 @@ class UICallbacks(RoundUICallbacks):
         # by `on_card_played` (post-play) and `_show_overlay` (I-toggle).
         def _hud_after_display(s: GameState) -> None:
             self.hud.render(self.acc, s)
-            self.trust_bar.render()
+            self.trust_bar.render(s)
 
         while True:
             card, new_state = prompt_card(
@@ -161,7 +179,7 @@ class UICallbacks(RoundUICallbacks):
         invalidate_diff()
         display(state, show_north_hand=self.show_north)
         self.hud.render(self.acc, state)
-        self.trust_bar.render()
+        self.trust_bar.render(state)
 
     def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None:
         from dataclasses import replace as dc_replace
@@ -174,7 +192,7 @@ class UICallbacks(RoundUICallbacks):
             display_state = state
         display(display_state, show_north_hand=self.show_north)
         self.hud.render(self.acc, display_state)
-        self.trust_bar.render()
+        self.trust_bar.render(display_state)
 
     def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None:
         # 4.7.0: animated odometer-style tally replaces the static
@@ -189,6 +207,25 @@ class UICallbacks(RoundUICallbacks):
 
     def on_round_end(self, breakdown: object) -> None:
         pass
+
+    def on_redeal(self, state: GameState) -> None:
+        from ..ui.render import invalidate_diff
+        from .ui.announce import BelAtroAnnounce
+
+        BelAtroAnnounce.banner("Everyone passed — redeal", self.reader, hold=1.0)
+        invalidate_diff()  # banner bypassed the diff renderer; repaint fully
+
+    def prompt_coinche(self, state: GameState, taker: Seat) -> bool:
+        """Le Tournoi ante theme: "Coinche always offered".
+
+        Outside Le Tournoi BelAtro keeps its usual flow (no player coinche
+        prompt; the partner AI may still coinche on its own).
+        """
+        if not self.run.card_enhancements.get("always_offer_coinche"):
+            return False
+        from .ui.announce import BelAtroAnnounce
+
+        return BelAtroAnnounce.yes_no(f"{taker.name} took the bid. Coinche (x2)?", self.reader)
 
     def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
         """3.7.1 D3: ask the NS taker whether to surcoinche after EW coinches."""
@@ -282,6 +319,8 @@ class BelAtroGame:
                 self.save_manager.save_profile(self.profile)
                 if self._ghost_enabled:
                     from .ghost_run import GhostRecorder
+                    # BelAtroRun picks a seed at creation when none is given,
+                    # so this is the real seed the run's RNG uses.
                     self._ghost_recorder = GhostRecorder(
                         seed=self.run.seed if self.run.seed is not None else 0,
                         deck_id=self.run.deck_id,
@@ -298,8 +337,9 @@ class BelAtroGame:
                     lambda reader: show_belatro_history(reader, run.history)
                 )
                 self._run_loop()
-        except KeyboardInterrupt:
-            # Catch exit signals to return to the Belote main menu
+        except (KeyboardInterrupt, FitAbortedError):
+            # Catch exit signals (incl. Q on a "terminal too small" screen
+            # raised by require_minimum) to return to the Belote main menu.
             return
         finally:
             from ..ui.prompts import set_history_override
@@ -308,9 +348,12 @@ class BelAtroGame:
             # player's own analysis. Best-effort; swallowed on failure.
             if self.run is not None:
                 from .run_summary import append_summary
-                append_summary(self.run, won=self.run.run_won)
+                # enter_endless() clears run_won to re-open the run, but being
+                # in endless at all means ante 8 was beaten — still a victory.
+                won = self.run.run_won or self.run.endless
+                append_summary(self.run, won=won)
                 if self._ghost_recorder is not None:
-                    label = "won" if self.run.run_won else f"ante{self.run.ante_number}"
+                    label = "won" if won else f"ante{self.run.ante_number}"
                     self._ghost_recorder.save(label=label)
 
     def _drain_unlock_announcements(self) -> None:
@@ -383,7 +426,7 @@ class BelAtroGame:
                             self.save_manager.save_profile(self.profile)
                             continue
                     break
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, FitAbortedError):
             self.run.run_over = True
             return
 
@@ -395,7 +438,10 @@ class BelAtroGame:
         # Uses the run's seeded RNG so themes are deterministic per seed.
         # The roll runs once per ante; subsequent blinds re-use the same theme.
         if self.run.blind_index == 0:
-            from .run.ante_themes import roll_theme
+            from .run.ante_themes import clear_theme_flags, roll_theme
+            # Drop the previous ante's theme flags so they don't outlive it
+            # (Le Tournoi's coinche offer used to stick for the whole run).
+            clear_theme_flags(self.run)
             theme = roll_theme(self.run._get_rng().random())
             self.run.ante_theme = theme.id if theme is not None else None
             if theme is not None:
@@ -403,7 +449,6 @@ class BelAtroGame:
         # 3.3.0: snapshots used at end of round to build the [H] history entry.
         history_ante = self.run.ante_number
         history_blind_index = self.run.blind_index
-        history_target = self.run.target_score
         money_before = self.run.economy.money
         bus = EventBus()
         self.unlock_tracker.subscribe_to(bus)
@@ -419,7 +464,10 @@ class BelAtroGame:
 
         from belote.belatro.core.scoring import ContractReward
         acc.contract_levels = cast("dict[str, ContractReward]", self.run.contract_levels)
-        acc.permanent_chips = self.run.permanent_chips
+        # Le Café's petit-blind +25 chips applies to that one blind only.
+        active_theme = self.run.get_ante_theme()
+        theme_chips = active_theme.chips_bonus(self.run.blind_index) if active_theme else 0
+        acc.permanent_chips = self.run.permanent_chips + theme_chips
         acc.permanent_mult = self.run.permanent_mult
         # 4.7.0: snapshot the run's current interest_rate so the Dix de Der
         # Heist multiplier is deterministic for the round (a mid-round La
@@ -442,7 +490,10 @@ class BelAtroGame:
         # BelAtroAnnounce.
         from .ui.announce import reset_tally_state
         reset_tally_state()
-        show_north = self.run.show_north_hand or self.run.partner.trust.shares_void_info
+        # Full partner hand only with Le Carnet. Trust 3+ ("Void Info") shows
+        # North's void suits on the trust bar instead — pre-4.9.7 it revealed
+        # the whole hand from the starting trust of 5, making Le Carnet moot.
+        show_north = self.run.show_north_hand
 
         # Check if boss
         boss = None
@@ -496,9 +547,14 @@ class BelAtroGame:
 
         if boss_flags is not None and boss_flags.hide_partner_hand:
             show_north = False  # partner hand hidden for this round
+            trust_bar.show_voids = False  # ...and so are its voids
 
         if auto_coinche_active:
             acc.target_score *= 2  # L'Avocat: target doubles
+        # The target this blind is actually judged against (2x under
+        # L'Avocat). Payout margin, Le Puriste, the big-margin trust check and
+        # the [H] history entry must all use it, not the base run target.
+        effective_target = acc.target_score
 
         if lock_trust:
             _saved_trust = self.run.partner.trust.value
@@ -532,11 +588,17 @@ class BelAtroGame:
         if self.run.surcoinche_unlocked:
             round_flags["surcoinche_unlocked"] = True
 
+        # Per-round deal seed drawn from the run's seeded RNG so a whole run
+        # (deals + AI play) replays from run.seed — ghost runs depend on it.
+        # Previously drive_round got no seed and every deal was unseeded.
+        round_seed = self.run._get_rng().getrandbits(32)
+
         final_state = drive_round(
             bus=bus,
+            seed=round_seed,
             partner=self.run.partner,
             boss=boss,
-            target_score=self.run.target_score,
+            target_score=effective_target,
             ui_callbacks=UICallbacks(
                 self.reader,
                 self.run,
@@ -611,7 +673,6 @@ class BelAtroGame:
         # Phase 2.3: refresh partner_mood for HUD display.
         self.run.partner_mood = trust.mood()
 
-        effective_target = acc.target_score  # doubled for L'Avocat, normal otherwise
         survived_via_insurance = False
         if total < effective_target:
             # Phase 2.1: Capot Insurance halves the chute loss (one-shot).
@@ -642,13 +703,17 @@ class BelAtroGame:
             if not lock_trust:
                 trust.blind_failed()
         else:
-            money_before = self.run.economy.money
-            payout = self.run.economy.process_round_end(total - self.run.target_score)
+            # Theme hook below measures this blind's payout only; the history
+            # entry keeps using the pre-round `money_before` snapshot so
+            # money_delta is computed the same way on win and loss (incl.
+            # L'Architecte's mid-bid $10 spend).
+            money_before_payout = self.run.economy.money
+            payout = self.run.economy.process_round_end(total - effective_target)
             if auto_coinche_active:
                 self.run.economy.add_money(payout * 2)  # L'Avocat: triple total payout
             self._reconcile_bonus_money(final_state._bonus_money)
             if final_state._joker_state.get("puriste_triggered"):
-                extra = max(0, (total - self.run.target_score) // 10)
+                extra = max(0, (total - effective_target) // 10)
                 self.run.economy.add_money(extra)  # Le Puriste: double base payout
 
             # L'Aristocrate deck: +$1 per Ace captured by NS team this round.
@@ -667,7 +732,7 @@ class BelAtroGame:
                     self.run.economy.add_money(aces_won)
 
             if not lock_trust:
-                if total >= self.run.target_score * 1.5:
+                if total >= effective_target * 1.5:
                     trust.big_margin_win()
                 else:
                     trust.blind_beaten()
@@ -676,7 +741,7 @@ class BelAtroGame:
             # awards bonus money, Café gives +1 trust on big-blind wins).
             theme = self.run.get_ante_theme()
             if theme is not None:
-                blind_payout = self.run.economy.money - money_before
+                blind_payout = self.run.economy.money - money_before_payout
                 theme.on_blind_won(self.run, self.run.blind_index, blind_payout)
 
         # Partner-specific trust events (skipped under Le Divorce)
@@ -701,7 +766,7 @@ class BelAtroGame:
         self._record_history_entry(
             ante=history_ante,
             blind_index=history_blind_index,
-            target=history_target,
+            target=effective_target,
             boss=boss,
             final_state=final_state,
             bd=bd,

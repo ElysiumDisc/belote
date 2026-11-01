@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 from belote.ansi import BOLD, RESET, gold_fg, green_fg, move, red_fg, white_fg
 
 if TYPE_CHECKING:
+    from belote.game import GameState
+
     from ..partner.trust import TrustTrack
 
 
@@ -32,14 +34,36 @@ def _bar_color(value: int) -> str:
     return str(green_fg())
 
 
+def _void_label(state: GameState | None) -> str:
+    """"Void: ♠♦" for North's empty suits during play, else "Void Info"."""
+    from belote.deck import CARD_SUITS
+    from belote.game import Phase, Seat
+
+    if state is None or state.phase != Phase.PLAYING:
+        return "Void Info"
+    hand = state.hand_of(Seat.NORTH)
+    if not hand:
+        return "Void Info"
+    held = {c.suit for c in hand}
+    voids = "".join(s.symbol for s in CARD_SUITS if s not in held)
+    return f"Void: {voids or '—'}"
+
+
 class TrustBar:
     """Visualizes the 0-10 Trust Track with a tier glyph and 4-colour gradient."""
 
-    def __init__(self, trust: TrustTrack) -> None:
+    def __init__(self, trust: TrustTrack, show_voids: bool = True) -> None:
         self.trust = trust
+        # False under bosses that hide the partner's hand: void info would
+        # leak what the boss is hiding.
+        self.show_voids = show_voids
 
-    def render(self) -> None:
-        """Render trust meter at (row 4, col 2)."""
+    def render(self, state: GameState | None = None) -> None:
+        """Render trust meter at (row 4, col 2).
+
+        With `state` during play, the trust-3+ "Void Info" perk lists the
+        suits North holds none of (e.g. "✦ Void: ♠♦").
+        """
         # 4.6.3: gated by the BelAtro top-HUD toggle so I/V can hide the bar
         # together with the joker strip and ante line.
         from .announce import is_top_hud_visible
@@ -59,10 +83,10 @@ class TrustBar:
 
         if self.trust.ai_degraded:
             status = red_fg() + " ⚠ Degraded" + RESET
-        elif self.trust.auto_capot_available:
-            status = gold_fg() + " ★ Auto-Capot" + RESET
-        elif self.trust.shares_void_info:
-            status = green_fg() + " ✦ Void Info" + RESET
+        # "★ Auto-Capot" (trust 9+) is not shown: the perk has no gameplay
+        # implementation yet, so advertising it was a false promise.
+        elif self.show_voids and self.trust.shares_void_info:
+            status = green_fg() + " ✦ " + _void_label(state) + RESET
         else:
             status = ""
 

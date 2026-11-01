@@ -625,12 +625,26 @@ class TestLeSergent:
         assert result is not None
         assert result.add_mult == 0.5
 
-    def test_consecutive_south_wins_both_give_mult(self) -> None:
+    def test_consecutive_south_wins_grow_with_streak(self) -> None:
         r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
         r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state)
         assert r1.add_mult == 0.5
-        assert r2.add_mult == 0.5
+        assert r2.add_mult == 1.0
         assert self.state.get(f"{self.joker.id}_streak") == 2
+
+    def test_streak_bonus_caps_at_two(self) -> None:
+        mults = [
+            self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=i), self.state)
+            for i in range(1, 9)
+        ]
+        assert [r.add_mult for r in mults if r] == [0.5, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 2.0]
+
+    def test_loss_restarts_streak_bonus(self) -> None:
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state)
+        self.joker.on_trick_won(make_trick_event(winner=Seat.EAST, trick_number=3), self.state)
+        r = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=4), self.state)
+        assert r is not None and r.add_mult == 0.5
 
     def test_east_win_resets_streak(self) -> None:
         # 3.4.2 (H1): an opposing-team trick (East/West) now resets the
@@ -644,7 +658,7 @@ class TestLeSergent:
         r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
         r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
         assert r1 is not None and r1.add_mult == 0.5
-        assert r2 is not None and r2.add_mult == 0.5
+        assert r2 is not None and r2.add_mult == 1.0
         assert self.state.get(f"{self.joker.id}_streak") == 2
 
     def test_east_win_returns_none(self) -> None:

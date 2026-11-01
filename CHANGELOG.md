@@ -5,6 +5,93 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.9.7] - 2026-11-01
+
+Repo-wide audit: four parallel reviewers swept the classic engine, the
+classic UI/terminal layer, the BelAtro engine/run/progression code and the
+BelAtro items/UI; every finding was verified (most with a repro script) before
+fixing. Test count 1111 → 1228.
+
+### Fixed — test suite
+
+- **Tests no longer depend on (or write to) your real profile.** A new
+  `tests/conftest.py` points `HOME` / `XDG_CONFIG_HOME` / `XDG_DATA_HOME` at a
+  temp dir. The suite used to render with whatever theme the developer last
+  picked (the golden-frame hashes only passed with `moonlit_tavern` saved) and
+  `theme_manager.set_current()` rewrote `~/.config/belote/theme.json`.
+  Golden hashes re-pinned to the default `classic_green` theme.
+- Hardcoded `/home/mrrobot/belote/` paths in `tests/test_alt_screen_scroll.py`
+  replaced with a path relative to the test file.
+- `scripts/benchmark.py` is now `mypy --strict` clean.
+
+### Fixed — classic game
+
+- **L'Anarchie scored every trick with the end-of-round trump.** Tricks now
+  record the trump they were played under (`GameState.trick_trumps`) and final
+  scoring uses it (was wrong in ~99% of L'Anarchie rounds).
+- A **worthless carré of 7s/8s outranked the other team's sequences** and
+  wiped out their points. 0-point carrés no longer take part in declarations.
+- **Hard AI threw high off-suit cards to the opponents**, believing an
+  off-suit Ace beat a led King (normal and Tout Atout contracts).
+- **Tout Atout under L'Anarchie** silently became a one-suit game while still
+  being scored as Tout Atout; trump no longer rotates under TA.
+- Capots by the opponents counted as **your** capots in stats/achievements;
+  `first_capot` used `== 1`; "Triple Coup" read lifetime instead of session capots.
+- 6+ card sequences were labelled "0" in the round summary.
+
+### Fixed — terminal, UI and files
+
+- `--target 750` (non-preset) crashed the main menu.
+- Stats file: atomic writes; corrupt / wrong-shaped files no longer crash the
+  game (moved aside to `stats.json.bak`).
+- Unknown escape sequences leaked as keystrokes (F2 quit the game, Ctrl+→
+  played card 5, Delete typed `~`); Ctrl-C now quits.
+- In-game `FitAbortedError` (terminal too small → Q) exits cleanly.
+- Spacious HUD overflowed at 120–143 columns and scrolled the screen.
+- Game-over screen "staircased" (bare `\n` in raw mode).
+- Pressing T crashed on a read-only config dir; theme saves are atomic.
+- The game can now start on Windows (`termios` imported only on Unix); classic
+  stats honour `%APPDATA%`.
+- `BELOTE_A11Y=1` no longer scribbles over the game screen — see
+  DEVELOPMENT.md → Accessibility (`BELOTE_A11Y_OUT`).
+
+### Fixed — BelAtro
+
+- **All-pass deals ended the run**; they now redeal (and round-end jokers no
+  longer fire on the abandoned deal).
+- Partner bidding was backwards in round 1 (could take any suit except the
+  legal one; L'Économe could never bid).
+- L'Architecte "buy contract" crashed in round 1 after taking $10.
+- Le Traître / L'Agent Double replaced the boss's larger sabotage set.
+- L'Avocat's doubled target was ignored for payout, Le Puriste, trust and history.
+- Ghost runs: real seeds, seeded rounds, unique file names.
+- Corrupt / newer-schema `profile.json` no longer crashes launch.
+- Capots by EW counted as yours (unlocks, Pluto); Mercury/Pluto paid on EW contracts.
+- The shop offered jokers you already own (duplicates corrupted each other's
+  state); Le Jugement too.
+- Le Patriote, L'Illusionniste and La Sentinelle (P) mishandled Tout Atout;
+  Le Passeur paid $2 when North bid Sans Atout.
+- Shop cards: frame misaligned, long names overflowed, editions invisible.
+- Compact HUD: trust bar overwrote the synergy tooltip.
+- History overlay overflowed 90–99 column terminals.
+- An ante-8 victory continued into endless mode was recorded as a loss.
+
+### Changed — design calls
+
+- **Le Diable** now works: for one round North over-cuts with its lowest
+  winning trump whenever it can — even over your winning card.
+- **Sell jokers** in the shop with `S` for half their cost (same value as
+  La Tempérance). Corrupted jokers can't be sold; selling a Negative joker
+  returns its slot.
+- **Le Sergent** grows with the streak: +0.5, +1.0, +1.5, then +2.0 per trick
+  (was a flat +0.5 that ignored "consecutive").
+- **Le Tournoi** really offers you a coinche; theme flags no longer outlive
+  their ante. **Le Café**'s +25 chips is a petit-blind bonus, not permanent.
+- **Auto-Capot** (trust 9+) is no longer advertised — it was never implemented.
+- **Trust 3+ shows North's void suits** (`✦ Void: ♠♦`) instead of the whole
+  hand; seeing the full hand needs Le Carnet.
+- **Pluto** pays only when you took the contract and made it as a capot.
+
 ## [4.9.6] - 2026-06-01
 
 Follow-up bug-hunt, logic, and performance audit. Three parallel Explore agents

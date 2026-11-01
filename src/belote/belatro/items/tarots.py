@@ -38,10 +38,13 @@ class LeJugement(Tarot):
         # Description promises a Common joker — pre-3.3.3 the pool was the
         # full unlocked set, so late-run players could roll Rare/Legendary
         # off this tarot and mis-price it. Filter to Rarity.COMMON only.
+        # Skip jokers already owned: two copies share `f"{id}_..."` joker_state
+        # keys and corrupt each other's counters/flags.
+        owned = {j.id for j in run.jokers}
         avail = {
             k: v
             for k, v in registry.get_available_jokers(run.profile).items()
-            if getattr(v, "rarity", Rarity.COMMON) == Rarity.COMMON
+            if getattr(v, "rarity", Rarity.COMMON) == Rarity.COMMON and k not in owned
         }
         if not avail:
             run.last_tarot_message = "Le Jugement: no jokers available to grant."

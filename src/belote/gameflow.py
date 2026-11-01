@@ -27,6 +27,7 @@ from .game import (
 )
 from .input import KeyReader, interruptible_sleep
 from .scoring import (
+    ScoringBreakdown,
     apply_round_score,
     coinche_adjusted_credits,
     detect_carres,
@@ -61,6 +62,20 @@ def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
     """Create AI players for seats not occupied by humans."""
     ai_seats = {Seat.EAST, Seat.NORTH, Seat.WEST}
     return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
+
+
+def _is_player_capot(breakdown: ScoringBreakdown) -> bool:
+    """True when the player's team (NS, team 0) took all 8 tricks.
+
+    `is_capot` is set for a capot by EITHER team, so passing it straight to
+    the stats credited EW capots to the player. The capot team is the taker
+    if the contract stood, else the defenders (`_score_capot_outcome` sets
+    `is_failed` when the defenders capot the taker).
+    """
+    if not breakdown.is_capot:
+        return False
+    capot_team = breakdown.taker_team if not breakdown.is_failed else 1 - breakdown.taker_team
+    return capot_team == 0
 
 
 def _contract_word(state: GameState) -> str | None:
@@ -558,7 +573,7 @@ def run_round(
             # Update global stats
             trump_sym = current.trump.symbol if current.trump else None
             update_stats_round(
-                breakdown.is_capot,
+                _is_player_capot(breakdown),
                 breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total,
                 trump_sym,
             )

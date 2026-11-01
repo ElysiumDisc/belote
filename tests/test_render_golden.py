@@ -35,6 +35,8 @@ from belote.game import Phase, Seat, new_game, replace, start_round
 render_mod = _sys.modules["belote.ui.render"]
 
 # Fixed 120x40 terminal so the snapshot is deterministic regardless of host.
+# Hashes are for the default `classic_green` theme; tests/conftest.py sandboxes
+# HOME so a developer's saved theme.json can't leak into the render.
 _TERM = (120, 40)
 
 # Per-row visible cell widths for the seeded PLAYING frame at 120x40.
@@ -44,8 +46,8 @@ _GOLDEN_WIDTHS = (
     121, 121, 121, 121, 121, 121, 121, 121, 121, 121,
     121, 121, 121, 121, 121, 121, 121, 121, 121, 120,
 )
-_GOLDEN_SHA_SEL0 = "05568b63dcd0d04b34c12c04444211afa69062a24c24a0ef38fe805973ece9f2"
-_GOLDEN_SHA_SEL3 = "bae622bc7141e7acefea637de8bfe1f3af4d04354f3aed7893244bd4ac1a5ccd"
+_GOLDEN_SHA_SEL0 = "f7871cf595f03198c7a7b2348eb05b3ffb5b01cf344b2d1014c4a3d81837ac75"
+_GOLDEN_SHA_SEL3 = "e902cffe06b8ced4e5b3a2fef76e6436be6d044b5c07143ee6c7824496b0c825"
 
 
 def _seeded_play_state() -> object:

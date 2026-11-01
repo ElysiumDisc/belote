@@ -4,6 +4,7 @@ import random
 import statistics
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 # Add src to sys.path
@@ -23,7 +24,6 @@ def benchmark_render(iterations: int = 100) -> float:
     rng = random.Random(42)
     state = start_round(state, rng)
     # Mock some state transitions to get into PLAYING phase
-    from belote.game import replace
 
     state = replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH)
 
@@ -50,7 +50,6 @@ def benchmark_ai(difficulty: Difficulty, iterations: int = 50) -> float:
     state = new_game()
     rng = random.Random(42)
     state = start_round(state, rng)
-    from belote.game import replace
 
     state = replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH)
 
@@ -69,12 +68,13 @@ def benchmark_ai(difficulty: Difficulty, iterations: int = 50) -> float:
 def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
     from belote.belatro.core.scoring import ScoreAccumulator
     from belote.belatro.engine.event_bus import TrickWonEvent
+    from belote.belatro.items.base import Joker
     from belote.belatro.items.jokers.contract import LeDiplomate
     from belote.deck import Card, Rank
 
     print(f"Benchmarking BelAtro State Update ({num_jokers} Jokers) over {iterations} iterations...")
 
-    jokers = [LeDiplomate() for _ in range(num_jokers)]
+    jokers: list[Joker] = [LeDiplomate() for _ in range(num_jokers)]
     acc = ScoreAccumulator()
     acc.attach_jokers(jokers)
 
@@ -102,7 +102,7 @@ def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
 
 def benchmark_scoring(iterations: int = 1000) -> float:
     from belote.deck import Card, Rank
-    from belote.game import Phase, TrickCard, replace
+    from belote.game import Phase, TrickCard
     from belote.scoring import score_round
 
     print(f"Benchmarking score_round() over {iterations} iterations...")
@@ -147,7 +147,7 @@ def benchmark_deal(iterations: int = 1000) -> float:
 
 
 def benchmark_legal_cards(iterations: int = 1000) -> float:
-    from belote.game import clear_legal_cards_cache, legal_cards, replace
+    from belote.game import clear_legal_cards_cache, legal_cards
     print(f"Benchmarking legal_cards() (cache cleared per call) over {iterations} iterations...")
 
     state = new_game()
@@ -172,7 +172,7 @@ def benchmark_legal_cards_cached(iterations: int = 1000) -> float:
     `benchmark_legal_cards` above invalidates every iteration and so reflects
     worst-case-only time.
     """
-    from belote.game import clear_legal_cards_cache, legal_cards, replace
+    from belote.game import clear_legal_cards_cache, legal_cards
     print(f"Benchmarking legal_cards() (warm cache) over {iterations} iterations...")
 
     state = new_game()
@@ -198,7 +198,7 @@ def benchmark_trick_scoring(iterations: int = 1000) -> float:
     (final round score). One of the hottest functions in a played round.
     """
     from belote.deck import Card, Rank
-    from belote.game import TrickCard, replace
+    from belote.game import TrickCard
     from belote.scoring import trick_card_points
 
     print(f"Benchmarking trick_card_points() over {iterations} iterations...")
@@ -228,7 +228,7 @@ def benchmark_ai_legality_filter(iterations: int = 500) -> float:
     AI calls `legal_cards` once per decision; an unrepresentative cold-cache
     benchmark above would over-attribute AI time to legality checks.
     """
-    from belote.game import legal_cards, replace
+    from belote.game import legal_cards
     print(f"Benchmarking AI legality filter over {iterations} iterations...")
 
     state = new_game()

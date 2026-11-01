@@ -701,19 +701,26 @@ class AIPlayer:
         # `highest_rank` and `opp_voids` depend only on (trick, trump, is_sa,
         # self._se, next_opp) — all constant across the 1–8 legal candidates.
         # Recomputing them per card was the dominant cost of `_hard_play`.
-        if trick:
-            highest_rank = max(
-                (
-                    trick_rank(tc.card, trump, self._se)
-                    if not is_sa
-                    else _NONTRUMP_ORDER[tc.card.rank]
-                    for tc in trick
-                    if not is_sa or tc.card.suit == trick[0].card.suit
-                ),
-                default=-1,
-            )
-        else:
-            highest_rank = -1
+        lead_suit_for_ranks = trick[0].card.suit if trick else None
+        se = self._se
+
+        def _rank_in_trick(c: Card) -> int:
+            """Strength of `c` in the current trick; -1 if it cannot take it.
+
+            Mirrors `game._card_beats`: a card contends only if it follows the
+            led suit or is a real trump (trump suit, or 7/8 under Déluge).
+            Off-suit cards never win under Sans Atout or Tout Atout. Without
+            this, an off-suit A (non-trump rank 7) "beat" a led K (rank 5),
+            so Hard AI dumped aces to the opponents expecting to win.
+            """
+            if lead_suit_for_ranks is not None and c.suit != lead_suit_for_ranks:
+                if is_sa or trump is Suit.TOUT_ATOUT:
+                    return -1
+                if c.suit != trump and not (se and c.rank in (Rank.SEVEN, Rank.EIGHT)):
+                    return -1
+            return _NONTRUMP_ORDER[c.rank] if is_sa else trick_rank(c, trump, se)
+
+        highest_rank = max((_rank_in_trick(tc.card) for tc in trick), default=-1)
         next_opp = self.seat.next_seat()
         opp_voids = self.memory.known_voids.get(next_opp, set())
 
@@ -722,19 +729,12 @@ class AIPlayer:
         # again for every visible partner card on every legal candidate
         # iteration — O(legal × partner_hand) recomputations. Building dicts
         # here collapses that to O(legal + partner_hand) lookups.
-        # Under SA, off-suit candidates get rank -1 (B1 short-circuit) so they
-        # cannot win the trick; lead-suit candidates use `_NONTRUMP_ORDER`.
-        lead_suit_for_ranks = trick[0].card.suit if trick else None
+        candidate_ranks: dict[Card, int] = {c: _rank_in_trick(c) for c in legal}
         if is_sa:
-            candidate_ranks: dict[Card, int] = {
-                c: (_NONTRUMP_ORDER[c.rank] if c.suit == lead_suit_for_ranks else -1)
-                for c in legal
-            }
             partner_ranks: dict[Card, int] = {
                 c: _NONTRUMP_ORDER[c.rank] for c in self.memory.partner_hand
             }
         else:
-            candidate_ranks = {c: trick_rank(c, trump, self._se) for c in legal}
             partner_ranks = {
                 c: trick_rank(c, trump, self._se) for c in self.memory.partner_hand
             }

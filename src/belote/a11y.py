@@ -1,9 +1,20 @@
 """3.0.0: optional screen-reader hints.
 
 When the env var ``BELOTE_A11Y`` is truthy, key in-game events emit a plain-text
-line to stderr — readable by terminal screen readers such as Orca, NVDA in WSL,
-or VoiceOver via iTerm2. Disabled by default so it doesn't pollute output for
+line — readable by terminal screen readers such as Orca, NVDA in WSL, or
+VoiceOver via iTerm2. Disabled by default so it doesn't pollute output for
 sighted players.
+
+Where the lines go (4.9.7):
+
+* ``BELOTE_A11Y_OUT=<path>`` — appended to that file or terminal device
+  (e.g. ``/dev/pts/3``, a second terminal the screen reader follows).
+* otherwise, stderr — when it is redirected (``2>a11y.txt``) or is a
+  different terminal from the game screen.
+* otherwise (stderr *is* the game screen) — ``a11y.log`` next to the stats
+  file (``~/.local/share/belote/``). Writing raw lines into the full-screen
+  game used to scroll and scramble the frame. Follow it with
+  ``tail -f ~/.local/share/belote/a11y.log`` in another terminal.
 
 **Invariant**: ``BELOTE_A11Y`` is read **once at module import**. Toggling the
 env var mid-session has no effect on production code — restart the process
@@ -19,7 +30,8 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from .deck import Card
@@ -45,15 +57,56 @@ def is_enabled() -> bool:
 
 def _refresh_enabled_from_env() -> None:
     """Re-read BELOTE_A11Y from the live environment. Public for tests."""
-    global _ENABLED
+    global _ENABLED, _sink
     _ENABLED = os.environ.get("BELOTE_A11Y", "").lower() in _TRUTHY
+    if _sink is not None and _sink is not sys.stderr:
+        _sink.close()
+    _sink = None
+
+
+# Output stream, resolved lazily on the first spoken line (see module docs).
+_sink: TextIO | None = None
+
+
+def _stderr_is_game_screen() -> bool:
+    """True when stderr and stdout are the same terminal (the game screen)."""
+    try:
+        out_fd, err_fd = sys.stdout.fileno(), sys.stderr.fileno()
+        if not (os.isatty(out_fd) and os.isatty(err_fd)):
+            return False
+        return os.fstat(out_fd).st_rdev == os.fstat(err_fd).st_rdev
+    except (AttributeError, OSError, ValueError):
+        # Captured / replaced streams (tests, pipes) have no usable fd.
+        return False
+
+
+def _open_sink() -> TextIO:
+    target = os.environ.get("BELOTE_A11Y_OUT", "")
+    if not target and _stderr_is_game_screen():
+        from .config import GLOBAL_CONFIG
+
+        log_path = GLOBAL_CONFIG.stats_path.parent / "a11y.log"
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return sys.stderr
+        target = str(log_path)
+    if target:
+        try:
+            return Path(target).open("a", encoding="utf-8", buffering=1)  # noqa: SIM115
+        except OSError:
+            return sys.stderr
+    return sys.stderr
 
 
 def speak(line: str) -> None:
-    """Emit one line to stderr — only when BELOTE_A11Y is enabled."""
+    """Emit one line — only when BELOTE_A11Y is enabled."""
+    global _sink
     if _ENABLED:
-        sys.stderr.write(line + "\n")
-        sys.stderr.flush()
+        if _sink is None:
+            _sink = _open_sink()
+        _sink.write(line + "\n")
+        _sink.flush()
 
 
 # ── Convenience formatters ────────────────────────────────────────────────

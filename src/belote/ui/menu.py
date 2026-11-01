@@ -304,7 +304,7 @@ def show_main_menu(
                     for s in [Seat.EAST, Seat.NORTH, Seat.WEST]:
                         curr_diffs[s] = new_diff
                 elif sel == 3:
-                    curr_target = targs[(targs.index(curr_target) + delta) % len(targs)]
+                    curr_target = _step_target(targs, curr_target, delta)
                 elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + delta) % len(spds)]
                 elif sel == 5:
@@ -336,7 +336,7 @@ def show_main_menu(
                     return choice, curr_diffs, curr_target, curr_speed
                 # For settings, Enter can also toggle forward
                 if sel == 3:
-                    curr_target = targs[(targs.index(curr_target) + 1) % len(targs)]
+                    curr_target = _step_target(targs, curr_target, 1)
                 elif sel == 4:
                     curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
                 elif sel == 5:
@@ -344,6 +344,20 @@ def show_main_menu(
                     curr_theme = theme_manager.current_name
                     new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
                     theme_manager.set_current(themes_list[new_idx])
+
+
+def _step_target(targs: list[int], curr: int, delta: int) -> int:
+    """Cycle the target score through the presets.
+
+    `--target` accepts any positive int (e.g. 750), which isn't in `targs`;
+    `targs.index` used to raise ValueError. A non-preset value snaps to the
+    nearest preset in the pressed direction, wrapping like the presets do.
+    """
+    if curr in targs:
+        return targs[(targs.index(curr) + delta) % len(targs)]
+    if delta > 0:
+        return next((t for t in targs if t > curr), targs[0])
+    return next((t for t in reversed(targs) if t < curr), targs[-1])
 
 
 def show_final_screen(state: GameState) -> None:
@@ -365,6 +379,6 @@ def show_final_screen(state: GameState) -> None:
     ]
 
     sys.stdout.write(clear_screen())
-    sys.stdout.write("\n".join(lines))
+    sys.stdout.write("\r\n".join(lines))
     sys.stdout.flush()
     invalidate_diff()

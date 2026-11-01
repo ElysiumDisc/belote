@@ -58,7 +58,16 @@ class Shop:
         # can't show up twice in one shop. If the unlocked pool is smaller
         # than 2, take whatever's available without padding.
         available_jokers = registry.get_available_jokers(prof)
-        joker_ids = list(available_jokers.keys())
+        # Never offer a joker the run already owns: duplicates share their
+        # `f"{id}_..."` joker_state keys and corrupt each other (double-pay,
+        # one copy never firing). If every unlocked joker is owned the joker
+        # row is simply left empty rather than offering a duplicate.
+        partner = getattr(self.run, "partner", None)
+        owned_ids = {
+            getattr(j, "id", None)
+            for j in [*self.run.jokers, *getattr(partner, "jokers", [])]
+        }
+        joker_ids = [j_id for j_id in available_jokers if j_id not in owned_ids]
         if joker_ids:
             picks = rng.sample(joker_ids, k=min(2, len(joker_ids)))
             for j_id in picks:
@@ -138,6 +147,39 @@ class Shop:
             return True
         self.last_buy_failure = "no_money"
         return False
+
+    @staticmethod
+    def sell_value(joker: object) -> int:
+        """Money a joker sells for: half its (edition-adjusted) cost.
+
+        Same formula La Tempérance uses for "total sell value".
+        """
+        return int(getattr(joker, "cost", 0)) // 2
+
+    def can_sell(self, index: int) -> bool:
+        """Corrupted jokers can't be sold — their curse was the price of the
+        power, and selling would refund it while keeping the run flags."""
+        if not (0 <= index < len(self.run.jokers)):
+            return False
+        return not getattr(self.run.jokers[index], "is_corrupted", False)
+
+    def sell_joker(self, index: int) -> int:
+        """Sell the owned joker at `index`. Returns the money gained (0 = refused).
+
+        A Negative-edition joker had grown `joker_slots` by one when bought,
+        so selling it gives that slot back.
+        """
+        if not self.can_sell(index):
+            return 0
+        from ..items.base import Edition
+
+        joker = self.run.jokers.pop(index)
+        if getattr(joker, "edition", Edition.NONE) == Edition.NEGATIVE:
+            self.run.joker_slots = max(len(self.run.jokers), self.run.joker_slots - 1)
+        value = self.sell_value(joker)
+        if value > 0:
+            self.run.economy.add_money(value)
+        return value
 
     def _can_accept(self, item: object) -> bool:
         """True iff `item` can be placed somewhere on the run right now.

@@ -230,12 +230,13 @@ def main() -> None:
                         flush_stats()
 
                 if state.phase == Phase.GAME_OVER:
-                    # Show final screen
+                    # Show final screen. Raw mode is active (OPOST off), so
+                    # line breaks must be "\r\n" — a bare "\n" staircases.
                     show_final_screen(state)
 
-                    sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
+                    sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                     sys.stdout.write(
-                        f"\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
+                        f"\r\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
                     )
                     sys.stdout.flush()
 
@@ -244,9 +245,9 @@ def main() -> None:
                         if ev.key == Key.HIST:
                             show_history(state, reader)
                             show_final_screen(state)
-                            sys.stdout.write(f"\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
+                            sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
                             sys.stdout.write(
-                                f"\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
+                                f"\r\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
                             )
                             sys.stdout.flush()
                         elif ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
@@ -257,7 +258,11 @@ def main() -> None:
                 sys.stdout.write(clear_screen())
                 sys.stdout.flush()
 
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, FitAbortedError):
+        # FitAbortedError: the player quit from an in-game resize prompt
+        # (`require_minimum` inside render/announce paths), not just the
+        # startup one above. Exit cleanly via the finally block instead of
+        # dumping a traceback over a raw-mode terminal.
         pass
     finally:
         flush_stats()

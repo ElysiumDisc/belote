@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+import os
+import tempfile
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .config import GLOBAL_CONFIG
@@ -52,12 +55,41 @@ class Statistics:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Statistics:
-        # Handle migration of old stats
+        # Handle migration of old stats: unknown keys are dropped, missing
+        # keys keep their defaults, and wrong-typed values (hand-edited or
+        # corrupted file, e.g. `"most_used_trump": null`) fall back to the
+        # default per field instead of crashing the first update.
         base = cls()
-        for key, value in data.items():
-            if hasattr(base, key):
-                setattr(base, key, value)
+        for f in fields(cls):
+            if f.name in data:
+                setattr(base, f.name, _conform(getattr(base, f.name), data[f.name]))
         return base
+
+
+def _conform(template: object, value: object) -> object:
+    """Return `value` coerced to the shape of `template` (a default field
+    value), falling back to `template` wherever the types don't match."""
+    if isinstance(template, int):
+        ok = isinstance(value, int) and not isinstance(value, bool)
+        return value if ok else template
+    if isinstance(template, list):
+        # Only list[str] (achievement IDs) exists today.
+        if not isinstance(value, list):
+            return template
+        return [v for v in value if isinstance(v, str)]
+    if isinstance(template, dict):
+        if not isinstance(value, dict):
+            return template
+        out = dict(template)
+        # Keys absent from the defaults (e.g. a future difficulty) are kept
+        # if they match the shape of the default entries.
+        sample = next(iter(template.values()), None)
+        for k, v in value.items():
+            ref = template.get(k, sample)
+            if isinstance(k, str) and ref is not None:
+                out[k] = _conform(ref, v)
+        return out
+    return template
 
 
 @dataclass(slots=True)
@@ -83,20 +115,59 @@ class StatisticsManager:
             self._stats_cache = Statistics()
             return self._stats_cache
         try:
-            with self.stats_file.open() as f:
-                self._stats_cache = Statistics.from_dict(json.load(f))
-        except (json.JSONDecodeError, OSError):
+            raw = self.stats_file.read_bytes()
+        except OSError:
+            # Unreadable (permissions, I/O error): use defaults but leave the
+            # file alone — it may be perfectly fine.
+            self._stats_cache = Statistics()
+            return self._stats_cache
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            data = None
+        if isinstance(data, dict):
+            self._stats_cache = Statistics.from_dict(data)
+        else:
+            # Unparseable or not an object (`[]`, `null`, truncated write):
+            # keep a copy for the player instead of letting the next save
+            # silently overwrite their history.
+            self._quarantine_corrupt_file()
             self._stats_cache = Statistics()
         return self._stats_cache
 
-    def save_stats(self, stats: Statistics) -> None:
+    def _quarantine_corrupt_file(self) -> None:
+        backup = self.stats_file.with_name(self.stats_file.name + ".bak")
         try:
-            # Ensure directory exists (again, just in case)
-            self.stats_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.stats_file.open("w") as f:
-                json.dump(stats.to_dict(), f, indent=2)
+            self.stats_file.replace(backup)
+            # info, not warning: with no handler configured a warning goes to
+            # stderr and would scribble over the raw-mode game screen.
+            _log.info("Corrupt stats file moved to %s", backup)
+        except OSError as e:
+            _log.warning("Corrupt stats file %s could not be moved aside: %s",
+                         self.stats_file, e)
+
+    def save_stats(self, stats: Statistics) -> None:
+        # Atomic write (sibling tmp file + fsync + os.replace): writing in
+        # place truncated stats.json first, so a crash or full disk mid-write
+        # lost the player's whole history.
+        tmp_path: Path | None = None
+        try:
+            directory = self.stats_file.parent
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w", dir=str(directory), prefix=".stats-", suffix=".json.tmp",
+                delete=False,
+            ) as tf:
+                tmp_path = Path(tf.name)
+                json.dump(stats.to_dict(), tf, indent=2)
+                tf.flush()
+                os.fsync(tf.fileno())
+            tmp_path.replace(self.stats_file)
         except OSError as e:
             _log.warning("Failed to save stats to %s: %s", self.stats_file, e)
+            if tmp_path is not None:
+                with contextlib.suppress(OSError):
+                    tmp_path.unlink()
 
     def flush_stats(self) -> None:
         """Write cached stats to disk."""
@@ -133,7 +204,12 @@ class StatisticsManager:
         # depend on the UI). Callers can read stats.achievements to detect
         # the new entries.
         from .achievements import evaluate_round
-        evaluate_round(stats, points_scored=points_scored, was_capot=is_capot)
+        evaluate_round(
+            stats,
+            points_scored=points_scored,
+            was_capot=is_capot,
+            session_capots=self._session_stats.capots,
+        )
 
         # Persist after every round so a mid-game crash doesn't lose
         # round-level stats or freshly-unlocked achievements.

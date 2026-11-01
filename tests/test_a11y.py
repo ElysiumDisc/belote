@@ -133,3 +133,38 @@ def test_a11y_disabled_when_env_unset(monkeypatch) -> None:
         assert buf.getvalue() == ""
     finally:
         a11y._refresh_enabled_from_env()
+
+
+def test_a11y_out_env_routes_to_file(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """BELOTE_A11Y_OUT sends announcements to a file instead of the screen."""
+    from belote import a11y
+
+    out = tmp_path / "a11y.txt"
+    monkeypatch.setenv("BELOTE_A11Y", "1")
+    monkeypatch.setenv("BELOTE_A11Y_OUT", str(out))
+    a11y._refresh_enabled_from_env()
+    try:
+        a11y.speak("north plays ace of spades.")
+        assert out.read_text(encoding="utf-8") == "north plays ace of spades.\n"
+    finally:
+        monkeypatch.delenv("BELOTE_A11Y", raising=False)
+        monkeypatch.delenv("BELOTE_A11Y_OUT", raising=False)
+        a11y._refresh_enabled_from_env()
+
+
+def test_a11y_uses_log_file_when_stderr_is_game_screen(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Raw lines on the game's own terminal scramble the frame — use a log."""
+    from belote import a11y
+
+    monkeypatch.setenv("BELOTE_A11Y", "1")
+    monkeypatch.delenv("BELOTE_A11Y_OUT", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(a11y, "_stderr_is_game_screen", lambda: True)
+    a11y._refresh_enabled_from_env()
+    try:
+        a11y.speak("south wins the trick worth 20 points.")
+        log = tmp_path / "belote" / "a11y.log"
+        assert log.read_text(encoding="utf-8") == "south wins the trick worth 20 points.\n"
+    finally:
+        monkeypatch.delenv("BELOTE_A11Y", raising=False)
+        a11y._refresh_enabled_from_env()

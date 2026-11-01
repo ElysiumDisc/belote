@@ -59,8 +59,14 @@ ACHIEVEMENTS: tuple[Achievement, ...] = (
 _ACHIEVEMENT_BY_ID: dict[str, Achievement] = {a.id: a for a in ACHIEVEMENTS}
 
 
-def evaluate_round(stats: Statistics, *, points_scored: int, was_capot: bool) -> list[Achievement]:
+def evaluate_round(
+    stats: Statistics, *, points_scored: int, was_capot: bool, session_capots: int = 0
+) -> list[Achievement]:
     """Check post-round triggers; return list of newly unlocked achievements.
+
+    ``session_capots`` is the player's capot count for this process session
+    (``SessionStats.capots``) — "Triple Coup" is a per-session feat, so the
+    lifetime ``stats.capots_achieved`` must not unlock it.
 
     Mutates ``stats.achievements`` to record unlocks.
     """
@@ -71,9 +77,11 @@ def evaluate_round(stats: Statistics, *, points_scored: int, was_capot: bool) ->
             newly.append(_ACHIEVEMENT_BY_ID[aid])
 
     if was_capot:
-        if stats.capots_achieved == 1:
+        # >= rather than == so a stats file that already had capots before
+        # achievements existed (or a missed unlock) still grants it.
+        if stats.capots_achieved >= 1:
             _try("first_capot")
-        if stats.capots_achieved >= 3:
+        if session_capots >= 3:
             _try("capot_x3")
         if stats.current_capot_streak >= 2:
             _try("capot_streak_2")

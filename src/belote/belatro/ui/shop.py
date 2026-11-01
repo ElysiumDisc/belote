@@ -23,6 +23,15 @@ if TYPE_CHECKING:
     from ..run.shop import Shop
 
 
+
+# Shop description prefix per joker edition (values of items.base.Edition).
+_EDITION_LABELS: dict[str, str] = {
+    "foil": "Foil: +50 chips per trigger",
+    "holo": "Holo: +10 Mult per trigger",
+    "poly": "Polychrome: x1.5 Mult per trigger",
+    "neg": "Negative: +1 joker slot",
+}
+
 class ShopScreen:
     """The interactive shop UI."""
 
@@ -65,7 +74,7 @@ class ShopScreen:
                         from .announce import BelAtroAnnounce
 
                         BelAtroAnnounce.banner(
-                            "Slots full — sell first to make room", self.reader, hold=1.0
+                            "Slots full — press S to sell a joker", self.reader, hold=1.0
                         )
                     elif bought:
                         money_after = self.shop.run.economy.money
@@ -92,9 +101,58 @@ class ShopScreen:
                     from .announce import BelAtroAnnounce
 
                     BelAtroAnnounce.banner("Consumable activated.", self.reader, hold=0.8)
+            elif key == Key.CHAR and event.char and event.char.lower() == "s":
+                self._handle_sell()
             elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 break
             self._render()
+
+    def _handle_sell(self) -> None:
+        """Numbered overlay: pick an owned joker to sell for half its cost."""
+        from belote.ui.fit_guard import require_minimum
+        from belote.ui.layout import vcenter_lines
+        from belote.ui.render import get_term_size, invalidate_diff
+
+        from .announce import BelAtroAnnounce
+
+        jokers = self.shop.run.jokers
+        if not jokers:
+            BelAtroAnnounce.banner("No jokers to sell", self.reader, hold=0.8)
+            return
+
+        require_minimum(self.reader)
+        term_w, term_h = get_term_size()
+        lines: list[str] = [
+            ansi_center(gold_fg() + BOLD + "SELL A JOKER" + RESET, term_w),
+            "",
+        ]
+        for i, joker in enumerate(jokers[:9]):
+            name = getattr(joker, "name", "?")
+            if self.shop.can_sell(i):
+                label = f"[{i + 1}] {name}  +${self.shop.sell_value(joker)}"
+            else:
+                label = f"[{i + 1}] {name}  (corrupted — can't sell)"
+            lines.append(ansi_center(white_fg() + label + RESET, term_w))
+        lines += ["", ansi_center("[1-9] sell   Esc cancel", term_w)]
+        sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
+        sys.stdout.flush()
+        invalidate_diff()
+
+        while True:
+            event = self.reader.read()
+            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
+                return
+            if event.key == Key.CHAR and event.char and event.char.isdigit():
+                idx = int(event.char) - 1
+                if not (0 <= idx < min(len(jokers), 9)):
+                    continue
+                name = getattr(jokers[idx], "name", "?")
+                if not self.shop.can_sell(idx):
+                    BelAtroAnnounce.banner(f"{name} is corrupted — can't sell", self.reader, hold=1.0)
+                    return
+                gained = self.shop.sell_joker(idx)
+                BelAtroAnnounce.banner(f"Sold {name} for ${gained}", self.reader, hold=0.8)
+                return
 
     def _handle_forge(self) -> None:
         """Spend 3 Tierce charges on a player-picked Planet contract level-up."""
@@ -216,14 +274,16 @@ class ShopScreen:
     def _render_item_card(self, item: object, row: int, col: int, is_sel: bool) -> list[str]:
         bc = REVERSE if is_sel else ""
         ac = RESET
-        name = getattr(item, "name", "?")
+        # Frame is _CARD_W (16) cells: 14 inner + 2 borders. Names longer than
+        # 14 cells used to overflow the frame into the neighbouring card.
+        name = str(getattr(item, "name", "?"))[:14]
         cost = getattr(item, "cost", 0)
         return [
-            move(row, col) + bc + "┌────────────────┐" + ac + "\n",
+            move(row, col) + bc + "┌──────────────┐" + ac + "\n",
             move(row + 1, col) + bc + f"│{gold_fg()}{name:^14}{RESET}{bc}│" + ac + "\n",
             move(row + 2, col) + bc + "│" + " " * 14 + "│" + ac + "\n",
             move(row + 3, col) + bc + f"│{white_fg()}{'$' + str(cost):^14}{RESET}{bc}│" + ac + "\n",
-            move(row + 4, col) + bc + "└────────────────┘" + ac + "\n",
+            move(row + 4, col) + bc + "└──────────────┘" + ac + "\n",
         ]
 
     def _render(self) -> None:
@@ -308,6 +368,11 @@ class ShopScreen:
         if self.selected < num_items:
             item = self.shop.inventory[self.selected]
             desc = getattr(item, "description", "")
+            # Editions raise the price 1.5x but weren't shown anywhere, so the
+            # player couldn't see why a joker cost more or spot a Negative one.
+            ed_label = _EDITION_LABELS.get(getattr(getattr(item, "edition", None), "value", ""))
+            if ed_label:
+                desc = f"[{ed_label}] {desc}"
             parts.append(
                 move(desc_row, 1)
                 + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w)
@@ -326,7 +391,8 @@ class ShopScreen:
 
         consumable_count = len(self.shop.run.consumables)
         hint = (
-            f"← → Navigate   Enter: Buy   C: Consumables ({consumable_count})   Esc: Continue"
+            f"← → Navigate   Enter: Buy   S: Sell   C: Consumables ({consumable_count})   "
+            "Esc: Continue"
         )
         parts.append(
             move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w) + "\n"

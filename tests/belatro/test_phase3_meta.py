@@ -35,14 +35,25 @@ def test_roll_theme_pdf() -> None:
     assert roll_theme(0.50) is None
 
 
-def test_cafe_ante_grants_starting_chips_and_softens_boss() -> None:
+def test_cafe_ante_grants_petit_blind_chips_and_softens_boss() -> None:
     run = BelAtroRun()
     base_chips = run.permanent_chips
     theme = CafeAnte()
     theme.on_ante_start(run)
-    assert run.permanent_chips == base_chips + 25
+    # +25 chips is a petit-blind (blind 0) bonus only — never permanent.
+    assert run.permanent_chips == base_chips
+    assert [theme.chips_bonus(i) for i in range(3)] == [25, 0, 0]
     assert theme.target_multiplier(0) == 1.0
     assert theme.target_multiplier(2) == 0.95
+
+
+def test_theme_flags_cleared_before_next_roll() -> None:
+    from belote.belatro.run.ante_themes import clear_theme_flags
+
+    run = BelAtroRun()
+    TournoiAnte().on_ante_start(run)
+    clear_theme_flags(run)
+    assert "always_offer_coinche" not in run.card_enhancements
 
 
 def test_cafe_ante_blind_won_lifts_trust() -> None:

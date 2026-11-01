@@ -571,11 +571,24 @@ class ScoreAccumulator:
                 contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
                 if contract_id:
                     reward = self.contract_levels.get(contract_id, {})
-                    if reward.get("add_money") and not event.breakdown.is_failed:
+                    # Only the player's (NS) successful contracts pay — an EW
+                    # take must not credit NS money.
+                    if (
+                        reward.get("add_money")
+                        and event.taker_seat in _NS_TEAM
+                        and not event.breakdown.is_failed
+                    ):
                         ledger.money += reward["add_money"]
                         self._log.append(f"Planet ({contract_id}): +${reward['add_money']}")
-                # Pluto (Capot bonus)
-                if event.capot and not event.breakdown.is_failed:
+                # Pluto (Capot bonus): only when NS took the contract AND made
+                # it as a capot — planets level up the player's own contracts
+                # (same rule as Mercury above). `event.capot` alone is also
+                # True for an EW capot, and a defensive NS capot doesn't count.
+                if (
+                    event.ns_capot
+                    and event.taker_seat in _NS_TEAM
+                    and not event.breakdown.is_failed
+                ):
                     pluto_reward = self.contract_levels.get("capot", {})
                     if pluto_reward.get("capot_bonus"):
                         ledger.chips += pluto_reward["capot_bonus"]

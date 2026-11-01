@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from belote.deck import Contract
 from belote.game import Seat
 
 from ...engine.event_bus import BeloteAnnouncedEvent, BidMadeEvent, RoundEndEvent
@@ -47,7 +48,13 @@ class LePasseur(Joker):
     cost = 5
 
     def on_bid(self, event: BidMadeEvent, state: dict[str, Any]) -> JokerResult | None:
-        if event.seat == Seat.NORTH and event.trump is None:
+        # A pass has trump=None, but so does a Sans Atout take — tell them apart
+        # by contract.
+        if (
+            event.seat == Seat.NORTH
+            and event.trump is None
+            and event.contract != Contract.SANS_ATOUT
+        ):
             return JokerResult(add_money=2)
         return None
 

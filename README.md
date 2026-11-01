@@ -114,8 +114,8 @@ belatro
 # Install in editable mode (recommended for development)
 pip install -e .
 
-# Or install from PyPI (once uploaded)
-pip install belote-cli
+# Or install from PyPI (recommended for playing)
+pipx install belote-cli      # update later with: pipx upgrade belote-cli
 
 # Play using the belote command
 belote
@@ -146,6 +146,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 **BelAtro (Roguelite):**
 - `1`-`5`: Inspect specific Jokers in the Shop
 - `C`: Open the Consumables tray in the Shop (use Tarots / Planets you've purchased)
+- `S` *(4.9.7)*: Sell a joker in the Shop for half its cost (corrupted jokers can't be sold)
 
 **Gameplay:**
 - `←` `→` or `↑` `↓` or **`W` `A` `S` `D`** *(4.5.0)*: Move selection
@@ -168,7 +169,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Collection (Almanac):** Persistent tracker to browse every Joker, Planet, and Voucher you've discovered across your runs.
 - **Full Boss Blind Suite:** All 21 unique bosses implemented, including complex mechanics like *L'Anarchie* (dynamic trump) and *La Rupture* (no consecutive wins).
 - **Multiplier Scoring:** Use items to stack Multipliers and reach scores in the millions.
-- **Partner Trust:** Build a relationship with your AI partner to unlock synergies.
+- **Partner Trust:** Build a relationship with your AI partner to unlock synergies. At trust 3+ the trust bar shows which suits North is void in (`✦ Void: ♠♦`); seeing North's full hand requires the Le Carnet voucher.
 - **Rich Terminal UI:** Full-screen themed felt table with detailed card graphics and "You" vs "Partner" terminology.
 - **Enhanced Hard AI**: Advanced void inference and 2-ply lookahead for critical tricks (Dix de Der).
 - **Customizable Themes:** Switch between thirteen color palettes (Classic Green, Dark Mode, Blue Velvet, Red Casino, Sepia Vintage, High Contrast, Colorblind, Forest Night, Moonlit Tavern, Royal Purple, Emerald Isle, Sunset Magma, Provence Lavande) using the `T` key during gameplay.
@@ -221,7 +222,7 @@ belote/
 │   ├── input.py       # Platform-dispatched key reader and interruptible sleep
 │   ├── stats.py       # Global and session statistics tracking
 │   └── rules.py       # Game rules content
-├── tests/             # Comprehensive test suite (1111 tests)
+├── tests/             # Comprehensive test suite (1228 tests)
 ├── scripts/           # Performance benchmarks
 ├── pyproject.toml      # Build system and dev dependencies (ruff/mypy)
 ├── LICENSE             # MIT License
@@ -236,14 +237,14 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1111 tests** passing with 100% coverage on game-logic modules (4.9.6).
+Currently **1228 tests** passing with 100% coverage on game-logic modules (4.9.7).
 
 ## Technical Integrity
 
 The codebase is strictly validated with the following tools:
 - **mypy**: 0 errors (strict type safety)
 - **ruff**: 0 violations (linting & formatting)
-- **pytest**: 1111/1111 passed
+- **pytest**: 1228/1228 passed
 - **Functional Architecture**: Purely immutable state transitions using `dataclasses.replace`
 - **Performance**: High-efficiency rendering and sub-millisecond AI decision times (see `scripts/benchmark.py`)
 

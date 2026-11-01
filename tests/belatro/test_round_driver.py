@@ -75,11 +75,21 @@ def test_drive_round_all_pass():
     # Force South to pass
     ui.prompt_bid = MagicMock(return_value=None)
 
-    # We use a seed that likely leads to all-pass or we mock AI to pass
-    with patch('belote.ai.AIPlayer.decide_bid', return_value=None):
-        drive_round(bus=bus, partner=partner, boss=None, ui_callbacks=ui, seed=42)
-    # If it reached the end without crashing, it's successful.
-    # The 'all-pass' case returns early.
+    # Every seat (AI, partner personality, South) always passes, so each deal
+    # is redealt until the defensive redeal cap, then drive_round returns at
+    # Phase.DEAL without scoring the abandoned deal.
+    from belote.belatro.engine.event_bus import RoundEndEvent
+    from belote.belatro.engine.round_driver import _MAX_REDEALS
+
+    events: list[object] = []
+    bus.subscribe(events.append)
+    with patch('belote.ai.AIPlayer.decide_bid', return_value=None), \
+         patch.object(type(partner.personality), 'should_bid', return_value=False):
+        state = drive_round(bus=bus, partner=partner, boss=None, ui_callbacks=ui, seed=42)
+    assert state.phase == Phase.DEAL
+    assert not any(isinstance(e, RoundEndEvent) for e in events)
+    # South bids once per bidding round, two rounds per deal.
+    assert ui.prompt_bid.call_count == 2 * (_MAX_REDEALS + 1)
 
 def test_event_bus_unsubscribe_during_emit():
     # 44. EventBus unsubscribe during emit - Verify handler can unsubscribe itself during event processing without crash.
@@ -624,7 +634,10 @@ def test_drive_round_emits_to_event_bus():
         def prompt_bid(self, state):  # type: ignore[no-untyped-def, override]
             return None
         def prompt_card(self, state):  # type: ignore[no-untyped-def, override]
-            return state.hands[state.turn.value][0], state
+            # Legal card: an all-pass deal now redeals, so the round may be
+            # played out once the partner personality takes.
+            from belote.game import legal_cards
+            return legal_cards(state, state.turn)[0], state
         def on_card_played(self, state, seat, card) -> None:  # type: ignore[no-untyped-def, override]
             pass
         def on_trick_end(self, state, winner, points) -> None:  # type: ignore[no-untyped-def, override]

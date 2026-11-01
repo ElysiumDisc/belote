@@ -168,7 +168,7 @@ def test_belatro_overlays_invalidate_diff() -> None:
         # TrustBar.render paints row 4 directly.
         "src/belote/belatro/ui/trust_bar.py": 1,
     }
-    repo_root = Path("/home/mrrobot/belote/")
+    repo_root = Path(__file__).resolve().parents[1]
     invalidate_re = re.compile(r"invalidate_diff\s*\(\s*\)")
 
     for relpath, min_count in paint_sites.items():
@@ -310,7 +310,7 @@ def test_classic_ui_overlays_invalidate_diff() -> None:
         # (show_round_summary only); 4.1.1 adds show_stats → 2.
         "src/belote/ui/announce.py": 2,
     }
-    repo_root = Path("/home/mrrobot/belote/")
+    repo_root = Path(__file__).resolve().parents[1]
     invalidate_re = re.compile(r"invalidate_diff\s*\(\s*\)")
 
     for relpath, min_count in paint_sites.items():

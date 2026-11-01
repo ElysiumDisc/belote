@@ -163,6 +163,15 @@ class BelAtroRun:
         from ..items.registry import register_all_items, registry
         from ..run.decks import STARTING_DECKS
 
+        # Pick a concrete seed when none was given so every run is replayable
+        # from `seed` (ghost runs record it). Must happen before the first
+        # `_get_rng()` call below. Drawn from the module RNG, so unseeded runs
+        # stay as random as before.
+        if self.seed is None and self._rng is None:
+            import random as _random
+
+            self.seed = _random.getrandbits(32)
+
         if not registry.planets:
             register_all_items()
 

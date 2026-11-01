@@ -3,12 +3,18 @@ from __future__ import annotations
 import os
 import select
 import sys
-import termios
 import time
-import tty
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, cast
+
+# termios/tty are Unix-only; importing them unconditionally made the module
+# (and so the whole game) unimportable on Windows even though a
+# `_WindowsKeyReader` exists. `select` stays top-level: the module exists on
+# Windows too, it just only works on sockets there (see interruptible_sleep).
+if sys.platform != "win32":
+    import termios
+    import tty
 
 
 class Key(Enum):
@@ -39,12 +45,26 @@ class Key(Enum):
     # menu-pop reads. Most prompt loops treat EOF like ESC ("back/cancel"),
     # which is fine because the next read() will return EOF again and propagate.
     EOF = "EOF"
+    # An escape sequence we parsed but don't bind (F-keys, Delete, PgUp,
+    # Ctrl+arrows, ...). Consumed whole so its trailing bytes don't leak as
+    # keystrokes, and distinct from ESC because ESC means "back" in most
+    # screens. Prompt loops ignore it; "[Any Key]" screens treat it as a key.
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass(frozen=True, slots=True)
 class KeyEvent:
     key: Key
     char: str | None = None
+
+
+# Final bytes shared by CSI (ESC [ X) and SS3 (ESC O X) cursor keys.
+_ARROW_FINALS: dict[bytes, Key] = {
+    b"A": Key.UP,
+    b"B": Key.DOWN,
+    b"C": Key.RIGHT,
+    b"D": Key.LEFT,
+}
 
 
 class _UnixKeyReader:
@@ -101,18 +121,41 @@ class _UnixKeyReader:
 
             next_byte = os.read(self._stdin_fd, 1)
             if next_byte == b"[":
-                # Likely an arrow key
-                code_byte = os.read(self._stdin_fd, 1)
-                match code_byte:
-                    case b"A":
-                        return KeyEvent(Key.UP)
-                    case b"B":
-                        return KeyEvent(Key.DOWN)
-                    case b"C":
-                        return KeyEvent(Key.RIGHT)
-                    case b"D":
-                        return KeyEvent(Key.LEFT)
+                # CSI: ESC [ <params 0x30-0x3F>* <intermediates 0x20-0x2F>*
+                # <final 0x40-0x7E>. Consume the whole sequence so e.g.
+                # Ctrl+Right (ESC [ 1 ; 5 C) doesn't leak ';', '5', 'C' as
+                # keystrokes. Every byte read is bounded by the same window.
+                params = b""
+                while True:
+                    b = self._read_seq_byte()
+                    if b is None:
+                        return KeyEvent(Key.UNKNOWN)
+                    if 0x20 <= b[0] <= 0x3F:
+                        params += b
+                        continue
+                    if 0x40 <= b[0] <= 0x7E:
+                        if not params:
+                            arrow = _ARROW_FINALS.get(b)
+                            if arrow is not None:
+                                return KeyEvent(arrow)
+                        return KeyEvent(Key.UNKNOWN)
+                    # Not a valid CSI byte — give up on the sequence.
+                    return KeyEvent(Key.UNKNOWN)
+            if next_byte == b"O":
+                # SS3: ESC O <final>. Application-cursor-mode arrows (OA-OD)
+                # and xterm F1-F4 (OP-OS). F2 used to become ESC + QUIT ('Q').
+                b = self._read_seq_byte()
+                if b is not None:
+                    arrow = _ARROW_FINALS.get(b)
+                    if arrow is not None:
+                        return KeyEvent(arrow)
+                return KeyEvent(Key.UNKNOWN)
             return KeyEvent(Key.ESC)
+
+        # Ctrl-C arrives as a plain 0x03 byte under raw mode (ISIG is off),
+        # so treat it as quit rather than an unbound control character.
+        if byte == 0x03:
+            return KeyEvent(Key.QUIT)
 
         # Enter
         if byte in (0x0A, 0x0D):
@@ -191,6 +234,14 @@ class _UnixKeyReader:
         except (ValueError, UnicodeDecodeError):
             return KeyEvent(Key.ESC)
 
+    def _read_seq_byte(self) -> bytes | None:
+        """Read one byte of an escape sequence, or None on timeout / EOF."""
+        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if not r:
+            return None
+        b = os.read(self._stdin_fd, 1)
+        return b or None
+
     def read_timeout(self, timeout: float) -> KeyEvent | None:
         """Read a key with a timeout. Returns None if no key is pressed."""
         r, _, _ = select.select([sys.stdin], [], [], timeout)
@@ -211,7 +262,13 @@ def interruptible_sleep(
     """
     start = time.time()
     while time.time() - start < seconds:
-        if reader:
+        if reader and os.name == "nt":
+            # select() only works on sockets on Windows; the Windows reader
+            # polls msvcrt.kbhit() in read_timeout instead.
+            ev = reader.read_timeout(granularity)
+            if ev is not None:
+                return ev
+        elif reader:
             r, _, _ = select.select([sys.stdin], [], [], granularity)
             if r:
                 return reader.read()
@@ -301,6 +358,12 @@ if os.name == "nt":
                         return KeyEvent(Key.RIGHT)
                     case b"K":
                         return KeyEvent(Key.LEFT)
+                # Other extended keys (F-keys, Delete, PgUp, ...): their
+                # second byte must not be reinterpreted as a letter (Delete's
+                # b"S" used to become DOWN). Matches the Unix reader.
+                return KeyEvent(Key.UNKNOWN)
+            if ch == b"\x03":
+                return KeyEvent(Key.QUIT)
             if ch in (b"\r", b"\n"):
                 return KeyEvent(Key.ENTER)
             if ch == b"\t":
