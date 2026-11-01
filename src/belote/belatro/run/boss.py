@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from belote.game import BossModifiers
+    from belote.variants import RuleVariants
 
     from ..engine.modifier_patch import PatchedGameState
 
@@ -19,21 +19,24 @@ class BossModifier(ABC):
         """Patch the GameState before the round begins."""
         ...
 
-    def flags(self) -> BossModifiers:
-        """Return the BossModifiers dataclass produced by this boss's apply().
+    def flags(self) -> RuleVariants:
+        """Return the RuleVariants dataclass produced by this boss's apply().
 
         Useful for pre-round setup that needs to react to flags without driving
         a full round. Independent of the live GameState — uses a stub.
         """
         from belote.game import GameState, new_game
+        from belote.variants import RuleVariants
 
         from ..engine.modifier_patch import PatchedGameState
 
         stub: GameState = new_game()
         proxy = PatchedGameState(stub)
         self.apply(proxy)
-        patches = object.__getattribute__(proxy, "_patches")
-        return patches.get("boss_modifiers", stub.boss_modifiers)
+        patches: dict[str, object] = object.__getattribute__(proxy, "_patches")
+        bm = patches.get("variants", stub.variants)
+        assert isinstance(bm, RuleVariants)
+        return bm
 
 
 # ── Standard Boss Blinds (11) ──────────────────────────────────────────────

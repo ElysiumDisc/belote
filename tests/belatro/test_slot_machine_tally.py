@@ -15,10 +15,12 @@ from dataclasses import replace
 import pytest
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.ui import announce as announce_module
 from belote.belatro.ui.announce import BelAtroAnnounce, reset_tally_state
-from belote.game import BossModifiers, GameState
+from belote.game import GameState
 from belote.input import Key, KeyEvent
+from belote.variants import RuleVariants
 
 
 class _FakeReader:
@@ -47,13 +49,13 @@ def _make_acc_and_state(
     chips: int = 50,
     mult: float = 2.0,
     target: int = 100,
-    boss: BossModifiers | None = None,
+    boss: RuleVariants | None = None,
 ) -> tuple[ScoreAccumulator, GameState]:
     acc = ScoreAccumulator()
     acc.target_score = target
-    state = GameState(hands=((), (), (), ()), _chips=chips, _mult=mult)
+    state = BelatroState(hands=((), (), (), ()), _chips=chips, _mult=mult)
     if boss is not None:
-        state = replace(state, boss_modifiers=boss)
+        state = replace(state, variants=boss)
     state = acc.trigger_round_start(state)
     return acc, state
 
@@ -95,7 +97,7 @@ def test_slot_machine_under_hide_hud_renders_nothing(capsys) -> None:
     """Le Brouillard's `hide_hud=True` should suppress the animation entirely
     so the boss's 'hide the score' promise holds."""
     reset_tally_state()
-    acc, state = _make_acc_and_state(boss=BossModifiers(hide_hud=True))
+    acc, state = _make_acc_and_state(boss=RuleVariants(hide_hud=True))
 
     BelAtroAnnounce.slot_machine_tally(acc, state, _NeverPressReader(), points=10)
     captured = capsys.readouterr()
@@ -122,7 +124,7 @@ def test_slot_machine_under_separate_scoring_renders_nothing(capsys) -> None:
     total (per-seat max). The animation must skip rather than mislead the
     player. Mirrors the HUD's `separate_scoring` gate at belatro/ui/hud.py."""
     reset_tally_state()
-    acc, state = _make_acc_and_state(boss=BossModifiers(separate_scoring=True))
+    acc, state = _make_acc_and_state(boss=RuleVariants(separate_scoring=True))
 
     BelAtroAnnounce.slot_machine_tally(acc, state, _NeverPressReader(), points=10)
     captured = capsys.readouterr()
@@ -136,7 +138,7 @@ def test_slot_machine_under_separate_scoring_still_updates_cache() -> None:
     reset_tally_state()
     acc, state = _make_acc_and_state(
         chips=90, mult=2.0,  # total = 180
-        boss=BossModifiers(separate_scoring=True),
+        boss=RuleVariants(separate_scoring=True),
     )
     BelAtroAnnounce.slot_machine_tally(acc, state, _NeverPressReader(), points=10)
     assert announce_module._last_tally_total == 180
@@ -197,7 +199,7 @@ def test_slot_machine_under_hide_hud_does_not_store_readout() -> None:
     """When Le Brouillard suppresses the animation, the readout cache
     must also stay None so the HUD doesn't paint a stale row."""
     reset_tally_state()
-    acc, state = _make_acc_and_state(boss=BossModifiers(hide_hud=True))
+    acc, state = _make_acc_and_state(boss=RuleVariants(hide_hud=True))
 
     BelAtroAnnounce.slot_machine_tally(acc, state, _NeverPressReader(), points=10)
     assert announce_module._last_tally_readout is None

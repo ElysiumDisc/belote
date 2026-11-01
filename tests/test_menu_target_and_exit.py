@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from belote.game import Seat, new_game
+from belote.game import new_game
 from belote.input import Key, KeyEvent
-from belote.ui.menu import _step_target, show_final_screen, show_main_menu
+from belote.ui.menu import _step_target, show_final_screen
 
 _TARGS = [500, 1000, 1500, 2000]
 
@@ -55,20 +55,20 @@ class _ScriptedReader:
 
 
 @pytest.mark.parametrize(("key", "expected"), [(Key.RIGHT, 1000), (Key.LEFT, 500), (Key.ENTER, 1000)])
-def test_main_menu_non_preset_target_does_not_crash(
+def test_settings_non_preset_target_does_not_crash(
     monkeypatch: pytest.MonkeyPatch, key: Key, expected: int
 ) -> None:
+    """`--target 750` (any positive int) snaps to the nearest preset when the
+    Target row is stepped (moved from the main menu to Settings in 4.10.0)."""
+    from belote import settings as settings_mod
+    from belote.ui import settings_menu
+
     monkeypatch.setattr(sys, "stdout", io.StringIO())
-    events = [KeyEvent(Key.DOWN)] * 3 + [KeyEvent(key), KeyEvent(Key.QUIT)]
-    diffs = {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}
-    choice, _, target, _ = show_main_menu(
-        _ScriptedReader(events),  # type: ignore[arg-type]
-        diffs,
-        750,
-        "normal",
-    )
-    assert choice == "Quit"
-    assert target == expected
+    monkeypatch.setattr(settings_mod, "save", lambda s: None)
+    prefs = settings_mod.Settings(target=750)
+    events = [KeyEvent(Key.DOWN), KeyEvent(key), KeyEvent(Key.ESC)]  # row 1 = Target
+    settings_menu.show_settings(_ScriptedReader(events), prefs)  # type: ignore[arg-type]
+    assert prefs.target == expected
 
 
 def test_final_screen_uses_crlf(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,11 +115,7 @@ def test_main_exits_cleanly_on_in_game_fit_abort(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(main_mod, "KeyReader", _FakeKeyReader)
     monkeypatch.setattr(main_mod, "flush_stats", lambda: None)
     monkeypatch.setattr(fit_guard, "require_minimum", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        main_mod,
-        "show_main_menu",
-        lambda _r, diffs, target, speed: ("Start Game", diffs, target, speed),
-    )
+    monkeypatch.setattr(main_mod, "show_main_menu", lambda _r, _modes=(): "Start Game")
 
     def raise_fit(*_a: Any, **_k: Any) -> None:
         raise FitAbortedError

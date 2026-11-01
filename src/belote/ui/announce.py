@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable, Collection
+from typing import TYPE_CHECKING
 
 from ..ansi import (
     BOLD,
@@ -23,6 +25,9 @@ from ..input import KeyEvent, KeyReader, interruptible_sleep
 from ..scoring import ScoringBreakdown
 from ..stats import get_session_stats, load_stats
 from .render import display_hud, get_term_size, invalidate_diff
+
+if TYPE_CHECKING:
+    from ..achievements import Achievement
 
 
 def belote_stinger(
@@ -110,6 +115,45 @@ def announce(
         invalidate_diff()
 
 
+def achievement_toast_lines(title: str, description: str) -> list[str]:
+    """Pure builder for the achievement-unlocked toast (plain text, no SGR)."""
+    head = "★ ACHIEVEMENT UNLOCKED ★"
+    body = f"{title} — {description}"
+    inner = max(len(head), len(body)) + 2
+    return [
+        "╭" + "─" * inner + "╮",
+        "│" + head.center(inner) + "│",
+        "│" + body.center(inner) + "│",
+        "╰" + "─" * inner + "╯",
+    ]
+
+
+def achievement_toast(
+    achievement: Achievement, reader: KeyReader | None = None, hold: float = 2.2
+) -> None:
+    """Pop a boxed toast for a newly unlocked achievement near the top of the
+    screen (above the trick mat). Skippable with any key; speaks the unlock
+    for screen-reader users."""
+    from .. import a11y
+
+    a11y.speak(f"achievement unlocked: {achievement.title}. {achievement.description}")
+    term_w, _ = get_term_size()
+    lines = achievement_toast_lines(achievement.title, achievement.description)
+    out = [hide_cursor()]
+    for i, line in enumerate(lines):
+        styled = f"{BOLD}{gold_fg()}{line}{RESET}"
+        out.append(move(3 + i, 1) + clear_line() + ansi_center(styled, term_w))
+    sys.stdout.write("".join(out))
+    sys.stdout.flush()
+    try:
+        if reader is not None and hold > 0:
+            interruptible_sleep(hold, reader)
+        elif hold > 0:
+            time.sleep(hold)
+    finally:
+        invalidate_diff()
+
+
 def show_round_summary(
     state: GameState,
     breakdown: ScoringBreakdown,
@@ -174,16 +218,40 @@ def show_round_summary(
     return event is not None
 
 
+# Extra Statistics-screen sections contributed by expansions. Each callable
+# returns ready-to-center lines; registered via `register_stats_section`.
+_STATS_SECTIONS: list[Callable[[], list[str]]] = []
+
+
+def register_stats_section(build: Callable[[], list[str]]) -> None:
+    if build not in _STATS_SECTIONS:
+        _STATS_SECTIONS.append(build)
+
+
+def _achievement_lines(unlocked: Collection[str]) -> list[str]:
+    """Pure line-builder for the Statistics screen's achievements panel.
+
+    Unlocks are evaluated and persisted by `stats.update_stats_round/game`
+    (see `achievements.py`); pre-4.10.0 nothing ever displayed them.
+    """
+    from ..achievements import ACHIEVEMENTS
+
+    got = sum(1 for a in ACHIEVEMENTS if a.id in unlocked)
+    lines = [f"  {UNDERLINE}Achievements: {got}/{len(ACHIEVEMENTS)}{RESET}"]
+    cells = [
+        f"{gold_fg()}★ {a.title}{RESET}" if a.id in unlocked else f"{DIM}☆ {a.title}{RESET}"
+        for a in ACHIEVEMENTS
+    ]
+    per_row = 3
+    for i in range(0, len(cells), per_row):
+        lines.append("    " + "   ".join(cells[i : i + per_row]))
+    return lines
+
+
 def show_stats(reader: KeyReader) -> None:
     """Display global game statistics."""
     stats = load_stats()
     session = get_session_stats()
-
-    # Load BelAtro profile
-    from ..belatro.progression.save import SaveManager
-
-    profile = SaveManager().load_profile()
-    b_stats = profile.stats
 
     # 4.1.1: hoist the line-list build outside the read loop. The stats numbers
     # are immutable for the lifetime of the modal — pre-4.1.1 every keystroke
@@ -208,18 +276,9 @@ def show_stats(reader: KeyReader) -> None:
     lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
     lines.append("")
 
-    # ── BELATRO (Roguelite) ──────────────────────────────────────────────
-    lines.append(f"{BOLD}{gold_fg()}BELATRO EXPANSION{RESET}")
-    lines.append("-" * 17)
-    lines.append(f"  Runs Won (Ante 8): {b_stats.get('runs_won', 0)}")
-    lines.append(f"  Total Capots:      {b_stats.get('total_capots', 0)}")
-    lines.append(
-        f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
-        f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}"
-    )
-    lines.append(f"  Discovered:        {len(profile.discovered_items)} items seen")
-    lines.append(f"  Unlocked:          {len(profile.unlocked_ids)} items earned")
-    lines.append("")
+    # ── Expansion sections (e.g. BelAtro, registered by the entry point) ──
+    for section in _STATS_SECTIONS:
+        lines.extend(section())
 
     # ── OTHER ──────────────────────────────────────────────────────────
     trump_list = sorted(stats.most_used_trump.items(), key=lambda x: x[1], reverse=True)
@@ -232,6 +291,7 @@ def show_stats(reader: KeyReader) -> None:
         dw = dstats["won"]
         dwr = (dw / dp * 100) if dp > 0 else 0
         lines.append(f"    {diff.capitalize():<8}: {dw}/{dp} ({dwr:.1f}%)")
+    lines.extend(_achievement_lines(stats.achievements))
 
     # Session Panel
     lines.append("")

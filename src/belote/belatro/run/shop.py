@@ -10,9 +10,15 @@ if TYPE_CHECKING:
 class Shop:
     """Manages randomized item generation and purchases between rounds."""
 
-    def __init__(self, run: BelAtroRun, profile: Profile | None = None) -> None:
+    def __init__(
+        self, run: BelAtroRun, profile: Profile | None = None, pool: Profile | None = None
+    ) -> None:
         self.run = run
-        self.profile = profile
+        self.profile = profile  # discoveries are recorded here
+        # Whose unlocks decide what can appear (defaults to `profile`). The
+        # Daily Challenge passes a fresh Profile so every player's shop rolls
+        # from the same pool and seeded runs stay in step.
+        self.pool = pool
         self.inventory: list[Any] = []
         self.reroll_cost = 5
         # Reason the most recent buy_item() returned False, or None on success.
@@ -46,7 +52,7 @@ class Shop:
         from ..items.registry import registry
         from ..progression.save import Profile
 
-        prof = self.profile or Profile()
+        prof = self.pool or self.profile or Profile()
         self.inventory = []
         # Use the run's seeded RNG so shop generation is deterministic when
         # run.seed is set. Pre-3.2 the shop used the module-level `random`,

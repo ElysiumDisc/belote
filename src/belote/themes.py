@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import config_dir
+
 
 @dataclass(frozen=True)
 class Theme:
@@ -357,6 +359,18 @@ class ThemeManager:
             callback()
         self.save_selection()
 
+    def cycle(self, step: int = 1) -> str:
+        """Switch to the theme `step` places after the current one (wrapping)
+        and return its name. An unknown current name restarts at the first."""
+        names = list(THEMES.keys())
+        try:
+            idx = names.index(self._current_theme_name)
+        except ValueError:
+            idx = -step
+        name = names[(idx + step) % len(names)]
+        self.set_current(name)
+        return name
+
     def list_themes(self) -> list[str]:
         return list(THEMES.keys())
 
@@ -393,7 +407,9 @@ class ThemeManager:
                     tmp_path.unlink()
 
     def _get_config_path(self) -> Path:
-        return Path.home() / ".config" / "belote" / "theme.json"
+        # Honors XDG_CONFIG_HOME / %APPDATA% (pre-4.10.0 hardcoded ~/.config,
+        # which also let the test suite write the real user config).
+        return config_dir() / "theme.json"
 
 
 theme_manager = ThemeManager()

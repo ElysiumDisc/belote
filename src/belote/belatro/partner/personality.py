@@ -4,7 +4,8 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from random import Random
 
-from belote.game import SANS_ATOUT_BID, BidValue, GameState, Seat, Suit
+from belote.deck import Suit
+from belote.game import SANS_ATOUT_BID, BidValue, GameState, Seat
 
 
 class PartnerPersonality(ABC):

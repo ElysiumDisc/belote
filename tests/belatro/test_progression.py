@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from belote.belatro.core.run_state import BelAtroRun
@@ -8,6 +11,11 @@ from belote.belatro.progression.unlocks import UnlockTracker
 from belote.belatro.run.ante import calculate_target
 from belote.deck import Suit
 from belote.game import Seat
+
+if TYPE_CHECKING:
+    from belote.belatro.engine.event_bus import (
+        RoundEndEvent,
+    )
 
 
 def test_planet_level_up():
@@ -248,3 +256,108 @@ def test_save_atomic_write_creates_no_orphan_tmpfile(tmp_path) -> None:
     # No orphan tmp file from the NamedTemporaryFile dance.
     tmp_files = [p for p in tmp_path.iterdir() if p.name.startswith(".profile-")]
     assert tmp_files == [], f"orphan tmpfile(s) left behind: {tmp_files}"
+
+
+class TestProfile:
+    def setup_method(self) -> None:
+        from belote.belatro.progression.save import Profile
+
+        self.profile = Profile()
+
+    def test_default_unlocked_ids_has_three_items(self) -> None:
+        assert len(self.profile.unlocked_ids) == 3
+
+    def test_default_unlocked_ids_contains_expected(self) -> None:
+        assert "le_classique" in self.profile.unlocked_ids
+        assert "le_courageux" in self.profile.unlocked_ids
+        assert "l_econome" in self.profile.unlocked_ids
+
+    def test_stats_has_four_keys(self) -> None:
+        assert len(self.profile.stats) == 4
+
+    def test_stats_all_zero(self) -> None:
+        assert all(v == 0 for v in self.profile.stats.values())
+
+    def test_stats_contains_expected_keys(self) -> None:
+        for key in ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"):
+            assert key in self.profile.stats
+
+    def test_is_unlocked_true_for_default_item(self) -> None:
+        assert self.profile.is_unlocked("le_classique") is True
+
+    def test_is_unlocked_false_for_unknown_item(self) -> None:
+        assert self.profile.is_unlocked("not_a_real_item") is False
+
+    def test_unlock_new_item_returns_true(self) -> None:
+        result = self.profile.unlock("brand_new_item")
+        assert result is True
+
+    def test_unlock_new_item_adds_to_list(self) -> None:
+        self.profile.unlock("brand_new_item")
+        assert "brand_new_item" in self.profile.unlocked_ids
+
+    def test_unlock_duplicate_returns_false(self) -> None:
+        result = self.profile.unlock("le_classique")
+        assert result is False
+
+    def test_unlock_duplicate_does_not_add_again(self) -> None:
+        original_count = len(self.profile.unlocked_ids)
+        self.profile.unlock("le_classique")
+        assert len(self.profile.unlocked_ids) == original_count
+
+
+class TestSaveManager:
+    def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
+        from belote.belatro.progression.save import Profile, SaveManager
+
+        original_env = os.environ.get("XDG_DATA_HOME")
+        try:
+            os.environ["XDG_DATA_HOME"] = str(tmp_path)
+            sm = SaveManager("belatro_test")
+            profile = Profile()
+            profile.unlock("test_item_xyz")
+            profile.stats["runs_won"] = 3
+            sm.save_profile(profile)
+
+            loaded = sm.load_profile()
+            assert "test_item_xyz" in loaded.unlocked_ids
+            assert loaded.stats["runs_won"] == 3
+        finally:
+            if original_env is None:
+                os.environ.pop("XDG_DATA_HOME", None)
+            else:
+                os.environ["XDG_DATA_HOME"] = original_env
+
+    def test_load_returns_default_profile_when_no_file(self, tmp_path: Path) -> None:
+        from belote.belatro.progression.save import Profile, SaveManager
+
+        original_env = os.environ.get("XDG_DATA_HOME")
+        try:
+            os.environ["XDG_DATA_HOME"] = str(tmp_path)
+            sm = SaveManager("belatro_no_file_test")
+            loaded = sm.load_profile()
+            assert isinstance(loaded, Profile)
+            assert len(loaded.unlocked_ids) == 3
+        finally:
+            if original_env is None:
+                os.environ.pop("XDG_DATA_HOME", None)
+            else:
+                os.environ["XDG_DATA_HOME"] = original_env
+
+    def test_roundtrip_preserves_all_defaults(self, tmp_path: Path) -> None:
+        from belote.belatro.progression.save import Profile, SaveManager
+
+        original_env = os.environ.get("XDG_DATA_HOME")
+        try:
+            os.environ["XDG_DATA_HOME"] = str(tmp_path)
+            sm = SaveManager("belatro_defaults_test")
+            profile = Profile()
+            sm.save_profile(profile)
+            loaded = sm.load_profile()
+            assert sorted(loaded.unlocked_ids) == sorted(profile.unlocked_ids)
+            assert loaded.stats == profile.stats
+        finally:
+            if original_env is None:
+                os.environ.pop("XDG_DATA_HOME", None)
+            else:
+                os.environ["XDG_DATA_HOME"] = original_env

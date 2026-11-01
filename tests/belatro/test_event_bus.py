@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from belote.belatro.engine.event_bus import EventBus, RoundEndEvent
 from belote.deck import Suit
 from belote.game import Seat
+
+if TYPE_CHECKING:
+    from belote.belatro.engine.event_bus import (
+        RoundEndEvent,
+    )
+from tests.belatro._events import (
+    make_decl_event,
+    make_trick_event,
+)
 
 
 def _evt() -> RoundEndEvent:
@@ -94,3 +105,56 @@ def test_consecutive_rounds_use_independent_buses() -> None:
     assert len(seen_r2) == 2
     # Round 1's bus never sees round 2 events.
     assert seen_r1 != seen_r2
+
+
+class TestEventBus:
+    def setup_method(self) -> None:
+        from belote.belatro.engine.event_bus import EventBus
+
+        self.bus = EventBus()
+
+    def test_subscribe_and_emit_calls_handler(self) -> None:
+        received: list[Any] = []
+        self.bus.subscribe(received.append)
+        evt = make_trick_event()
+        self.bus.emit(evt)
+        assert received == [evt]
+
+    def test_multiple_handlers_all_called(self) -> None:
+        calls_a: list[Any] = []
+        calls_b: list[Any] = []
+        self.bus.subscribe(calls_a.append)
+        self.bus.subscribe(calls_b.append)
+        evt = make_trick_event()
+        self.bus.emit(evt)
+        assert calls_a == [evt]
+        assert calls_b == [evt]
+
+    def test_unsubscribe_removes_handler(self) -> None:
+        calls: list[Any] = []
+        self.bus.subscribe(calls.append)
+        self.bus.unsubscribe(calls.append)
+        self.bus.emit(make_trick_event())
+        assert calls == []
+
+    def test_emit_with_no_handlers_does_nothing(self) -> None:
+        # Should not raise
+        self.bus.emit(make_trick_event())
+
+    def test_emit_passes_exact_event_object(self) -> None:
+        received: list[Any] = []
+        self.bus.subscribe(received.append)
+        evt = make_decl_event(points=99)
+        self.bus.emit(evt)
+        assert received[0].points == 99
+
+    def test_handler_receives_different_event_types(self) -> None:
+        from belote.belatro.engine.event_bus import BeloteAnnouncedEvent
+
+        received: list[Any] = []
+        self.bus.subscribe(received.append)
+        evt1 = make_trick_event()
+        evt2 = BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False)
+        self.bus.emit(evt1)
+        self.bus.emit(evt2)
+        assert len(received) == 2

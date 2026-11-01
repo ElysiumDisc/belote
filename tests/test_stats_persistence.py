@@ -175,9 +175,10 @@ def test_stats_path_honours_appdata_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import belote.config as config_mod
+    import belote.paths as paths_mod
 
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    monkeypatch.setattr(config_mod, "_is_windows", lambda: True)
+    monkeypatch.setattr(paths_mod, "_is_windows", lambda: True)
     assert config_mod.Config().stats_path == tmp_path / "belote" / "stats.json"
 
 
@@ -191,3 +192,74 @@ def test_stats_path_ignores_appdata_off_windows(
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert config_mod.Config().stats_path == tmp_path / "xdg" / "belote" / "stats.json"
+
+
+def test_theme_config_path_honours_xdg_config_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pre-4.10.0 the theme file was hardcoded to ~/.config, ignoring
+    XDG_CONFIG_HOME (and leaking the test suite into the real user config)."""
+    from belote.themes import ThemeManager
+
+    if os.name == "nt":
+        pytest.skip("POSIX-only behaviour")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert ThemeManager()._get_config_path() == tmp_path / "belote" / "theme.json"
+
+
+def test_stats_screen_lists_achievements() -> None:
+    """Achievements were evaluated and persisted but never displayed."""
+    from belote.achievements import ACHIEVEMENTS
+    from belote.ansi import visible_len
+    from belote.ui.announce import _achievement_lines
+
+    first = ACHIEVEMENTS[0]
+    lines = _achievement_lines([first.id])
+    assert f"1/{len(ACHIEVEMENTS)}" in lines[0]
+    body = "".join(lines[1:])
+    assert f"★ {first.title}" in body
+    assert all(f"☆ {a.title}" in body for a in ACHIEVEMENTS[1:])
+    # Must fit the 80-col minimum terminal.
+    assert all(visible_len(line) <= 80 for line in lines)
+
+
+def test_theme_cycle_wraps_and_recovers_from_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from belote.themes import THEMES, ThemeManager
+
+    tm = ThemeManager()
+    monkeypatch.setattr(tm, "_get_config_path", lambda: tmp_path / "theme.json")
+    names = list(THEMES)
+    tm.set_current(names[-1])
+    assert tm.cycle() == names[0]
+    tm._current_theme_name = "no-such-theme"
+    assert tm.cycle() == names[0]
+
+
+def test_update_stats_round_returns_new_unlocks_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlocks are returned to the caller (who shows the toast) exactly once."""
+    from belote import stats as stats_mod
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    stats_mod._MANAGER._stats_cache = None
+    monkeypatch.setattr(stats_mod._MANAGER, "_session_stats", stats_mod.SessionStats())
+    try:
+        first = stats_mod.update_stats_round(True, 252, "♠")
+        assert "first_capot" in [a.id for a in first]
+        again = stats_mod.update_stats_round(True, 252, "♠")
+        assert "first_capot" not in [a.id for a in again]
+    finally:
+        stats_mod._MANAGER._stats_cache = None
+
+
+def test_achievement_toast_lines_frame_the_text() -> None:
+    from belote.ui.announce import achievement_toast_lines
+
+    lines = achievement_toast_lines("Le Grand Chelem", "Score your first Capot.")
+    assert len(lines) == 4
+    assert len({len(line) for line in lines}) == 1  # rectangular box
+    assert "ACHIEVEMENT UNLOCKED" in lines[1]
+    assert "Le Grand Chelem — Score your first Capot." in lines[2]

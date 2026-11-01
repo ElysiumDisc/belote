@@ -17,6 +17,7 @@ from belote.ansi import (
 from belote.input import Key
 from belote.rules import RulesPage
 from belote.ui.render import get_term_size, invalidate_diff
+from belote.ui.text import wrap_words
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -170,53 +171,48 @@ BELATRO_RULES: dict[str, RulesPage] = {
 }
 
 
+def rules_lines(lang_key: str, wrap_at: int) -> list[str]:
+    """Pure line-builder for the BelAtro rules screen (one language)."""
+    content = BELATRO_RULES[lang_key]
+    title = content["title"]
+    lines: list[str] = [
+        BOLD + gold_fg() + title.upper() + RESET,
+        "=" * min(visible_len(title), wrap_at),
+    ]
+    for section in content["sections"]:
+        lines.append("")
+        lines.append(BOLD + white_fg() + section["header"] + RESET)
+        lines.append("-" * len(section["header"]))
+        lines.extend(wrap_words(section["text"], wrap_at, indent="  "))
+    lines.append("")
+    lang_label = "EN" if lang_key == "en" else "FR"
+    lines.append(
+        DIM + "Press [L] to Toggle Language (" + lang_label + ") | [Q/Enter/Esc] Back" + RESET
+    )
+    return lines
+
+
 def show_belatro_rules(reader: KeyReader) -> None:
     """Display scrollable BelAtro rules in EN/FR."""
     lang = "en"
     scroll = 0
 
-    def get_render(lang_key: str, wrap_at: int) -> list[str]:
-        content = BELATRO_RULES[lang_key]
-        lines: list[str] = []
-        title = content["title"]
-        lines.append(BOLD + gold_fg() + title.upper() + RESET)
-        lines.append("=" * min(visible_len(title), wrap_at))
-        for section in content["sections"]:
-            lines.append("")
-            lines.append(BOLD + white_fg() + section["header"] + RESET)
-            lines.append("-" * len(section["header"]))
-            words = section["text"].split()
-            line = "  "
-            for w in words:
-                if len(line) + len(w) + 1 > wrap_at:
-                    lines.append(line)
-                    line = "  " + w
-                else:
-                    line = line + " " + w if line.strip() else "  " + w
-            if line.strip():
-                lines.append(line)
-        lines.append("")
-        lang_label = "EN" if lang_key == "en" else "FR"
-        lines.append(
-            DIM + "Press [L] to Toggle Language (" + lang_label + ") | [Q/Enter/Esc] Back" + RESET
-        )
-        return lines
-
     from belote.ui.fit_guard import require_minimum
 
-    hide_cursor()
     while True:
         require_minimum(reader)
         term_w, term_h = get_term_size()
         wrap_at = min(80, term_w - 8)
         view_h = term_h - 4
 
-        lines = get_render(lang, wrap_at)
+        lines = rules_lines(lang, wrap_at)
         max_scroll = max(0, len(lines) - view_h)
         scroll = max(0, min(scroll, max_scroll))
 
         visible_lines = lines[scroll : scroll + view_h]
-        output = [clear_screen()]
+        # hide_cursor() returns the escape string; pre-4.10.0 it was called
+        # bare (a no-op) instead of being written with the frame.
+        output = [clear_screen(), hide_cursor()]
         for line in visible_lines:
             output.append(ansi_center(line, term_w) + "\r\n")
 
@@ -232,6 +228,6 @@ def show_belatro_rules(reader: KeyReader) -> None:
             scroll = max(0, scroll - 1)
         elif key == Key.DOWN:
             scroll = min(max_scroll, scroll + 1)
-        elif key == Key.CHAR and event.char.lower() == "l":
+        elif key == Key.CHAR and (event.char or "").lower() == "l":
             lang = "fr" if lang == "en" else "en"
             scroll = 0

@@ -79,13 +79,13 @@ def test_windows_reader_returns_eof_on_empty_read() -> None:
 
     src = inspect.getsource(input_module)
     # Find the Windows read body window; assert the empty-bytes guard appears
-    # before the decode fallback. Match `char = ch.decode` rather than the
+    # before the decode fallback. Match `char_event(ch.decode` rather than the
     # bare substring so the in-source comment that quotes `ch.decode("utf-8")`
     # doesn't shadow the real call site.
     win_idx = src.find("class _WindowsKeyReader")
     assert win_idx != -1
     read_idx = src.find("def read(self)", win_idx)
-    decode_idx = src.find("char = ch.decode", read_idx)
+    decode_idx = src.find("char_event(ch.decode", read_idx)
     guard_idx = src.find("if not ch:", read_idx)
     assert guard_idx != -1, "Windows reader missing empty-bytes EOF guard"
     assert decode_idx != -1, "Windows reader decode fallback unexpectedly gone"
@@ -160,3 +160,48 @@ def test_announce_yes_no_returns_false_on_eof() -> None:
     reader.read.return_value = KeyEvent(Key.EOF)
     assert BelAtroAnnounce.yes_no("Continue?", reader) is False
     assert reader.read.call_count == 1
+
+
+def test_char_event_aliases_are_case_insensitive() -> None:
+    """Both readers share `char_event`; pin the alias table's behaviour."""
+    from belote.input import CHAR_ALIASES, char_event
+
+    for ch, key in CHAR_ALIASES.items():
+        assert char_event(ch).key is key
+        assert char_event(ch.upper()).key is key
+    plain = char_event("x")
+    assert plain.key is Key.CHAR and plain.char == "x"
+
+
+def test_extension_keys_only_returned_when_registered(monkeypatch: object) -> None:
+    """Core prompts ignore expansion keys (I / V) unless an expansion has
+    registered them, in which case they come back as `ExtensionKey`."""
+    import io
+    import random
+    import sys
+
+    from belote.game import new_game, start_round
+    from belote.input import KeyEvent
+    from belote.ui import prompts
+
+    class _Reader:
+        def __init__(self, keys: list[Key]) -> None:
+            self.keys = iter(keys)
+
+        def read(self) -> KeyEvent:
+            return KeyEvent(next(self.keys))
+
+    state = start_round(new_game(), random.Random(1))
+    old = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        # Unregistered: V is ignored, the QUIT that follows ends the prompt.
+        assert prompts.prompt_bid(state, _Reader([Key.INVENTORY, Key.QUIT])) == "QUIT"
+        prompts.register_extension_keys(Key.INVENTORY)
+        try:
+            res = prompts.prompt_bid(state, _Reader([Key.INVENTORY]))
+        finally:
+            prompts.unregister_extension_keys(Key.INVENTORY)
+        assert res == prompts.ExtensionKey(Key.INVENTORY)
+    finally:
+        sys.stdout = old

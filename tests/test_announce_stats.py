@@ -55,6 +55,9 @@ def test_stats_shows_discovered_and_unlocked_separately(
     # Make the loop exit on the first key press.
     reader = ScriptedReader(iter([KeyEvent(key=Key.QUIT, char=None)]))
 
+    from belote.belatro.integration import install
+
+    install()  # the app entry point wires BelAtro's stats section in
     announce_mod.show_stats(reader)
     out = buf.getvalue()
 

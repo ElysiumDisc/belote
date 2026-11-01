@@ -4,9 +4,10 @@ from dataclasses import replace
 
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import TrickWonEvent
 from belote.deck import Card, Rank, Suit
-from belote.game import GameState, Seat
+from belote.game import Seat
 
 
 def make_trick_event(
@@ -32,7 +33,7 @@ class TestDeckVariants:
     def test_republicain_deck_bonus(self) -> None:
         """Verify +5 chips per 7 or 8 in any trick for Républicain deck."""
         acc = ScoreAccumulator(deck_id="republicain")
-        state = GameState(hands=((), (), (), ()))
+        state = BelatroState(hands=((), (), (), ()))
         state = replace(state, _chips=0, _mult=1.0)
 
         # Trick with a 7 and an 8

@@ -171,6 +171,26 @@ PYTHONPATH=src python scripts/benchmark.py
 
 Use these as a regression-detection floor for future changes.
 
+## Architecture: core game vs. BelAtro expansion
+
+- **The core never imports BelAtro.** `tests/test_repo_layout.py` enforces
+  it; only the composition root `belote/main.py` wires the expansion in via
+  `belote/belatro/integration.py` (menu modes, stats section, settings
+  toggle) and BelAtro installs its run-scoped hooks itself (history
+  override, bid hint, extension keys I/V).
+- **One round engine.** `belote/round_engine.py::play_round` owns the phase
+  order (bidding with all-pass handling → contract → tricks). Classic
+  (`gameflow.ClassicRound`) and BelAtro (`belatro/engine/round_driver.py::
+  _RoundContext`) are `RoundPolicy` implementations — change the round's
+  flow there, once.
+- **Rule variants are core.** Boss / deck / voucher effects that change how
+  Belote is played live on `GameState.variants` (`belote/variants.py`);
+  bosses only switch variants on.
+- **Expansion state rides on a subclass.** BelAtro's chips / mult / money /
+  joker state live on `belatro/core/state.py::BelatroState`. Core
+  transitions are generic over `GameState` subclasses and build states with
+  `replace()`, so the subclass survives every move.
+
 ## Accessibility
 
 Set `BELOTE_A11Y=1` to emit one-line plain-text descriptions of card plays,
@@ -196,8 +216,10 @@ run won/lost).
 
 ## Optional Runtime Flags
 
-The following environment variables enable opt-in features. Each is read
-once at startup; toggling mid-run has no effect.
+Players toggle these from the in-game **Settings** screen (`belote/settings.py`
+→ `settings.json`; `settings.apply()` pushes the values into the modules).
+The environment variables below still work and *override* the saved setting
+while set — handy for debugging and CI. Each is read once at startup.
 
 - `BELOTE_REPLAY=1` — after every Classic round, print a one-line summary
   of how often South's plays matched the Hard-AI's preferred line

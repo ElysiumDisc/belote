@@ -88,10 +88,11 @@ def test_force_bypasses_diff(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_env_var_bypasses_diff(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`BELOTE_NO_DIFF=1` is an escape hatch — emit full frame regardless."""
+    """Diff rendering off (Fast redraw setting / `BELOTE_NO_DIFF=1`, read
+    once at import) — emit the full frame regardless."""
     render_mod._last_emitted_lines = None
     render_mod._last_render_key = None
-    monkeypatch.setenv("BELOTE_NO_DIFF", "1")
+    monkeypatch.setattr(render_mod, "_DIFF_ENABLED", False)
 
     buf = io.StringIO()
     monkeypatch.setattr(render_mod.sys, "stdout", buf)
@@ -273,7 +274,6 @@ def test_show_main_menu_invalidates_diff_on_exit(monkeypatch: pytest.MonkeyPatch
     Same convention as `show_help`/`show_history`/`show_rules` (4.0.0) and
     `show_card_detail` (4.0.0, removed in 4.6.0).
     """
-    from belote.game import Seat
     from belote.input import Key, KeyEvent
     from belote.ui import menu as menu_mod
 
@@ -291,13 +291,7 @@ def test_show_main_menu_invalidates_diff_on_exit(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(menu_mod.sys, "stdout", buf)
     monkeypatch.setattr(menu_mod, "get_term_size", lambda: (120, 40))
 
-    diffs = {Seat.EAST: "medium", Seat.NORTH: "medium", Seat.WEST: "medium"}
-    choice, _, _, _ = menu_mod.show_main_menu(
-        _QuitReader(),  # type: ignore[arg-type]
-        diffs,
-        target=1000,
-        speed="normal",
-    )
+    choice = menu_mod.show_main_menu(_QuitReader(), ["BelAtro"])  # type: ignore[arg-type]
     assert choice == "Quit"
     assert render_mod._last_emitted_lines is None, (
         "show_main_menu must invalidate_diff() on exit so a subsequent "

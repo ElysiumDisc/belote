@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import os
 import random
 from dataclasses import replace
 
-from . import a11y
+from . import a11y, settings
 from .ai import AIPlayer, Difficulty
 from .deck import Card, Contract, Suit
 from .game import (
@@ -16,16 +15,15 @@ from .game import (
     Seat,
     Sequence,
     TrickCard,
-    bidding_turn,
     clear_announced,
     clear_legal_cards_cache,
     compute_trick_winners,
-    play_card,
-    process_bid,
     start_round,
     team_of,
+    trick_winner_seat,
 )
 from .input import KeyReader, interruptible_sleep
+from .round_engine import RoundInterrupted, RoundPolicy, play_bidding, play_round, play_tricks
 from .scoring import (
     ScoringBreakdown,
     apply_round_score,
@@ -35,6 +33,7 @@ from .scoring import (
     get_declaration_points,
     is_capot,
     score_round,
+    trick_card_points,
 )
 from .stats import update_stats_round
 from .ui import (
@@ -51,6 +50,8 @@ from .ui import (
     show_round_summary,
     slide_card_to_table_hint,
 )
+from .ui.announce import achievement_toast
+from .ui.prompts import ExtensionKey
 
 # Minimum time the four cards stay on the mat before a trick clears. This
 # applies even when the user has skipped earlier animations (so a fast-paced
@@ -127,6 +128,213 @@ def _bid_label(bid: BidValue) -> str:
     return bid.symbol
 
 
+class ClassicRound(RoundPolicy[GameState]):
+    """Classic Belote over the shared round engine: South is the human
+    (prompts), the other seats are AI, every move is animated/announced and
+    pushed onto the undo history."""
+
+    def __init__(
+        self,
+        reader: KeyReader,
+        ai_players: dict[Seat, AIPlayer],
+        ai_delay: float,
+        trick_pause: float,
+        history: list[GameState],
+        replay_decisions: list[tuple[GameState, Card]] | None = None,
+    ) -> None:
+        self.reader = reader
+        self.ai_players = ai_players
+        self.ai_delay = ai_delay
+        self.trick_pause = trick_pause
+        self.history = history
+        self.replay_decisions = replay_decisions
+        # Set when the player skips an animation; reset on the player's turn
+        # (M6) and at each phase start.
+        self.skip_anims = False
+
+    # ── bidding ─────────────────────────────────────────────────────────
+
+    def choose_bid(self, state: GameState, seat: Seat) -> BidValue:
+        if seat != Seat.SOUTH:
+            return self.ai_players[seat].decide_bid(state)
+        self.skip_anims = False  # M6: reset the skip flag on the human's turn
+        while True:
+            display(state, None)
+            res = prompt_bid(state, self.reader)
+            if res == "QUIT":
+                raise RoundInterrupted("QUIT")
+            if res == "UNDO":
+                raise RoundInterrupted("UNDO")
+            if isinstance(res, ExtensionKey):
+                continue  # only expansions register extension keys
+            if isinstance(res, str) and res != SANS_ATOUT_BID:
+                raise RoundInterrupted("QUIT")  # unknown sentinel: not a real bid
+            return res
+
+    def before_bid(self, state: GameState, seat: Seat, bid: BidValue) -> None:
+        if seat != Seat.SOUTH:
+            display(state, None)
+            if bid is not None:
+                message = f"{seat.name} takes it as {_bid_label(bid)}!"
+                duration = (self.ai_delay * 2 + 0.5) if not self.skip_anims else 0
+            else:
+                message = f"{seat.name} passes"
+                duration = self.ai_delay if not self.skip_anims else 0
+            if announce(message, duration=duration, reader=self.reader) is not None:
+                self.skip_anims = True
+        self.history.append(state)
+
+    def on_contract(self, state: GameState) -> GameState:
+        # 4.9.0 / G1: post-bid coinche flow (defenders, then taker side).
+        state = _run_coinche_flow(state, self.reader, self.ai_players)
+        # 4.6.5 a11y: announce the locked contract at the bid→play transition.
+        if state.taker is not None:
+            a11y.announce_contract(state.taker, _contract_word(state) or "no trump")
+        self.skip_anims = False  # a fresh phase starts with animations on
+        return state
+
+    # ── play ────────────────────────────────────────────────────────────
+
+    def choose_card(self, state: GameState, seat: Seat) -> tuple[Card, GameState]:
+        if seat != Seat.SOUTH:
+            ai = self.ai_players[seat]
+            ai.update_memory(state)
+            return ai.decide_card(state), state
+        self.skip_anims = False  # M6
+        while True:
+            display(state, None)
+            state_before_south = state
+            card, state = prompt_card(state, self.reader)
+            if card is None:
+                raise RoundInterrupted("QUIT")
+            if isinstance(card, ExtensionKey):
+                continue  # only expansions register extension keys; re-prompt
+            if not isinstance(card, Card):
+                raise RoundInterrupted("UNDO")
+            if self.replay_decisions is not None:
+                self.replay_decisions.append((state_before_south, card))
+            return card, state
+
+    def before_card(self, state: GameState, seat: Seat, card: Card) -> None:
+        reader = self.reader
+        # 1. Show the card on the mat IMMEDIATELY.
+        display_state = replace(
+            state, current_trick=state.current_trick + (TrickCard(seat, card),)
+        )
+        # 4.8.0 / C3: tactile launch trail when the player (SOUTH) plays a
+        # card. AI seats skip — their plays feel different via the AI delay.
+        if seat == Seat.SOUTH and not self.skip_anims:
+            slide_card_to_table_hint(reader)
+        if len(display_state.current_trick) == 1:
+            display(display_state, None)
+        else:
+            patch_trick_card(display_state, seat, card)
+
+        # 2. Short delay for cards 1-3 (the card is already on the mat; the
+        # a11y path announces the play for screen-reader users).
+        if (
+            seat != Seat.SOUTH
+            and len(display_state.current_trick) < 4
+            and not self.skip_anims
+            and interruptible_sleep(self.ai_delay, reader)
+        ):
+            self.skip_anims = True
+
+        # 3. A completed trick: pause longer and show announcements.
+        if len(display_state.current_trick) == 4:
+            self._trick_complete_effects(state, display_state)
+
+        # 3b. After the first trick, announce sequences / carrés.
+        if len(display_state.current_trick) == 4 and len(state.completed_tricks) == 0:
+            self._announce_declarations(state, display_state)
+
+        # 4. Record the move for undo + screen readers.
+        self.history.append(state)
+        a11y.announce_play(state.turn, card)
+
+    def _trick_complete_effects(self, state: GameState, display_state: GameState) -> None:
+        reader, trick_pause = self.reader, self.trick_pause
+        # Non-skippable minimum dwell so all four cards are always visible
+        # before the trick clears (even after skipping / on "instant").
+        interruptible_sleep(MIN_TRICK_DWELL, None)
+        is_sa = state.contract == Contract.SANS_ATOUT
+        # 4.8.0 / C4: brief gold pulse on the natural trick winner (a Rupture
+        # swing only takes effect at scoring time, so the visual stays right).
+        if not self.skip_anims:
+            w = trick_winner_seat(
+                display_state.current_trick, state.trump, state.variants.seven_eight_trump, is_sa
+            )
+            if w is not None:
+                pulse_winner_glow(w, reader)
+        if len(state.completed_tricks) == 7:  # the 8th trick
+            # Rupture-aware projection (the 8th trick isn't in completed_tricks
+            # yet) so the announcement names the team scoring actually credits.
+            projected = list(state.completed_tricks) + [display_state.current_trick]
+            winner = compute_trick_winners(state, state.trump, is_sa, tricks=projected)[-1]
+            if winner:
+                team = "NS" if team_of(winner) == 0 else "EW"
+                announce(
+                    f"Dix de Der (Team {team})",
+                    duration=trick_pause * 0.8 if not self.skip_anims else 0,
+                    reader=reader,
+                )
+                display(display_state, None)
+            # Check for Capot while cards are still visible.
+            if is_capot(state, tricks=projected) is not None:
+                announce(
+                    "CAPOT!",
+                    duration=trick_pause * 1.2 if not self.skip_anims else 0,
+                    reader=reader,
+                )
+                display(display_state, None)
+        if not self.skip_anims and interruptible_sleep(trick_pause, reader):
+            self.skip_anims = True
+
+    def _announce_declarations(self, state: GameState, display_state: GameState) -> None:
+        seq_names = {3: "Tierce", 4: "Quarte", 5: "Quinte"}
+        for decl in state.declarations:
+            if decl.kind not in ("sequence", "carre"):
+                continue
+            msg = f"{decl.seat.name}: {decl.kind.upper()}"
+            if decl.kind == "sequence":
+                length = decl.detail.length if isinstance(decl.detail, Sequence) else 0
+                msg = f"{decl.seat.name}: {seq_names.get(length, 'Sequence')}"
+            if isinstance(decl.detail, (Sequence, Carre)):
+                a11y.announce_declaration(
+                    decl.seat, decl.kind, get_declaration_points([decl.detail])
+                )
+            announce(
+                msg,
+                duration=self.trick_pause * 0.8 if not self.skip_anims else 0,
+                reader=self.reader,
+            )
+            display(display_state, None)
+
+    def after_card(
+        self, before: GameState, state: GameState, seat: Seat, card: Card
+    ) -> GameState:
+        # A trick just closed: tell screen readers who won and for how much,
+        # via the canonical scoring helper so zero-rank variants are honored.
+        if (
+            len(state.completed_tricks) > len(before.completed_tricks)
+            and state.last_trick_winner is not None
+        ):
+            pts = trick_card_points(state, state.completed_tricks[-1])
+            a11y.announce_trick_won(state.last_trick_winner, pts)
+        if state.announced:
+            # 4.8.0 / C5: Belote / Rebelote get the 4-row stinger; any other
+            # announcement keeps the slim one-line `announce`.
+            msg = state.announced
+            dur = max(0.5, self.trick_pause * 0.6) if not self.skip_anims else 0
+            if msg in ("Belote!", "Rebelote!"):
+                belote_stinger(msg, duration=dur, reader=self.reader)
+            else:
+                announce(msg, duration=dur, reader=self.reader)
+            state = clear_announced(state)
+            display(state, None)
+        return state
+
+
 def run_bidding(
     state: GameState,
     reader: KeyReader,
@@ -134,52 +342,13 @@ def run_bidding(
     ai_delay: float,
     history: list[GameState],
 ) -> GameState | str | None:
-    """Run the bidding phase. Returns None if user quits, 'UNDO' if requested."""
-    current = state
-    skip_anims = False
-    while current.phase == Phase.BIDDING:
-        bidder = bidding_turn(current)
-
-        if bidder == Seat.SOUTH:
-            skip_anims = False  # M6: Reset skip flag when it's the human's turn
-            display(current, None)
-            res = prompt_bid(current, reader)
-            if res == "QUIT":
-                return None
-            if res == "UNDO":
-                return "UNDO"
-            if res == "OVERLAY":
-                # Classic mode has no separate score overlay; re-prompt for a real bid.
-                continue
-            if isinstance(res, str) and res != SANS_ATOUT_BID:
-                # Sentinels like "QUIT"/"UNDO"/"OVERLAY" are not real bids.
-                return None
-            bid: BidValue = res
-        else:
-            ai = ai_players[bidder]
-            bid = ai.decide_bid(current)
-            display(current, None)
-            if bid is not None:
-                message = f"{bidder.name} takes it as {_bid_label(bid)}!"
-                duration = (ai_delay * 2 + 0.5) if not skip_anims else 0
-            else:
-                message = f"{bidder.name} passes"
-                duration = ai_delay if not skip_anims else 0
-            if announce(message, duration=duration, reader=reader) is not None:
-                skip_anims = True
-
-        history.append(current)
-        current = process_bid(current, bid)
-
-    # 4.9.0 / G1: post-bid coinche flow. Only fires when a taker exists
-    # (i.e. the bidding produced a real contract, not an all-pass). One
-    # defender-side coinche check, then if coinched, one taker-side
-    # surcoinche check. Updates `current.coinche_level` in place via
-    # `dataclasses.replace`. AI heuristic in `ai.decide_coinche`.
-    if current.taker is not None:
-        current = _run_coinche_flow(current, reader, ai_players)
-
-    return current
+    """Run the bidding phase (+ coinche). Returns None if the user quits,
+    'UNDO' if requested."""
+    policy = ClassicRound(reader, ai_players, ai_delay, 0.0, history)
+    try:
+        return play_bidding(state, policy)
+    except RoundInterrupted as stop:
+        return None if stop.reason == "QUIT" else "UNDO"
 
 
 def _run_coinche_flow(
@@ -247,170 +416,13 @@ def run_play(
     history: list[GameState],
     replay_decisions: list[tuple[GameState, Card]] | None = None,
 ) -> GameState | str | None:
-    """Run the play phase (all 8 tricks). Returns None if user quits, 'UNDO' if requested."""
-    current = state
-    skip_anims = False
-
-    while current.phase == Phase.PLAYING:
-        player = current.turn
-        if player == Seat.SOUTH:
-            skip_anims = False  # M6: Reset skip flag when it's the human's turn
-            display(current, None)
-            state_before_south = current
-            card, current = prompt_card(current, reader)
-            if card is None:
-                return None
-            if card == "UNDO":
-                return "UNDO"
-            if card == "OVERLAY":
-                # Classic mode has no separate score overlay; re-prompt for a real card.
-                continue
-            if card == "INVENTORY":
-                # 4.7.0: V key opens the BelAtro inventory overlay. Classic
-                # Belote has no run-state to inspect, so V is a no-op here
-                # — re-prompt for a real card play.
-                continue
-            if not isinstance(card, Card):
-                return "UNDO"
-            if replay_decisions is not None:
-                replay_decisions.append((state_before_south, card))
-        else:
-            ai = ai_players[player]
-            ai.update_memory(current)
-            card = ai.decide_card(current)
-
-        # 1. Show the card on the mat IMMEDIATELY
-        display_state = replace(
-            current, current_trick=current.current_trick + (TrickCard(player, card),)
-        )
-        # 4.8.0 / C3: tactile launch trail when the player (SOUTH) plays a
-        # card. Cheap (~120ms, skippable). AI seats skip — their plays
-        # already feel different via the per-card AI delay below.
-        if player == Seat.SOUTH and not skip_anims:
-            slide_card_to_table_hint(reader)
-        if len(display_state.current_trick) == 1:
-            display(display_state, None)
-        else:
-            patch_trick_card(display_state, player, card)
-
-        # 2. Short delay for cards 1, 2, 3. The card is already visible on the
-        # mat from step 1 (display() or patch_trick_card just above); no text
-        # banner is needed — pre-4.0.1 wrote "X plays Y" to stdout, which
-        # scrolled the alt-screen and corrupted the diff baseline. The TTS
-        # path in a11y.py:87 still announces the play independently for
-        # screen-reader users.
-        if (
-            player != Seat.SOUTH
-            and len(display_state.current_trick) < 4
-            and not skip_anims
-            and interruptible_sleep(ai_delay, reader)
-        ):
-            skip_anims = True
-
-        # 3. If this completes a trick, pause longer and show announcements
-        if len(display_state.current_trick) == 4:
-            # Non-skippable minimum dwell so all four cards are always visible
-            # before the trick clears, even when the user has skipped earlier
-            # animations or is on the "instant" speed preset.
-            interruptible_sleep(MIN_TRICK_DWELL, None)
-            # 4.8.0 / C4: brief gold pulse identifying the trick winner. The
-            # winner is the natural trick winner (pre-Rupture-override) for
-            # the just-completed trick — Rupture's swing only takes effect
-            # at scoring time, so the on-table visual stays accurate.
-            if not skip_anims:
-                from .game import trick_winner_seat as _twin
-                is_sa = current.contract == Contract.SANS_ATOUT
-                w = _twin(
-                    display_state.current_trick,
-                    current.trump,
-                    current.boss_modifiers.seven_eight_trump,
-                    is_sa,
-                )
-                if w is not None:
-                    pulse_winner_glow(w, reader)
-            if len(current.completed_tricks) == 7:  # This was the 8th trick
-                is_sa = current.contract == Contract.SANS_ATOUT
-                # Use the Rupture-aware helper so the announcement names the
-                # team that actually gets credited in scoring (see
-                # `compute_trick_winners` in game.py). Pass the projected
-                # 8-trick list because the 8th trick hasn't been pushed to
-                # `completed_tricks` yet. Reuse the list across the Capot
-                # check below to avoid a redundant rebuild.
-                projected = list(current.completed_tricks) + [display_state.current_trick]
-                winner = compute_trick_winners(
-                    current, current.trump, is_sa, tricks=projected
-                )[-1]
-                if winner:
-                    team = "NS" if team_of(winner) == 0 else "EW"
-                    announce(
-                        f"Dix de Der (Team {team})",
-                        duration=trick_pause * 0.8 if not skip_anims else 0,
-                        reader=reader,
-                    )
-                    display(display_state, None)
-
-                # Check for Capot while cards are still visible
-                if is_capot(current, tricks=projected) is not None:
-                    announce(
-                        "CAPOT!", duration=trick_pause * 1.2 if not skip_anims else 0, reader=reader
-                    )
-                    display(display_state, None)
-
-            if not skip_anims and interruptible_sleep(trick_pause, reader):
-                skip_anims = True
-
-        # 3b. If first trick completed, announce sequences/carres
-        if len(display_state.current_trick) == 4 and len(current.completed_tricks) == 0:
-            for decl in current.declarations:
-                if decl.kind in ("sequence", "carre"):
-                    msg = f"{decl.seat.name}: {decl.kind.upper()}"
-                    if decl.kind == "sequence":
-                        # Sequence length (3=tierce, 4=quarte, 5=quinte)
-                        seq_names = {3: "Tierce", 4: "Quarte", 5: "Quinte"}
-                        # Safely access length
-                        length = 0
-                        if isinstance(decl.detail, Sequence):
-                            length = decl.detail.length
-                        name = seq_names.get(length, "Sequence")
-                        msg = f"{decl.seat.name}: {name}"
-
-                    announce(
-                        msg, duration=trick_pause * 0.8 if not skip_anims else 0, reader=reader
-                    )
-                    display(display_state, None)
-
-        # 4. Transition to next state
-        history.append(current)
-        a11y.announce_play(current.turn, card)
-        prior_completed = len(current.completed_tricks)
-        current = play_card(current, card)
-        # If a trick just closed, emit a11y hint for the winner. The pts use
-        # the canonical scoring helper so boss zero-rank flags (Le Sauvage,
-        # L'Iconoclaste, Le Roi Mort, Les Dix Maudits, Les Clubs Bannis)
-        # are honoured — the screen-reader hears the same number the HUD
-        # eventually shows.
-        if (
-            len(current.completed_tricks) > prior_completed
-            and current.last_trick_winner is not None
-        ):
-            from .scoring import trick_card_points as _trick_pts
-            pts = _trick_pts(current, current.completed_tricks[-1])
-            a11y.announce_trick_won(current.last_trick_winner, pts)
-
-        if current.announced:
-            # 4.8.0 / C5: Belote / Rebelote get a dramatic 4-row centered
-            # stinger; other announcements (none today, but the path is
-            # generic) keep the slim one-line `announce`.
-            msg = current.announced
-            dur = max(0.5, trick_pause * 0.6) if not skip_anims else 0
-            if msg in ("Belote!", "Rebelote!"):
-                belote_stinger(msg, duration=dur, reader=reader)
-            else:
-                announce(msg, duration=dur, reader=reader)
-            current = clear_announced(current)
-            display(current, None)
-
-    return current
+    """Run the play phase (all 8 tricks). Returns None if the user quits,
+    'UNDO' if requested."""
+    policy = ClassicRound(reader, ai_players, ai_delay, trick_pause, history, replay_decisions)
+    try:
+        return play_tricks(state, policy)
+    except RoundInterrupted as stop:
+        return None if stop.reason == "QUIT" else "UNDO"
 
 
 def show_hand_preview(state: GameState, reader: KeyReader) -> None:
@@ -458,58 +470,28 @@ def run_round(
     # — toggling mid-round has no effect, and we avoid touching os.environ in
     # the per-card hot path. None disables capture entirely.
     replay_decisions: list[tuple[GameState, Card]] | None = (
-        [] if os.environ.get("BELOTE_REPLAY") else None
+        [] if settings.current().replay_analysis_on() else None
     )
 
     # Pre-game hand preview
     show_hand_preview(current, reader)
 
+    policy = ClassicRound(
+        reader, ai_players, ai_delay, trick_pause, history_stack, replay_decisions
+    )
     while True:
-        # Bidding Phase
-        res_bid = run_bidding(current, reader, ai_players, ai_delay, history_stack)
-        if res_bid is None:
-            return None
-        if res_bid == "UNDO":
+        policy.skip_anims = False
+        try:
+            current = play_round(current, policy)
+        except RoundInterrupted as stop:
+            if stop.reason == "QUIT":
+                return None
             # `legal_cards` memoizes on hand/trick tuple ids. After we restore
             # an earlier GameState, those tuples may again be live — flush so
             # we never serve a stale cached entry from before the undo.
             clear_legal_cards_cache()
-            restored = _undo_pop_to_south(history_stack, stack_base)
-            if restored is not None:
-                current = restored
-                announce("↶ Undo", duration=0.8, reader=reader)
-                display(current, None)
-                continue
-            # Nothing left to undo in this round — restart with a fresh deal
-            del history_stack[stack_base:]
-            current = start_round(state, rng)
-            announce("↶ Undo — fresh deal", duration=0.8, reader=reader)
-            continue
-        current = res_bid  # type: ignore[assignment]
-
-        if current.phase == Phase.DEAL:  # All passed
-            announce("All passed - Reshuffling!", duration=round_pause * 0.5, reader=reader)
-            return current
-
-        # 4.6.5 a11y: announce the locked contract at bid→play transition.
-        # Without this, screen-reader users heard card plays and trick winners
-        # but never the trump / Tout Atout / Sans Atout context. Classic
-        # Belote has no coinche concept — that lives in BelAtro's
-        # `round_driver` only, so coinche_level defaults to 0 here.
-        if current.taker is not None:
-            a11y.announce_contract(current.taker, _contract_word(current) or "no trump")
-
-        # Play Phase
-        res_play = run_play(
-            current, reader, ai_players, ai_delay, trick_pause, history_stack,
-            replay_decisions=replay_decisions,
-        )
-        if res_play is None:
-            return None
-        if res_play == "UNDO":
-            clear_legal_cards_cache()
             # Drop captured decisions so the replay matches the play that
-            # actually finished the round, not the rewound branch.
+            # actually finishes the round, not the rewound branch.
             if replay_decisions is not None:
                 replay_decisions.clear()
             restored = _undo_pop_to_south(history_stack, stack_base)
@@ -517,14 +499,16 @@ def run_round(
                 current = restored
                 announce("↶ Undo", duration=0.8, reader=reader)
                 display(current, None)
-                # If we undo into BIDDING, we continue the outer loop
                 continue
             # Nothing left to undo in this round — restart with a fresh deal
             del history_stack[stack_base:]
             current = start_round(state, rng)
             announce("↶ Undo — fresh deal", duration=0.8, reader=reader)
             continue
-        current = res_play  # type: ignore[assignment]
+
+        if current.phase == Phase.DEAL:  # All passed
+            announce("All passed - Reshuffling!", duration=round_pause * 0.5, reader=reader)
+            return current
 
         # Scoring Phase
         if current.phase == Phase.SCORING:
@@ -572,10 +556,12 @@ def run_round(
 
             # Update global stats
             trump_sym = current.trump.symbol if current.trump else None
-            update_stats_round(
+            unlocked = update_stats_round(
                 _is_player_capot(breakdown),
                 breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total,
                 trump_sym,
             )
+            for achievement in unlocked:
+                achievement_toast(achievement, reader)
 
             return apply_round_score(current, breakdown)

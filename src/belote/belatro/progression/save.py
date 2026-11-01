@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ...paths import data_dir
+
 
 class _NewerSchemaError(ValueError):
     """Save file was written by a newer build (schema_version too high)."""
@@ -62,12 +64,7 @@ class SaveManager:
 
     def _get_save_path(self, app_name: str) -> Path:
         """Resolve XDG-compliant data path."""
-        if os.name == "nt":
-            base = Path(os.environ.get("APPDATA", "."))
-        else:
-            xdg = os.environ.get("XDG_DATA_HOME", "")
-            base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-        path = base / app_name
+        path = data_dir(app_name)
         path.mkdir(parents=True, exist_ok=True)
         return path
 

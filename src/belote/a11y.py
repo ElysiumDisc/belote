@@ -55,6 +55,17 @@ def is_enabled() -> bool:
     return _ENABLED
 
 
+def set_enabled(on: bool) -> None:
+    """Switch screen-reader hints on/off (the Settings screen)."""
+    global _ENABLED, _sink
+    if on == _ENABLED:
+        return
+    _ENABLED = on
+    if _sink is not None and _sink is not sys.stderr:
+        _sink.close()
+    _sink = None
+
+
 def _refresh_enabled_from_env() -> None:
     """Re-read BELOTE_A11Y from the live environment. Public for tests."""
     global _ENABLED, _sink

@@ -4,7 +4,7 @@ import random
 from collections import Counter
 from enum import Enum
 
-from .deck import _NONTRUMP_ORDER, Card, Contract, Rank, Suit, trick_rank
+from .deck import _NONTRUMP_ORDER, Card, Contract, Rank, Suit, is_trump_card, trick_rank
 from .game import (
     SANS_ATOUT_BID,
     BidValue,
@@ -70,7 +70,7 @@ class AIPlayer:
         # unseeded Random() for legacy callers that construct an AIPlayer
         # directly (e.g. test fixtures).
         self._rng = rng if rng is not None else random.Random()
-        # Set per decide_card() call from state.boss_modifiers.seven_eight_trump.
+        # Set per decide_card() call from state.variants.seven_eight_trump.
         # All ranking helpers in this class read it via self._se.
         self._se = False
 
@@ -140,7 +140,7 @@ class AIPlayer:
         # set at round start in current code, but the assumption is
         # defensive — a future boss or voucher that toggles visibility
         # mid-round would otherwise see stale cached partner cards.
-        hide = bool(state.boss_modifiers.hide_partner_hand)
+        hide = bool(state.variants.hide_partner_hand)
         partner_key: tuple[int, int, bool] = (completed_count, current_count, hide)
         if self.memory.last_partner_hand_key != partner_key:
             p = partner(self.seat)
@@ -199,9 +199,9 @@ class AIPlayer:
         or None (pass). TA and SA are only considered in round 2; round 1 is
         "take the up-card suit at the standard contract" only.
         """
-        self._se = state.boss_modifiers.seven_eight_trump
+        self._se = state.variants.seven_eight_trump
         # Boss: La Solitude (Partner forced pass)
-        if state.boss_modifiers.partner_forced_pass and self.seat == partner(Seat.SOUTH):
+        if state.variants.partner_forced_pass and self.seat == partner(Seat.SOUTH):
             return None
 
         hand = state.hand_of(self.seat)
@@ -329,7 +329,7 @@ class AIPlayer:
         jack-heavy hand under Le Sauvage even though those jacks would score
         zero in actual play.
         """
-        bm = state.boss_modifiers
+        bm = state.variants
         ta_pts = sum(card_points_with_modifiers(c, Suit.TOUT_ATOUT, bm) for c in hand)
         # The Jack-count bonus is the AI's TA strength signal — drop it if
         # jacks are suppressed.
@@ -364,17 +364,13 @@ class AIPlayer:
         # see deck.py::trick_rank and ::card_points). Every ranking / point
         # read in this method must thread `_se` through or the AI under-
         # values trump cards that should beat them.
-        self._se = state.boss_modifiers.seven_eight_trump
+        self._se = state.variants.seven_eight_trump
 
         # Boss: L'Agent Double (Partner sabotages on 3 random tricks)
-        if state.boss_modifiers.agent_double_active and self.seat == partner(Seat.SOUTH):
+        if state.variants.agent_double_active and self.seat == partner(Seat.SOUTH):
             current_trick = len(state.completed_tricks) + 1
-            raw_tricks = state._joker_state.get("agent_double_tricks", frozenset())
-            sabotage_tricks: frozenset[int] = (
-                raw_tricks if isinstance(raw_tricks, frozenset) else frozenset()
-            )
             trump = state.trump
-            if current_trick in sabotage_tricks and trump is not None:
+            if current_trick in state.variants.sabotage_tricks and trump is not None:
                 return min(legal, key=lambda c: trick_rank(c, trump, self._se))
 
         if not hand:
@@ -459,7 +455,7 @@ class AIPlayer:
         # aces_zero, jacks_zero, tens_zero, ban_clubs). Pre-4.1.1 medium AI used
         # raw card_points and would "preserve" a K of trump under kings_zero as
         # if it still scored 20 — picking it as the highest-value card to keep.
-        bm = state.boss_modifiers
+        bm = state.variants
 
         # Update void inferences
         self._update_voids(state)
@@ -588,7 +584,7 @@ class AIPlayer:
             if c.suit in suit_cards:
                 suit_cards[c.suit].append(c)
 
-        bm = state.boss_modifiers
+        bm = state.variants
         # Honors are J/9/A; drop a rank from the count if it's zeroed by a
         # boss flag (3.9.3 — honor-counting was previously boss-blind).
         # 4.6.4: hoisted out of the per-suit loop. The closure was being
@@ -716,7 +712,7 @@ class AIPlayer:
             if lead_suit_for_ranks is not None and c.suit != lead_suit_for_ranks:
                 if is_sa or trump is Suit.TOUT_ATOUT:
                     return -1
-                if c.suit != trump and not (se and c.rank in (Rank.SEVEN, Rank.EIGHT)):
+                if not is_trump_card(c, trump, se):
                     return -1
             return _NONTRUMP_ORDER[c.rank] if is_sa else trick_rank(c, trump, se)
 
@@ -852,7 +848,7 @@ class AIPlayer:
         # (kings_zero / aces_zero / jacks_zero / tens_zero / ban_clubs).
         # Propagates to _score_discarding_strategy / _score_winning_strategy
         # via the `points` parameter and to _score_leading_strategy via `bm`.
-        bm = state.boss_modifiers
+        bm = state.variants
         points = card_points_with_modifiers(card, trump, bm)
         # Small per-card tiebreaker: when win/loss heuristics are otherwise
         # equal, slightly bias toward playing the higher-value card. The
@@ -1124,7 +1120,7 @@ class AIPlayer:
         # Le Républicain (or any deck/voucher that sets the flag): 7s and 8s
         # are wild and may be played on any suit, so an off-suit 7/8 doesn't
         # prove void in lead suit.
-        wild_active = bool(state._joker_state.get("republicain_wild"))
+        wild_active = state.variants.wild_seven_eight
 
         # 1. Process new completed tricks
         trump = state.trump

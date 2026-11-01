@@ -1,10 +1,10 @@
 """4.6.2 — RoundLedger.
 
 A mutable side-channel that lives for one BelAtro round and replaces the
-per-event `dataclasses.replace(GameState, ...)` pattern in
+per-event `dataclasses.replace(BelatroState, ...)` pattern in
 `ScoreAccumulator.update_state`.
 
-Frozen-GameState contract still holds at round boundaries: `seal_round()` does
+Frozen-BelatroState contract still holds at round boundaries: `seal_round()` does
 the single `replace()` that produces the final canonical state at round end.
 
 Why this design:
@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from belote.game import GameState
+from .state import BelatroState
 
 
 @dataclass(slots=True)
@@ -55,8 +55,8 @@ class RoundLedger:
     # updates.
     joker_state: dict[str, Any] = field(default_factory=dict)
 
-    def seal_round(self, state: GameState) -> GameState:
-        """Produce the canonical sealed GameState for the end of the round.
+    def seal_round(self, state: BelatroState) -> BelatroState:
+        """Produce the canonical sealed BelatroState for the end of the round.
 
         Single `replace()` that stamps the ledger's chips/mult/money into the
         frozen state. `joker_state` is already live on `state` (shared dict)

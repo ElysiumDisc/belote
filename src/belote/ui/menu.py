@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 
 from ..ansi import (
     BOLD,
@@ -8,12 +9,15 @@ from ..ansi import (
     RESET,
     REVERSE,
     ansi_center,
+    clear_below,
     clear_screen,
+    clear_to_eol,
     gold_fg,
     hide_cursor,
     light_gray_fg,
     menu_art_fg,
     menu_border_fg,
+    move,
     white_fg,
 )
 from ..game import GameState, Seat
@@ -218,58 +222,45 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
                 return current_diffs
 
 
-def show_main_menu(
-    reader: KeyReader, diffs_map: dict[Seat, str], target: int, speed: str
-) -> tuple[str, dict[Seat, str], int, str]:
-    """Display the main menu and return (choice, diffs_map, target, speed)."""
-    curr_target = target
-    curr_speed = speed
-    curr_diffs = diffs_map
+CORE_MENU_ENTRIES: tuple[str, ...] = ("Start Game", "Settings", "Rules & History", "Statistics", "Quit")
 
+
+def show_main_menu(reader: KeyReader, modes: Sequence[str] = ()) -> str:
+    """Display the main menu and return the chosen entry's label.
+
+    `modes` are extra game modes listed first (the entry point passes the
+    expansion's modes, e.g. BelAtro); the core entries follow. AI / target /
+    speed / theme live in the Settings screen.
+    """
+    options = [*modes, *CORE_MENU_ENTRIES]
     sel = 0
-    targs = [500, 1000, 1500, 2000]
-    spds = ["slow", "normal", "fast", "instant"]
     frame = 0
 
     while True:
-        # Determine display difficulty
-        unique_diffs = set(curr_diffs.values())
-        diff_display = next(iter(unique_diffs)).capitalize() if len(unique_diffs) == 1 else "Mixed"
-
-        options_labels = [
-            "BelAtro",
-            "Start Game",
-            f"AI:     < {diff_display} >",
-            f"Target: < {curr_target} >",
-            f"Speed:  < {curr_speed.capitalize()} >",
-            f"Theme:  < {theme_manager.get_current().name} >",
-            "Rules & History",
-            "Statistics",
-            "Quit",
-        ]
-
         term_w, term_h = get_term_size()
-        out = clear_screen() + hide_cursor()
-
-        # Build the art containing the menu
-        all_lines = _render_main_menu_art(sel, options_labels, frame, term_h)
+        # Repaint in place (home + per-row clear-to-EOL + erase-below) rather
+        # than clear_screen(): this loop redraws every 300ms to animate the
+        # steam, and a full-screen clear on each tick flickers on most
+        # terminals. Every row is fully overwritten, so no debris survives.
+        out = move(1, 1) + hide_cursor()
+        all_lines = _render_main_menu_art(sel, options, frame, term_h)
 
         # Center the entire block vertically and horizontally
         v_pad = max(0, (term_h - len(all_lines) - 2) // 2)
-
         lines = [""] * v_pad
         for line in all_lines:
             lines.append(ansi_center(line, term_w))
-
         lines.append("")
         lines.append(
             ansi_center(
-                f"{light_gray_fg()}↑/↓: Navigate  ←/→: Change Settings  Enter: Confirm/Config  Q: Quit{RESET}",
+                f"{light_gray_fg()}↑/↓: Navigate  Enter: Select  T: Theme  ?: Help  Q: Quit{RESET}",
                 term_w,
             )
         )
 
-        sys.stdout.write(out + "\r\n".join(lines))
+        sys.stdout.write(
+            out + "\r\n".join(line + clear_to_eol() for line in lines) + clear_below()
+        )
         sys.stdout.flush()
 
         event = reader.read_timeout(0.3)
@@ -278,72 +269,20 @@ def show_main_menu(
             continue
 
         match event.key:
-            case Key.QUIT:
+            case Key.QUIT | Key.EOF:
                 invalidate_diff()
-                return "Quit", curr_diffs, curr_target, curr_speed
+                return "Quit"
             case Key.HELP:
                 show_help(reader)
             case Key.THEME:
-                themes_list = list(THEMES.keys())
-                curr_theme = theme_manager.current_name
-                new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
-                theme_manager.set_current(themes_list[new_idx])
+                theme_manager.cycle()
             case Key.UP:
-                sel = (sel - 1) % len(options_labels)
+                sel = (sel - 1) % len(options)
             case Key.DOWN:
-                sel = (sel + 1) % len(options_labels)
-            case Key.LEFT | Key.RIGHT:
-                delta = 1 if event.key == Key.RIGHT else -1
-                if sel == 2:
-                    # Change all AI difficulties at once
-                    diffs = ["easy", "medium", "hard"]
-                    # If mixed, start from medium
-                    base_diff = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "medium"
-                    new_idx = (diffs.index(base_diff) + delta) % len(diffs)
-                    new_diff = diffs[new_idx]
-                    for s in [Seat.EAST, Seat.NORTH, Seat.WEST]:
-                        curr_diffs[s] = new_diff
-                elif sel == 3:
-                    curr_target = _step_target(targs, curr_target, delta)
-                elif sel == 4:
-                    curr_speed = spds[(spds.index(curr_speed) + delta) % len(spds)]
-                elif sel == 5:
-                    # Cycle theme with left/right
-                    themes_list = list(THEMES.keys())
-                    curr_theme = theme_manager.current_name
-                    new_idx = (themes_list.index(curr_theme) + delta) % len(themes_list)
-                    theme_manager.set_current(themes_list[new_idx])
+                sel = (sel + 1) % len(options)
             case Key.ENTER:
-                choice = [
-                    "BelAtro",
-                    "Start Game",
-                    "AI Config",
-                    "Target Score",
-                    "Speed",
-                    "Theme",
-                    "Rules & History",
-                    "Statistics",
-                    "Quit",
-                ][sel]
-                if choice == "AI Config":
-                    curr_diffs = show_ai_config(reader, curr_diffs)
-                    continue
-                if choice == "Theme":
-                    show_theme_selector(reader)
-                    continue
-                if choice in ("BelAtro", "Start Game", "Quit", "Rules & History", "Statistics"):
-                    invalidate_diff()
-                    return choice, curr_diffs, curr_target, curr_speed
-                # For settings, Enter can also toggle forward
-                if sel == 3:
-                    curr_target = _step_target(targs, curr_target, 1)
-                elif sel == 4:
-                    curr_speed = spds[(spds.index(curr_speed) + 1) % len(spds)]
-                elif sel == 5:
-                    themes_list = list(THEMES.keys())
-                    curr_theme = theme_manager.current_name
-                    new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
-                    theme_manager.set_current(themes_list[new_idx])
+                invalidate_diff()
+                return options[sel]
 
 
 def _step_target(targs: list[int], curr: int, delta: int) -> int:

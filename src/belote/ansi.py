@@ -236,6 +236,11 @@ def clear_screen() -> str:
     return "\x1b[H\x1b[2J"
 
 
+def clear_below() -> str:
+    """Erase from the cursor to the end of the screen."""
+    return "\x1b[J"
+
+
 def clear_line() -> str:
     return "\x1b[2K"
 
@@ -258,18 +263,6 @@ def alt_screen_on() -> str:
 
 def alt_screen_off() -> str:
     return "\x1b[?1049l"
-
-
-def save_cursor() -> str:
-    return "\x1b7"
-
-
-def restore_cursor() -> str:
-    return "\x1b8"
-
-
-def scroll_region(top: int, bottom: int) -> str:
-    return f"\x1b[{top};{bottom}r"
 
 
 # Palette accessors. Read precomputed escape strings from the active palette

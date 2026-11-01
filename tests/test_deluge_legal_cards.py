@@ -12,7 +12,8 @@ in turn tripped `AIPlayer.decide_card`'s empty-legal assertion.
 from __future__ import annotations
 
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard, legal_cards
+from belote.game import GameState, Phase, Seat, TrickCard, legal_cards
+from belote.variants import RuleVariants
 
 
 def _state(hand: tuple[Card, ...], lead: Card) -> GameState:
@@ -24,7 +25,7 @@ def _state(hand: tuple[Card, ...], lead: Card) -> GameState:
         contract="hearts",
         taker=Seat.WEST,
         current_trick=(TrickCard(Seat.WEST, lead),),
-        boss_modifiers=BossModifiers(seven_eight_trump=True),
+        variants=RuleVariants(seven_eight_trump=True),
     )
 
 

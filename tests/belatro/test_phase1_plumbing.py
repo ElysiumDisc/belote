@@ -4,6 +4,7 @@ new BelAtroRun fields, BeloteAnnouncedEvent emission."""
 from __future__ import annotations
 
 from belote.belatro.core.run_state import BelAtroRun
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import BidMadeEvent, RoundEndEvent
 from belote.belatro.items.base import Joker, Planet, Rarity, Tarot, Voucher
 from belote.deck import CARD_SUITS, Card, Rank, Suit, card_points, make_deck, trick_rank
@@ -234,10 +235,9 @@ def test_joker_state_alias_survives_post_trigger_mutations() -> None:
     path sees it.
     """
     from belote.belatro.core.scoring import ScoreAccumulator
-    from belote.game import GameState
 
     acc = ScoreAccumulator()
-    base = GameState(hands=((), (), (), ()))
+    base = BelatroState(hands=((), (), (), ()))
     state = acc.trigger_round_start(base)
 
     # Sanity: state._joker_state IS the ledger's dict (alias established).

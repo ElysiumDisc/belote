@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import signal
 import sys
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Final
 
@@ -44,19 +46,11 @@ from ..game import (
     GameState,
     Phase,
     Seat,
+    legal_bids,
     legal_cards,
 )
 from ..themes import theme_manager
 from .layout import STANDARD, LayoutPreset, choose_layout, vcenter_lines
-
-# ── Backward-compat: the legacy module-level constants are now derived from the
-# STANDARD preset for any code that still imports them directly. New rendering
-# code receives a `layout: LayoutPreset` argument and reads dims from there.
-CARD_W = STANDARD.card_w
-CARD_H = STANDARD.card_h
-CARD_GAP = STANDARD.card_gap
-SIDE_COL_W = STANDARD.side_col_w
-
 
 # Tracks the (term_w, term_h, layout.name) of the previous render so we can
 # clear the screen when the layout flavour changes (avoids stale artifacts
@@ -139,6 +133,23 @@ def _card_symbol(card: Card) -> str:
     return f"{card.rank.value}{suit_str}"
 
 
+# Centre art for the full-size (card_h >= 7) face, "{s}" = suit glyph.
+# Face cards + Ace: (utf8 top, ascii top, middle, utf8 bottom, ascii bottom).
+_FACE_ART: dict[Rank, tuple[str, str, str, str, str]] = {
+    Rank.JACK: ("╭━┳━╮", " ***  ", "{s}J{s}", "╰─┃─╯", " -|-  "),  # knave with sword
+    Rank.QUEEN: ("╭◊─◊╮", " (-)  ", "{s}Q{s}", "╰─♥─╯", " -v-  "),  # jewelled headdress
+    Rank.KING: ("╭┻━┻╮", " /=\\  ", "{s}K{s}", "╰─┴─╯", " ---  "),  # crown
+    Rank.ACE: ("╭─◆─╮", "*-+-*", " {s}A{s} ", "╰─◆─╯", "*-+-*"),  # wreath
+}
+# Pip cards: three rows of suit pips in a recognisable pattern.
+_PIP_ART: dict[Rank, tuple[str, str, str]] = {
+    Rank.SEVEN: ("{s}   {s}", "  {s}  ", "{s}   {s}"),
+    Rank.EIGHT: ("{s}   {s}", "{s}   {s}", "{s}   {s}"),
+    Rank.NINE: ("{s} {s} {s}", "{s}   {s}", "{s} {s} {s}"),
+    Rank.TEN: ("{s} {s} {s}", "{s} {s} {s}", "{s}   {s}"),
+}
+
+
 @lru_cache(maxsize=8192)
 def _card_face_internal(
     card: Card,
@@ -200,69 +211,16 @@ def _card_face_internal(
     # Standard / spacious: room for 3-row centre art between the index corners.
     # Compact (card_h <= 5): just index corners and a single suit row.
     if card_h >= 7:
-        art_top = " " * inner_w
-        art_mid = " " * inner_w
-        art_bot = " " * inner_w
-
-        if card.rank == Rank.JACK:
-            # Knave with sword.
-            art_top = ("╭━┳━╮" if has_utf8 else " ***  ").center(inner_w)
-            art_mid = f"{suit_sym}J{suit_sym}".center(inner_w)
-            art_bot = ("╰─┃─╯" if has_utf8 else " -|-  ").center(inner_w)
-        elif card.rank == Rank.QUEEN:
-            # Queen with jewelled headdress.
-            art_top = ("╭◊─◊╮" if has_utf8 else " (-)  ").center(inner_w)
-            art_mid = f"{suit_sym}Q{suit_sym}".center(inner_w)
-            art_bot = ("╰─♥─╯" if has_utf8 else " -v-  ").center(inner_w)
-        elif card.rank == Rank.KING:
-            # King with crown.
-            art_top = ("╭┻━┻╮" if has_utf8 else " /=\\  ").center(inner_w)
-            art_mid = f"{suit_sym}K{suit_sym}".center(inner_w)
-            art_bot = ("╰─┴─╯" if has_utf8 else " ---  ").center(inner_w)
-        elif card.rank == Rank.ACE:
-            # Ace: decorative wreath around the suit.
-            art_top = ("╭─◆─╮" if has_utf8 else "*-+-*").center(inner_w)
-            art_mid = f" {suit_sym}A{suit_sym} ".center(inner_w)
-            art_bot = ("╰─◆─╯" if has_utf8 else "*-+-*").center(inner_w)
+        face = _FACE_ART.get(card.rank)
+        if face is not None:
+            utf_top, ascii_top, mid, utf_bot, ascii_bot = face
+            raw = (utf_top if has_utf8 else ascii_top, mid, utf_bot if has_utf8 else ascii_bot)
         else:
-            # Pip cards (7-10): arrange suit pips in a recognisable pattern.
-            pip = suit_sym if has_utf8 else card.suit.name[0]
-            if card.rank == Rank.SEVEN:
-                top_raw, mid_raw, bot_raw = (
-                    f"{pip}   {pip}",
-                    f"  {pip}  ",
-                    f"{pip}   {pip}",
-                )
-            elif card.rank == Rank.EIGHT:
-                top_raw, mid_raw, bot_raw = (
-                    f"{pip}   {pip}",
-                    f"{pip}   {pip}",
-                    f"{pip}   {pip}",
-                )
-            elif card.rank == Rank.NINE:
-                top_raw, mid_raw, bot_raw = (
-                    f"{pip} {pip} {pip}",
-                    f"{pip}   {pip}",
-                    f"{pip} {pip} {pip}",
-                )
-            elif card.rank == Rank.TEN:
-                top_raw, mid_raw, bot_raw = (
-                    f"{pip} {pip} {pip}",
-                    f"{pip} {pip} {pip}",
-                    f"{pip}   {pip}",
-                )
-            else:
-                top_raw = ""
-                mid_raw = pip
-                bot_raw = ""
-            art_top = top_raw.center(inner_w)
-            art_mid = mid_raw.center(inner_w)
-            art_bot = bot_raw.center(inner_w)
-
-        # Truncate art rows to inner_w (handles card_w slightly different from 9).
-        art_top = art_top[:inner_w].ljust(inner_w)
-        art_mid = art_mid[:inner_w].ljust(inner_w)
-        art_bot = art_bot[:inner_w].ljust(inner_w)
+            raw = _PIP_ART.get(card.rank, ("", "{s}", ""))
+        # Center, then truncate/pad to inner_w (handles card_w other than 9).
+        art_top, art_mid, art_bot = (
+            r.replace("{s}", suit_sym).center(inner_w)[:inner_w].ljust(inner_w) for r in raw
+        )
 
         idx_pad = max(0, inner_w - index_w)
         rows = [
@@ -1016,7 +974,7 @@ def _build_hud(
     `team_scores_override` lets the score-roll animation in announce.py paint
     intermediate frames without allocating a fresh frozen GameState per step.
     """
-    if state.boss_modifiers.hide_hud:
+    if state.variants.hide_hud:
         left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
         mid = f"{DIM} [HUD HIDDEN BY BOSS] {RESET}"
         if layout.hud_style == "compact":
@@ -1093,6 +1051,16 @@ def _fit_hud(bar: str, theme_label: str, term_w: int, *, fallback: str | None = 
     return ansi_ljust(clamped, term_w)
 
 
+# Optional one-line hint painted above the bid selector. Expansions install a
+# provider (BelAtro shows the partner's bidding tendency); classic has none.
+_bid_hint_provider: Callable[[GameState], str | None] | None = None
+
+
+def set_bid_hint_provider(provider: Callable[[GameState], str | None] | None) -> None:
+    global _bid_hint_provider
+    _bid_hint_provider = provider
+
+
 def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -> list[str]:
     """Build the in-frame bidding prompt: optional tendency line, then the
     selector (Round 1: inline highlighted Take/Pass; Round 2: boxed grid).
@@ -1107,23 +1075,20 @@ def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -
         assert up_card is not None  # guaranteed by Phase.BIDDING + round 1
         labels = [f"Take {up_card.suit.symbol}", "Pass"]
     else:
-        all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
-        up_card = state.up_card
-        assert up_card is not None
-        other_suits = [s for s in all_suits if s != up_card.suit]
-        labels = [s.symbol for s in other_suits] + ["TA", "SA", "Pass"]
-        round2_suits: list[Suit | str | None] = [
-            *other_suits,
-            Suit.TOUT_ATOUT,
-            SANS_ATOUT_BID,
-            None,
+        round2_suits = legal_bids(state)
+        labels = [
+            "Pass" if b is None
+            else "TA" if b == Suit.TOUT_ATOUT
+            else "SA" if b == SANS_ATOUT_BID
+            else b.symbol
+            for b in round2_suits
         ]
 
     lines: list[str] = []
 
-    tendency = state._joker_state.get("partner_bid_tendency_text")
-    if isinstance(tendency, str) and tendency:
-        lines.append(ansi_center(f"{DIM}{tendency}{RESET}", term_w))
+    hint = _bid_hint_provider(state) if _bid_hint_provider is not None else None
+    if hint:
+        lines.append(ansi_center(f"{DIM}{hint}{RESET}", term_w))
 
     if state.bidding_round == 2:
         inner_w = 60
@@ -1344,6 +1309,17 @@ def display_hud(
     sys.stdout.flush()
 
 
+# Diff-based emit toggle. Resolved once from the env at import (it used to be
+# re-read on every frame); the Settings screen flips it via set_diff_enabled.
+_DIFF_ENABLED: bool = os.environ.get("BELOTE_NO_DIFF") != "1"
+
+
+def set_diff_enabled(on: bool) -> None:
+    global _DIFF_ENABLED, _last_emitted_lines
+    _DIFF_ENABLED = on
+    _last_emitted_lines = None  # next frame is a full redraw either way
+
+
 def display(
     state: GameState,
     selection: int | None = None,
@@ -1362,14 +1338,12 @@ def display(
     Bypass via:
     * `force=True` — caller knows the screen is dirty (post-clear, after
       menu/scene transition, on layout boundaries).
-    * env var `BELOTE_NO_DIFF=1` — escape hatch for debugging artifact
-      complaints. Mirrors the existing `NO_COLOR` style.
+    * the "Fast redraw" setting off, or env var `BELOTE_NO_DIFF=1` — escape
+      hatch for debugging artifact complaints (read once, not per frame).
 
     Layout/theme changes invalidate the baseline automatically (render()
     + the theme_manager callback both set `_last_emitted_lines = None`).
     """
-    import os as _os
-
     # 4.1.0 (C6): pre-clear the side-channel so an exception escaping render()
     # can't leave a stale tuple for a later display() call to diff against.
     global _pending_rendered_lines, _last_emitted_lines
@@ -1382,7 +1356,7 @@ def display(
         and _last_emitted_lines is not None
         and _pending_rendered_lines is not None
         and len(_pending_rendered_lines) == len(_last_emitted_lines)
-        and _os.environ.get("BELOTE_NO_DIFF") != "1"
+        and _DIFF_ENABLED
     )
 
     if not use_diff:

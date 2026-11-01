@@ -95,7 +95,7 @@ def test_lead_bias_prefers_signaled_suit() -> None:
         Card(Suit.DIAMONDS, Rank.EIGHT),  # signaled — should win
         Card(Suit.CLUBS, Rank.SEVEN),
     )
-    # Build a minimal state — _hard_lead reads state.turn / boss_modifiers
+    # Build a minimal state — _hard_lead reads state.turn / variants
     # via memory, none of which need to be populated for this branch.
     from belote.game import new_game, start_round
     s = new_game()

@@ -4,11 +4,17 @@ import random
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from functools import lru_cache
-from typing import Final, Literal
+from typing import Final, Literal, TypeVar
 
-from .deck import Card, Contract, Rank, Suit, make_deck, trick_rank
+from .config import GLOBAL_CONFIG
+from .deck import Card, Contract, Rank, Suit, is_trump_card, make_deck, trick_rank
 from .deck import deal as deal_cards_
 from .deck import shuffle as shuffle_deck_
+from .variants import RuleVariants
+
+# Transitions are generic over GameState subclasses: `replace()` keeps the
+# concrete type, so an expansion's state subclass round-trips unchanged.
+S = TypeVar("S", bound="GameState")
 
 # Sentinel for the Sans Atout contract at the bidding API boundary.
 # `Suit.TOUT_ATOUT` already exists for Tout Atout. Sans Atout has no card-suit
@@ -46,9 +52,6 @@ class Seat(Enum):
 
     def next_seat(self) -> Seat:
         return Seat((self.value + 1) % 4)
-
-    def prev_seat(self) -> Seat:
-        return Seat((self.value - 1) % 4)
 
     @property
     def name(self) -> str:
@@ -160,33 +163,6 @@ class RoundScore:
 
 
 @dataclass(frozen=True, slots=True)
-class BossModifiers:
-    """Boss-modifier flags injected by drive_round when a boss blind is active."""
-    no_belote: bool = False
-    dynamic_trump: bool = False
-    no_consecutive_team_wins: bool = False
-    seven_eight_trump: bool = False
-    invert_scoring: bool = False
-    kings_zero: bool = False
-    auto_coinche: bool = False
-    queen_spades_penalty: bool = False
-    hide_hud: bool = False
-    ban_clubs: bool = False
-    no_dix_de_der: bool = False
-    tens_zero: bool = False
-    hide_partner_hand: bool = False
-    agent_double_active: bool = False
-    agent_double_late_only: bool = False
-    partner_forced_pass: bool = False
-    lock_trust_zero: bool = False
-    separate_scoring: bool = False
-    # 3.0.0: three new boss flags (Le Sauvage, L'Iconoclaste, Le Mime).
-    aces_zero: bool = False
-    jacks_zero: bool = False
-    declarations_zero: bool = False
-
-
-@dataclass(frozen=True, slots=True)
 class GameState:
     hands: tuple[tuple[Card, ...], ...]
     initial_hands: tuple[tuple[Card, ...], ...] = field(default_factory=lambda: ((), (), (), ()))
@@ -242,34 +218,15 @@ class GameState:
     # to the winning team's credit in `scoring.py::apply_round_score`.
     coinche_level: int = 0
 
-    boss_modifiers: BossModifiers = field(default_factory=BossModifiers)
+    variants: RuleVariants = field(default_factory=RuleVariants)
 
-    # Same mutable-dict-inside-frozen contract as `belote_holders`. BelAtro
-    # jokers and the round driver write per-round flags here. Values must be
-    # scalars (bool/int/str/frozenset) — see tests/belatro/test_phase1_plumbing.py
-    # `test_joker_state_only_contains_scalar_values`.
-    #
-    # 4.8.2 (B4 wiring note): inside a BelAtro round this dict is *aliased*
-    # to `ScoreAccumulator._ledger.joker_state` from `trigger_round_start`
-    # onward. The round driver mutates the dict IN PLACE (heist declaration,
-    # agent_double sabotage sets, etc.) to preserve the alias — `replace(
-    # state, _joker_state={...})` would shallow-copy the dict and break it,
-    # making subsequent ledger writes invisible to classic-Belote reads
-    # (ai.py, scoring.py, game.py via `state._joker_state.get(...)`).
-    # Outside the BelAtro round driver, classic callers should still rebuild
-    # via `replace()` to keep the frozen-dataclass discipline.
-    _joker_state: dict[str, object] = field(default_factory=dict)
-    _chips: int = 0
-    _mult: float = 1.0
-    _bonus_money: int = 0
+    # Expansions extend GameState by subclassing (see belatro/core/state.py).
+    # Every transition below builds the next state with `replace()`, which
+    # preserves the subclass, so extension fields ride along untouched.
     _rng: random.Random = field(default_factory=random.Random, compare=False, repr=False)
 
     def hand_of(self, seat: Seat) -> tuple[Card, ...]:
         return self.hands[seat.value]
-
-    @property
-    def current_bidder(self) -> Seat:
-        return get_bidder(self.dealer, self.bidder_index)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +234,7 @@ class GameState:
 # ---------------------------------------------------------------------------
 
 
-def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
+def reset_round_fields(state: S, **kwargs: object) -> S:
     """Return a new state with round-specific fields reset to defaults.
 
     `litige_points` is deliberately NOT reset here. The litige pool survives
@@ -301,7 +258,7 @@ def reset_round_fields(state: GameState, **kwargs: object) -> GameState:
         "belote_announcer": None,
         "belote_trump": None,
         "first_trick_done": False,
-        "boss_modifiers": BossModifiers(),
+        "variants": RuleVariants(),
         # 4.9.0 / G1: coinche state is per-round, reset to neutral.
         "coinche_level": 0,
     }
@@ -316,7 +273,7 @@ def new_game(target: int = 1000) -> GameState:
     )
 
 
-def start_round(state: GameState, rng: random.Random) -> GameState:
+def start_round(state: S, rng: random.Random) -> S:
     """Deal cards and start bidding phase."""
     deck = shuffle_deck(rng)
     initial_hands, up_card, remaining = deal_cards(deck)
@@ -359,7 +316,7 @@ def bidding_turn(state: GameState) -> Seat:
     return get_bidder(state.dealer, state.bidder_index)
 
 
-def process_bid(state: GameState, bid: BidValue) -> GameState:
+def process_bid(state: S, bid: BidValue) -> S:
     """Process a bid and return the new state."""
     return place_bid(state, bid)
 
@@ -393,7 +350,26 @@ def _distribute_remaining_cards(state: GameState, taker: Seat) -> list[list[Card
     return new_hands
 
 
-def place_bid(state: GameState, bid: BidValue) -> GameState:
+_NORMAL_SUITS: tuple[Suit, ...] = (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS)
+
+
+def legal_bids(state: GameState) -> list[BidValue]:
+    """Every bid the current bidder may make, in display order, pass last.
+
+    Round 1: take the up-card suit, or pass.
+    Round 2: any *other* normal suit, Tout Atout, Sans Atout, or pass.
+
+    Single source of truth for the bid selector (prompt + render), the
+    BelAtro joker hooks, and the partner-personality legality gate.
+    """
+    up_suit = state.up_card.suit if state.up_card is not None else None
+    if state.bidding_round == 1:
+        return [up_suit, None] if up_suit is not None else [None]
+    others: list[BidValue] = [s for s in _NORMAL_SUITS if s != up_suit]
+    return [*others, Suit.TOUT_ATOUT, SANS_ATOUT_BID, None]
+
+
+def place_bid(state: S, bid: BidValue) -> S:
     """Process a bid from the current bidder.
 
     `bid` is one of:
@@ -617,18 +593,14 @@ def _calculate_legal_cards_impl(
     # lead means following with ANY trump, not just lead-suit cards: an off-suit
     # 7/8 is a trump too. Using `c.suit == lead_suit` here would drop those and
     # wrongly report the player as void (empty legal set → crash).
-    def is_trump_card(c: Card) -> bool:
-        return c.suit == trump or (
-            seven_eight_trump and c.rank in (Rank.SEVEN, Rank.EIGHT)
-        )
+    def is_trump(c: Card) -> bool:
+        return is_trump_card(c, trump, seven_eight_trump)
 
-    is_trump_lead = (lead_suit == trump) or (
-        seven_eight_trump and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
-    )
+    is_trump_lead = is_trump(lead_card)
 
     if is_trump_lead:
         # Trump led: must follow with a trump if possible, must overtrump if possible
-        my_trumps = [c for c in hand if is_trump_card(c)]
+        my_trumps = [c for c in hand if is_trump(c)]
         if my_trumps:
             highest_in_trick = max(
                 (trick_rank(tc.card, trump, seven_eight_trump) for tc in played_cards), default=-1
@@ -659,15 +631,14 @@ def _calculate_legal_cards_impl(
                 res_cards = hand
             else:
                 # Must trump if possible
-                my_trumps = [c for c in hand if is_trump_card(c)]
+                my_trumps = [c for c in hand if is_trump(c)]
                 if my_trumps:
                     # Must trump; also must overtrump if possible
                     highest_trump_in_trick = max(
                         (
                             trick_rank(tc.card, trump, seven_eight_trump)
                             for tc in played_cards
-                            if tc.card.suit == trump
-                            or (seven_eight_trump and tc.card.rank in (Rank.SEVEN, Rank.EIGHT))
+                            if is_trump(tc.card)
                         ),
                         default=-1,
                     )
@@ -698,7 +669,7 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
     hand = state.hand_of(seat)
     hand_ids = tuple(_CARD_TO_ID[c] for c in hand)
     trick_ids = tuple((tc.seat.value, _CARD_TO_ID[tc.card]) for tc in state.current_trick)
-    se_trump = state.boss_modifiers.seven_eight_trump
+    se_trump = state.variants.seven_eight_trump
     is_sa = state.contract == Contract.SANS_ATOUT
 
     res_ids = _calculate_legal_cards_impl(
@@ -708,7 +679,7 @@ def legal_cards(state: GameState, seat: Seat) -> tuple[Card, ...]:
 
     # Le Républicain deck: 7s/8s are wild and always legal in addition to the
     # normal options. Union (preserve order, don't double up).
-    if state._joker_state.get("republicain_wild") and state.current_trick:
+    if state.variants.wild_seven_eight and state.current_trick:
         existing = set(res_cards)
         wild_extras = tuple(
             c for c in hand if c.rank in (Rank.SEVEN, Rank.EIGHT) and c not in existing
@@ -766,20 +737,22 @@ def _card_beats(
 
     # Lead card is usually the first card in the trick.
     # We need to know if the LEAD was a trump (declared or 7/8 in Deluge).
-    is_trump_card = (card.suit == trump) or (
+    # Deliberately NOT deck.is_trump_card: under Tout Atout every card is
+    # "trump", but cross-suit cards must still lose to the lead suit here.
+    card_is_trump = (card.suit == trump) or (
         seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT)
     )
-    is_best_trump = (current_best.suit == trump) or (
+    best_is_trump = (current_best.suit == trump) or (
         seven_eight_trump and current_best.rank in (Rank.SEVEN, Rank.EIGHT)
     )
 
-    if is_trump_card and not is_best_trump:
+    if card_is_trump and not best_is_trump:
         return True
-    if not is_trump_card and is_best_trump:
+    if not card_is_trump and best_is_trump:
         return False
 
     # Neither are trump (or both are trump but different suits - only possible with 7/8 deluge)
-    if is_trump_card and is_best_trump:
+    if card_is_trump and best_is_trump:
         assert trump is not None
         # Both act as trumps, compare their trick_ranks
         return trick_rank(card, trump, seven_eight_trump) > trick_rank(
@@ -812,7 +785,7 @@ def per_trick_trumps(state: GameState, trump: Suit | None, n: int) -> list[Suit 
     which is the trump in force right now. Every other mode returns `trump`
     for all tricks, exactly as before.
     """
-    if not state.boss_modifiers.dynamic_trump:
+    if not state.variants.dynamic_trump:
         return [trump] * n
     recorded = state.trick_trumps
     return [recorded[i] if i < len(recorded) else trump for i in range(n)]
@@ -838,8 +811,8 @@ def compute_trick_winners(
     8th trick) may pass an explicit sequence so the same Rupture rule applies
     to the projected final state.
     """
-    se_trump = state.boss_modifiers.seven_eight_trump
-    rupture = state.boss_modifiers.no_consecutive_team_wins
+    se_trump = state.variants.seven_eight_trump
+    rupture = state.variants.no_consecutive_team_wins
     source = state.completed_tricks if tricks is None else tricks
     winners: list[Seat | None] = []
     prev_winner: Seat | None = None
@@ -950,7 +923,7 @@ def _record_belote_announcement(
     if (
         effective_trump
         and state.belote_holders.get(effective_trump) == state.turn
-        and not state.boss_modifiers.no_belote
+        and not state.variants.no_belote
     ):
         is_k_q = (
             card.rank in (Rank.KING, Rank.QUEEN)
@@ -984,7 +957,7 @@ def _resolve_trick_winner(
     state = ctx.state
     winner = trick_winner_seat(new_trick, ctx.trump, ctx.se_trump, ctx.is_sa)
 
-    if state.boss_modifiers.no_consecutive_team_wins and state.completed_tricks:
+    if state.variants.no_consecutive_team_wins and state.completed_tricks:
         # Use the cached resolved winner (state.last_trick_winner), not the
         # raw trick_winner_seat result from completed_tricks[-1]. play_card
         # stores the *resolved* winner, so reading from state keeps the
@@ -1042,11 +1015,11 @@ def _compute_live_round_points(
         ew_pts += trick_pts
 
     # Last trick bonus (suppressed by Le Zéro Final boss).
-    if tricks_count == 8 and not state.boss_modifiers.no_dix_de_der:
+    if tricks_count == 8 and not state.variants.no_dix_de_der:
         if team_of(winner) == 0:
-            ns_pts += 10
+            ns_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
         else:
-            ew_pts += 10
+            ew_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS
     return ns_pts, ew_pts
 
 
@@ -1058,7 +1031,7 @@ def _rotate_dynamic_trump(ctx: _PlayContext, tricks_count: int) -> Suit | None:
     """
     state = ctx.state
     if (
-        state.boss_modifiers.dynamic_trump
+        state.variants.dynamic_trump
         and state.contract not in (Contract.SANS_ATOUT, Contract.TOUT_ATOUT)
         and tricks_count % 2 == 0
         and tricks_count < 8
@@ -1068,7 +1041,7 @@ def _rotate_dynamic_trump(ctx: _PlayContext, tricks_count: int) -> Suit | None:
     return ctx.trump
 
 
-def play_card(state: GameState, card: Card) -> GameState:
+def play_card(state: S, card: Card) -> S:
     """Play a card. Returns new state, possibly advancing trick/round/phase.
 
     3.7.1 (D1): orchestrator over `_record_belote_announcement`,
@@ -1092,7 +1065,7 @@ def play_card(state: GameState, card: Card) -> GameState:
         state=state,
         trump=state.trump,
         is_sa=state.contract == Contract.SANS_ATOUT,
-        se_trump=state.boss_modifiers.seven_eight_trump,
+        se_trump=state.variants.seven_eight_trump,
     )
 
     # Belote/Rebelote announcement; resets the announced popup each play so it
@@ -1168,11 +1141,7 @@ def play_card(state: GameState, card: Card) -> GameState:
     )
 
 
-def set_announced(state: GameState, msg: str) -> GameState:
-    return replace(state, announced=msg)
-
-
-def clear_announced(state: GameState) -> GameState:
+def clear_announced(state: S) -> S:
     return replace(state, announced=None)
 
 
@@ -1251,7 +1220,7 @@ def sort_hand(hand: tuple[Card, ...], trump: Suit | None) -> tuple[Card, ...]:
     return tuple(sorted(hand, key=sort_key))
 
 
-def sort_south_hand(state: GameState) -> GameState:
+def sort_south_hand(state: S) -> S:
     """Sort South's hand and update state."""
     new_hands = list(state.hands)
     new_hands[Seat.SOUTH.value] = sort_hand(state.hands[Seat.SOUTH.value], state.trump)

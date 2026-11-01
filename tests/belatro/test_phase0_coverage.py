@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import RoundEndEvent, TrickWonEvent
 from belote.belatro.items.jokers.contract import LeDiplomate, LeFanatique
 from belote.belatro.partner.personality import (
@@ -19,8 +20,9 @@ from belote.belatro.partner.personality import (
     LeStratege,
 )
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
+from belote.game import GameState, Phase, Seat, TrickCard
 from belote.scoring import score_round
+from belote.variants import RuleVariants
 
 # ── LeFanatique (Tout Atout) ───────────────────────────────────────────────
 
@@ -200,7 +202,7 @@ def test_h1_team_aware_jokers_fire_on_north_partner_win() -> None:
 
 
 def _state_with_north_hand(hand: tuple[Card, ...], up: Card | None = None) -> GameState:
-    return GameState(
+    return BelatroState(
         hands=((), (), hand, ()),
         up_card=up,
         phase=Phase.BIDDING,
@@ -266,12 +268,12 @@ def test_boss_seven_eight_trump_lets_seven_beat_ace() -> None:
     # Under seven_eight_trump, a 7 or 8 of any suit (whether of trump or not)
     # is treated as a trump-rank card. We assert via score_round that a trick
     # led by a 7 with three filler cards still gets credited to South.
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(seven_eight_trump=True),
+        variants=RuleVariants(seven_eight_trump=True),
         completed_tricks=(_trick(Card(Suit.SPADES, Rank.SEVEN), Suit.DIAMONDS, Rank.SEVEN),),
     )
     breakdown = score_round(state)
@@ -311,7 +313,7 @@ def test_boss_dynamic_trump_changes_trump_every_two_tricks() -> None:
     state = place_bid(state, state.up_card.suit)
     assert state.phase == Phase.PLAYING
 
-    state = replace(state, boss_modifiers=BossModifiers(dynamic_trump=True))
+    state = replace(state, variants=RuleVariants(dynamic_trump=True))
     initial_trump = state.trump
     assert initial_trump is not None
 
@@ -354,26 +356,26 @@ def test_boss_no_dix_de_der_disables_last_trick_bonus() -> None:
         "completed_tricks": (last_trick,) * 8,
         "last_trick_winner": Seat.NORTH,
     }
-    with_bonus = score_round(GameState(**base_state, boss_modifiers=BossModifiers()))
+    with_bonus = score_round(BelatroState(**base_state, variants=RuleVariants()))
     without_bonus = score_round(
-        GameState(**base_state, boss_modifiers=BossModifiers(no_dix_de_der=True))
+        BelatroState(**base_state, variants=RuleVariants(no_dix_de_der=True))
     )
     # Disabling the bonus reduces the taker side's table points by exactly 10.
     assert with_bonus.table_taker_pts - without_bonus.table_taker_pts == 10
 
 
 def test_boss_agent_double_active_flag_visible_on_state() -> None:
-    """The flag on BossModifiers must be reachable via state.boss_modifiers.
+    """The flag on RuleVariants must be reachable via state.variants.
 
     This is the canonical pattern that ai.py now uses (post Phase 0.1 fix);
     this test pins it so future renames can't silently re-introduce the
     `getattr(state, "_agent_double_active", False)` foot-gun.
     """
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
-        boss_modifiers=BossModifiers(agent_double_active=True),
+        variants=RuleVariants(agent_double_active=True),
     )
-    assert state.boss_modifiers.agent_double_active is True
+    assert state.variants.agent_double_active is True
 
 
 def test_round_end_event_carries_trump_and_capot() -> None:
@@ -397,19 +399,19 @@ def test_every_boss_modifier_actually_patches_a_flag() -> None:
     looks the result up against the ``boss_fields`` allow-list in
     ``engine/modifier_patch.py``. A typo (e.g. ``"_kingz_zero"``) would
     simply land in the generic ``_patches`` dict and never reach
-    ``BossModifiers``, so the boss would do nothing at runtime.
+    ``RuleVariants``, so the boss would do nothing at runtime.
 
     For every registered boss we assert that calling ``.flags()`` produces
-    a BossModifiers whose representation differs from the default — i.e.
+    a RuleVariants whose representation differs from the default — i.e.
     that at least one allow-listed flag was actually toggled.
     """
     from belote.belatro.run.boss import ALL_BOSS_MODIFIERS
 
-    default = BossModifiers()
+    default = RuleVariants()
     for boss_cls in ALL_BOSS_MODIFIERS:
         flags = boss_cls().flags()
         assert flags != default, (
-            f"{boss_cls.__name__}.apply() did not change BossModifiers — "
+            f"{boss_cls.__name__}.apply() did not change RuleVariants — "
             f"check that every state.patch(...) key is in the boss_fields "
             f"allow-list at engine/modifier_patch.py:27."
         )

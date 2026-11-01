@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from belote.ai import AIPlayer, Difficulty
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import TrickWonEvent
 from belote.belatro.items.base import Joker, JokerResult
 from belote.belatro.partner.partner_state import PartnerState
 from belote.belatro.partner.trust import TrustTrack
 from belote.deck import Card, Rank, Suit
-from belote.game import GameState, Seat
+from belote.game import Seat
+
+if TYPE_CHECKING:
+    from belote.belatro.engine.event_bus import (
+        TrickWonEvent,
+    )
 
 
 def make_trick_event(
@@ -34,9 +41,9 @@ class TestPartnerTrust:
     # 25. AI partner forced pass (La Solitude boss)
     def test_ai_partner_forced_pass(self) -> None:
         """Verify partner always passes when _partner_forced_pass is set."""
-        state = GameState(hands=((), (), (), ()))
+        state = BelatroState(hands=((), (), (), ()))
         # Manually set the flag (usually injected by BossModifier)
-        state = replace(state, boss_modifiers=replace(state.boss_modifiers, partner_forced_pass=True))
+        state = replace(state, variants=replace(state.variants, partner_forced_pass=True))
 
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
 
@@ -54,8 +61,8 @@ class TestPartnerTrust:
         )
         # North is partner of South
         hands = [(), (), list(cards), ()]  # S, E, N, W
-        state = GameState(hands=tuple(tuple(h) for h in hands))
-        state = replace(state, trump=Suit.SPADES, boss_modifiers=replace(state.boss_modifiers, agent_double_active=True), turn=Seat.NORTH)
+        state = BelatroState(hands=tuple(tuple(h) for h in hands))
+        state = replace(state, trump=Suit.SPADES, variants=replace(state.variants, agent_double_active=True), turn=Seat.NORTH)
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
         played = ai.decide_card(state)
 
@@ -65,8 +72,8 @@ class TestPartnerTrust:
 
     # 34. Partner joker double trust
     def test_partner_joker_double_trust(self) -> None:
-        """Verify partner joker effects fire twice when partner_jokers_double is True."""
-        acc = ScoreAccumulator(partner_jokers_double=True)
+        """Verify partner joker effects fire twice at the boost tier (trust 5+)."""
+        acc = ScoreAccumulator(partner_tier=2)
 
         class MockPartnerJoker(Joker):
             name = "Mock Partner Joker"
@@ -77,7 +84,7 @@ class TestPartnerTrust:
         joker = MockPartnerJoker()
         acc.attach_jokers([joker])
 
-        state = GameState(hands=((), (), (), ()))
+        state = BelatroState(hands=((), (), (), ()))
         # Initial chips 0
         state = replace(state, _chips=0, _mult=1.0)
 
@@ -170,3 +177,112 @@ class TestEquipJokerOnPurchase:
         run = BelAtroRun()
         assert state.equip_joker(_StubJoker(), run) is False
         assert calls == []
+
+
+class TestTrustTrack:
+    def setup_method(self) -> None:
+        from belote.belatro.partner.trust import TrustTrack
+
+        self.trust = TrustTrack()
+
+    def test_initial_value_is_five(self) -> None:
+        assert self.trust.value == 5
+
+    def test_blind_beaten_adds_one(self) -> None:
+        self.trust.blind_beaten()
+        assert self.trust.value == 6
+
+    def test_big_margin_win_adds_two(self) -> None:
+        self.trust.big_margin_win()
+        assert self.trust.value == 7
+
+    def test_capot_together_adds_three(self) -> None:
+        self.trust.capot_together()
+        assert self.trust.value == 8
+
+    def test_blind_failed_subtracts_one(self) -> None:
+        self.trust.blind_failed()
+        assert self.trust.value == 4
+
+    def test_chute_subtracts_two(self) -> None:
+        self.trust.chute()
+        assert self.trust.value == 3
+
+    def test_partner_passes_all_sets_zero(self) -> None:
+        self.trust.partner_passes_all()
+        assert self.trust.value == 0
+
+    def test_clamp_at_maximum_ten(self) -> None:
+        self.trust.value = 9
+        self.trust.capot_together()  # +3 → would be 12 → clamped at 10
+        assert self.trust.value == 10
+
+    def test_clamp_at_minimum_zero(self) -> None:
+        self.trust.value = 1
+        self.trust.chute()  # -2 → would be -1 → clamped at 0
+        assert self.trust.value == 0
+
+    def test_blind_beaten_at_ten_stays_ten(self) -> None:
+        self.trust.value = 10
+        self.trust.blind_beaten()
+        assert self.trust.value == 10
+
+    def test_chute_at_zero_stays_zero(self) -> None:
+        self.trust.value = 0
+        self.trust.chute()
+        assert self.trust.value == 0
+
+    # --- Threshold properties ---
+
+    def test_shares_void_info_false_below_threshold(self) -> None:
+        self.trust.value = 2
+        assert self.trust.shares_void_info is False
+
+    def test_shares_void_info_true_at_threshold(self) -> None:
+        self.trust.value = 3
+        assert self.trust.shares_void_info is True
+
+    def test_shares_void_info_true_above_threshold(self) -> None:
+        self.trust.value = 7
+        assert self.trust.shares_void_info is True
+
+    def test_duo_contracts_available_false_below_five(self) -> None:
+        self.trust.value = 4
+        assert self.trust.duo_contracts_available is False
+
+    def test_duo_contracts_available_true_at_five(self) -> None:
+        self.trust.value = 5
+        assert self.trust.duo_contracts_available is True
+
+    def test_partner_joker_boost_tier_starts_at_five(self) -> None:
+        self.trust.value = 4
+        assert self.trust.tier == 1
+        self.trust.value = 5
+        assert self.trust.tier == 2
+
+    def test_auto_capot_available_true_at_nine_not_used(self) -> None:
+        self.trust.value = 9
+        self.trust.auto_capot_used = False
+        assert self.trust.auto_capot_available is True
+
+    def test_auto_capot_available_false_if_already_used(self) -> None:
+        self.trust.value = 10
+        self.trust.auto_capot_used = True
+        assert self.trust.auto_capot_available is False
+
+    def test_auto_capot_available_false_below_nine(self) -> None:
+        self.trust.value = 8
+        self.trust.auto_capot_used = False
+        assert self.trust.auto_capot_available is False
+
+    def test_ai_degraded_true_at_or_below_two(self) -> None:
+        self.trust.value = 2
+        assert self.trust.ai_degraded is True
+
+    def test_ai_degraded_true_at_zero(self) -> None:
+        self.trust.value = 0
+        assert self.trust.ai_degraded is True
+
+    def test_ai_degraded_false_above_two(self) -> None:
+        self.trust.value = 3
+        assert self.trust.ai_degraded is False

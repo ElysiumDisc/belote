@@ -41,6 +41,8 @@ from .ui import (
     show_rules,
     show_stats,
 )
+from .ui.announce import achievement_toast
+from .ui.settings_menu import show_settings
 
 
 class TerminalGuard:
@@ -82,21 +84,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target",
         type=positive_int,
-        default=GLOBAL_CONFIG.TARGET_SCORE,
-        help=f"Target score to win (default: {GLOBAL_CONFIG.TARGET_SCORE})",
+        default=None,
+        help="Target score to win (default: the saved setting, else "
+        f"{GLOBAL_CONFIG.TARGET_SCORE})",
     )
     parser.add_argument(
         "--difficulty",
         choices=["easy", "medium", "hard"],
-        default="medium",
-        help="AI difficulty (default: medium)",
+        default=None,
+        help="AI difficulty for every seat (default: the saved setting, else medium)",
     )
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument(
         "--speed",
         choices=list(GLOBAL_CONFIG.SPEED_TIMINGS.keys()),
-        default="normal",
-        help="Game pace. Default: normal",
+        default=None,
+        help="Game pace (default: the saved setting, else normal)",
     )
     return parser.parse_args()
 
@@ -107,6 +110,18 @@ def main() -> None:
     from .themes import theme_manager
 
     theme_manager.load_selection()
+
+    # Saved settings, with any CLI flags overriding them for this session.
+    from . import settings as settings_mod
+
+    prefs = settings_mod.load()
+    if args.difficulty is not None:
+        prefs.ai = dict.fromkeys(settings_mod.AI_SEATS, args.difficulty)
+    if args.target is not None:
+        prefs.target = args.target
+    if args.speed is not None:
+        prefs.speed = args.speed
+    settings_mod.apply(prefs)
 
     # Terminal-size enforcement now lives inside the alt-screen as a live
     # overlay (see require_minimum). Below the floor we paint a centered
@@ -125,6 +140,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _sig_handler)
     atexit.register(guard.restore)
 
+    # Composition root: wire the BelAtro expansion into the core UI's
+    # extension points (the core itself never imports BelAtro).
+    from .belatro import integration as belatro_integration
+
+    belatro_integration.install()
+
     try:
         with KeyReader() as reader:
             guard.enter(reader)
@@ -139,22 +160,23 @@ def main() -> None:
             except FitAbortedError:
                 return
 
-            target = args.target
-            speed = args.speed
-            diffs_map = {
-                Seat.EAST: args.difficulty,
-                Seat.NORTH: args.difficulty,
-                Seat.WEST: args.difficulty,
-            }
+            modes = belatro_integration.menu_modes()
 
             while True:
-                choice, diffs_map, target, speed = show_main_menu(
-                    reader, diffs_map, target, speed
-                )
+                choice = show_main_menu(reader, [label for label, _ in modes])
 
                 if choice == "Quit":
                     flush_stats()
                     break
+
+                launch = dict(modes).get(choice)
+                if launch is not None:
+                    launch(reader)
+                    continue
+
+                if choice == "Settings":
+                    show_settings(reader, prefs)
+                    continue
 
                 if choice == "Rules & History":
                     show_rules(reader)
@@ -164,18 +186,17 @@ def main() -> None:
                     show_stats(reader)
                     continue
 
-                if choice == "BelAtro":
-                    from .belatro.main import BelAtroGame
-
-                    game = BelAtroGame()
-                    game.start(reader)
-                    continue
-
                 if choice != "Start Game":
                     continue
 
                 # Start Game — already in alt-screen, just clear.
-                ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[speed]
+                target = prefs.target
+                diffs_map = {
+                    Seat.EAST: prefs.ai["east"],
+                    Seat.NORTH: prefs.ai["north"],
+                    Seat.WEST: prefs.ai["west"],
+                }
+                ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[prefs.speed]
                 sys.stdout.write(clear_screen() + hide_cursor())
                 sys.stdout.flush()
 
@@ -222,12 +243,14 @@ def main() -> None:
                             next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"
                         )
 
-                        update_stats_game(
+                        unlocked = update_stats_game(
                             won=(ns >= target and ns > ew),
                             num_rounds=len(state.score_history),
                             difficulty=difficulty_str,
                         )
                         flush_stats()
+                        for achievement in unlocked:
+                            achievement_toast(achievement, reader)
 
                 if state.phase == Phase.GAME_OVER:
                     # Show final screen. Raw mode is active (OPOST off), so

@@ -200,7 +200,8 @@ def test_dynamic_trump_never_overrides_sans_atout() -> None:
     test exercises a full SA round under `dynamic_trump` and asserts
     `state.trump is None` at every step.
     """
-    from belote.game import BossModifiers, new_game, start_round
+    from belote.game import new_game, start_round
+    from belote.variants import RuleVariants
 
     rng = random.Random(11)
     state = start_round(new_game(), rng)
@@ -211,7 +212,7 @@ def test_dynamic_trump_never_overrides_sans_atout() -> None:
     # Inject dynamic_trump after bid (would normally be set by boss apply).
     from dataclasses import replace as dc_replace
     state = dc_replace(
-        state, boss_modifiers=BossModifiers(dynamic_trump=True)
+        state, variants=RuleVariants(dynamic_trump=True)
     )
 
     while state.phase == Phase.PLAYING:
@@ -231,7 +232,8 @@ def test_no_consecutive_team_wins_invariant_when_rupture_active() -> None:
     behaviour here — that's covered by the boss integration tests; the
     invariant we lock is: under Rupture, no team can sweep all 8 tricks.
     """
-    from belote.game import BossModifiers, new_game, start_round, team_of
+    from belote.game import new_game, start_round, team_of
+    from belote.variants import RuleVariants
 
     sweeps = 0
     for seed in range(30):
@@ -239,7 +241,7 @@ def test_no_consecutive_team_wins_invariant_when_rupture_active() -> None:
         state = start_round(new_game(), rng)
         from dataclasses import replace as dc_replace
         state = dc_replace(
-            state, boss_modifiers=BossModifiers(no_consecutive_team_wins=True)
+            state, variants=RuleVariants(no_consecutive_team_wins=True)
         )
         state = place_bid(state, state.up_card.suit)
         while state.phase == Phase.PLAYING:

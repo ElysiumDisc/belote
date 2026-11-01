@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from belote.ansi import visible_len
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Seat, new_game
+from belote.game import GameState, Seat, new_game
 from belote.ui.layout import (
     ALL_LAYOUTS,
     COMPACT,
@@ -16,6 +16,7 @@ from belote.ui.layout import (
     choose_layout,
     fits_minimum,
 )
+from belote.variants import RuleVariants
 
 # ── choose_layout boundaries ────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ def test_hud_handles_hide_hud_boss_under_compact() -> None:
     from belote.ui.render import _build_hud
 
     state = new_game()
-    state = replace(state, boss_modifiers=BossModifiers(hide_hud=True))
+    state = replace(state, variants=RuleVariants(hide_hud=True))
     bar = _build_hud(state, term_w=80, layout=COMPACT)
     assert "HIDDEN BY BOSS" in bar
     assert visible_len(bar) <= 80

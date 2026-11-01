@@ -95,6 +95,9 @@ class BelAtroRun:
 
     # ── Determinism ────────────────────────────────────────
     seed: int | None = None
+    # ISO date when this is a Daily Challenge run (see belatro/daily.py):
+    # starter shop pool, no endless offer.
+    daily: str | None = None
     _rng: Any = None
 
     # ── Idempotency guard for voucher.apply() ──────────────

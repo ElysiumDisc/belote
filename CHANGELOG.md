@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.10.0] - 2026-11-01
+
+Verification pass over two external audit reports (every claim checked
+against the code), then the full follow-up: BelAtro becomes a true expansion
+of the core game, one shared round engine, the god functions split, and three
+features (Settings, achievement toasts, Daily Challenge). Refactors were
+verified with seeded whole-round fingerprints (BelAtro: 800 rounds across all
+bosses/jokers/flags; classic: 450 rounds incl. heavy undo) — byte-identical
+except the intended undo fix. Tests 1228 → 1286, coverage 79% → 83%.
+
+### Added
+- **Settings screen** (main menu → Settings), persisted to `settings.json` in
+  the config dir: AI difficulty (per seat), target, speed, theme, animations,
+  fast redraw, screen-reader hints, replay analysis, and expansion toggles
+  (BelAtro ghost recording). `BELOTE_*` env vars still override while set; the
+  CLI flags now override the saved values for one session.
+- **Achievement toasts:** unlocking an achievement pops a boxed toast (and a
+  screen-reader line) at the end of the round / game.
+- **Daily Challenge:** one date-seeded BelAtro run per day, identical for
+  everyone (fixed deck, starter shop pool, no endless), with a share code and
+  a local best-result record (`daily.json`).
+- **Screen-reader hints now announce declarations** (`a11y.announce_declaration`
+  existed but was never called).
+
+### Fixed
+- **Classic: undo during play re-ran the coinche flow** — the player was
+  re-prompted to coinche and the AI defenders were silently re-polled
+  (shifting their RNG) every time an undo resumed the play phase.
+- **BelAtro collection gallery** pinned the cursor to the top row (the list
+  was sliced from the selected item), hiding every item above it.
+- **BelAtro rules screen** called `hide_cursor()` without writing it (no-op).
+- **Le Divorce / La Trahison** could leave partner trust frozen at 0 if the
+  round aborted; the restore now runs in a `finally`.
+- **BelAtro: Sans Atout bid from the normal prompt became a pass.**
+  `UICallbacks.prompt_bid` filtered UI sentinels with `isinstance(res, str)`,
+  which also matched `SANS_ATOUT_BID` (the plain string `"sans_atout"`).
+- **L'Aristocrate ace payout ignored La Rupture / L'Anarchie.** Aces are now
+  credited via `compute_trick_winners` (new `_aces_won_by_team` helper) instead
+  of raw `trick_winner_seat` with the final trump.
+- **mypy was blind to every absolute `belote.*` import.** A stray empty
+  `src/__init__.py` made mypy name modules `src.belote.*`; with
+  `ignore_missing_imports` all `from belote.… import` resolved to `Any`.
+  Removed it (guarded by `tests/test_repo_layout.py`) and fixed the 9 errors
+  it was hiding (incl. a possible `None.lower()` in the BelAtro rules screen).
+- **Theme file ignored `XDG_CONFIG_HOME` / `%APPDATA%`** (hardcoded
+  `~/.config`, which also let the test suite write the real user config).
+- **Main menu flicker:** the 300ms steam animation no longer clears the whole
+  screen each tick; it repaints in place.
+- **Achievements are now visible** on the Statistics screen (they were
+  evaluated and saved but never shown).
+
+### Changed — architecture
+- **The core never imports BelAtro** (enforced by `tests/test_repo_layout.py`).
+  Boss/deck/voucher rule switches moved from BelAtro's `BossModifiers` +
+  `_joker_state` keys to a core `RuleVariants` (`belote/variants.py`,
+  `GameState.variants`). BelAtro's chips/mult/money/joker state moved off the
+  core `GameState` onto `belatro/core/state.py::BelatroState`, a subclass that
+  core transitions (now generic over `GameState` subclasses) carry along.
+  The stats screen, bid-hint line, I/V keys and main-menu modes are now
+  registration hooks wired from the entry point via `belatro/integration.py`.
+- **One round engine** (`belote/round_engine.py`): classic `gameflow` and
+  BelAtro `round_driver` are two `RoundPolicy` implementations of
+  `play_round`. Coinche level now lives on `state.coinche_level` in both modes.
+- **God functions split:** `process_event` (369 lines) → per-event handler
+  methods; `drive_round` (450) → a round context + phase functions;
+  `_play_blind` (344) → setup / boss / settlement helpers.
+- **Tests:** the 2037-line `test_belatro.py` split by topic (economy, score
+  accumulator, run state, jokers, shop, …); 2 duplicate tests removed; new
+  coverage for the round engine, headless classic rounds, the collection /
+  rules / shop screens, settings and the daily challenge.
+
+### Changed
+- AI / target / speed / theme moved from the main menu into Settings.
+- Shared key-alias table for the Unix and Windows readers; one
+  `ThemeManager.cycle()`; table-driven card art (byte-identical output);
+  `wrap_words` text helper; `BELOTE_NO_DIFF` read once instead of per frame.
+- One `legal_bids(state)` in `game.py` replaces four hand-rolled copies
+  (bid prompt, bid renderer, BelAtro joker hooks, partner legality gate).
+- One `deck.is_trump_card()` replaces the inline "trump suit or Déluge 7/8"
+  predicate in `deck.py`, `game.py`, `ai.py` and `round_driver.py`
+  (`_card_beats` keeps its Tout-Atout-exclusive variant, now commented).
+- New `belote/paths.py` owns data/config locations (was 5 copies; the BelAtro
+  ones fell back to the CWD on Windows without `%APPDATA%`).
+- Dix de Der uses `GLOBAL_CONFIG.LAST_TRICK_BONUS` everywhere (3 hardcoded 10s).
+- BelAtro history entries are built from typed `GameState`/`ScoringBreakdown`
+  instead of `object` + `getattr`.
+
+### Removed
+- `BelAtroAnnounce.score_popup` (slated for removal in 4.8) and its dead
+  overlay flag helpers.
+- `ScoreAccumulator.partner_jokers_double` / `TrustTrack.partner_jokers_double`
+  (deprecated since 3.5.0; `partner_tier` replaces them).
+- Dead code: `Seat.prev_seat`, `GameState.current_bidder`, `set_announced`,
+  `Config.ensure_stats_dir`, legacy `Config.CARD_*` / `MIN_TERM_*` /
+  `THEME_NAME`, `render.CARD_W/CARD_H/CARD_GAP/SIDE_COL_W`,
+  `ansi.save_cursor/restore_cursor/scroll_region`, unused HUD tables.
+
 ## [4.9.7] - 2026-11-01
 
 Repo-wide audit: four parallel reviewers swept the classic engine, the

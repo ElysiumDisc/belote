@@ -553,7 +553,8 @@ def test_hud_running_total_under_multi_boss_ban_clubs_plus_kings_zero() -> None:
     silently overwriting it. The 10 of clubs would credit 10 to the HUD even
     though score_round (canonical) returned 0 for the trick. Now play_card
     delegates to scoring.trick_card_points so both flags compose correctly."""
-    from belote.game import BossModifiers, play_card
+    from belote.game import play_card
+    from belote.variants import RuleVariants
 
     # 4-card clubs-led trick. South completes it with the 10 of clubs.
     # Trump = HEARTS (so clubs are non-trump; 10 of clubs = 10 points normally).
@@ -572,7 +573,7 @@ def test_hud_running_total_under_multi_boss_ban_clubs_plus_kings_zero() -> None:
             TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.SEVEN)),
             TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.EIGHT)),
         ),
-        boss_modifiers=BossModifiers(ban_clubs=True, kings_zero=True),
+        variants=RuleVariants(ban_clubs=True, kings_zero=True),
     )
     new_state = play_card(state, Card(Suit.CLUBS, Rank.TEN))
     assert new_state.current_round_points == (0, 0), (

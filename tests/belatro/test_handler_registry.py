@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import TrickWonEvent
 from belote.belatro.items.base import Joker, JokerResult
 from belote.deck import Card, Rank, Suit
@@ -47,7 +48,7 @@ def _make_trick_event() -> TrickWonEvent:
 
 
 def _make_state() -> GameState:
-    return GameState(hands=((), (), (), ()), trump=Suit.SPADES, taker=Seat.SOUTH)
+    return BelatroState(hands=((), (), (), ()), trump=Suit.SPADES, taker=Seat.SOUTH)
 
 
 def test_attach_empty_then_append_triggers_rebuild() -> None:

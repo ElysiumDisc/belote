@@ -18,9 +18,11 @@ from dataclasses import replace
 import pytest
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import TrickWonEvent
 from belote.deck import Suit
-from belote.game import BossModifiers, GameState, Seat
+from belote.game import GameState, Seat
+from belote.variants import RuleVariants
 
 
 def _make_acc(*, interest_rate: int = 1, target_score: int = 100) -> ScoreAccumulator:
@@ -30,10 +32,10 @@ def _make_acc(*, interest_rate: int = 1, target_score: int = 100) -> ScoreAccumu
     return acc
 
 
-def _make_state(*, boss: BossModifiers | None = None) -> GameState:
-    state = GameState(hands=((), (), (), ()))
+def _make_state(*, boss: RuleVariants | None = None) -> GameState:
+    state = BelatroState(hands=((), (), (), ()))
     if boss is not None:
-        state = replace(state, boss_modifiers=boss)
+        state = replace(state, variants=boss)
     return state
 
 
@@ -227,7 +229,7 @@ def test_heist_under_no_dix_de_der_boss_still_resolves() -> None:
     """Le Zéro Final zeroes the classic +10 last-trick bonus but does not
     suppress the heist multiplier — the multiplier IS the heist reward,
     not the +10. The heist resolves on the trick-8 winner regardless."""
-    boss = BossModifiers(no_dix_de_der=True)
+    boss = RuleVariants(no_dix_de_der=True)
     acc = _make_acc(interest_rate=1)
     state = _make_state(boss=boss)
     state = acc.trigger_round_start(state)
@@ -252,7 +254,7 @@ def test_heist_under_no_dix_de_der_boss_still_resolves() -> None:
 def test_heist_under_declarations_zero_works_normally() -> None:
     """Le Mime zeros declaration scoring. Heist is orthogonal — declarations
     and heist resolve independently."""
-    boss = BossModifiers(declarations_zero=True)
+    boss = RuleVariants(declarations_zero=True)
     acc = _make_acc(interest_rate=1)
     state = _make_state(boss=boss)
     state = acc.trigger_round_start(state)
@@ -465,7 +467,7 @@ def test_heist_under_le_mime_lost_branch_still_forfeits() -> None:
     forfeit path must still subtract the trick 1-7 NS chips correctly —
     the audit flagged that the existing test only covered the won branch
     under Le Mime."""
-    boss = BossModifiers(declarations_zero=True)
+    boss = RuleVariants(declarations_zero=True)
     acc = _make_acc(interest_rate=1)
     state = _make_state(boss=boss)
     state = acc.trigger_round_start(state)
@@ -507,7 +509,7 @@ def test_heist_la_rupture_auto_bust_when_ns_won_trick_7() -> None:
     post-flip world: NS wins tricks 1-7 (high chip basis), then trick 8
     is forced to EW per the Rupture rule.
     """
-    boss = BossModifiers(no_consecutive_team_wins=True)
+    boss = RuleVariants(no_consecutive_team_wins=True)
     acc = _make_acc(interest_rate=1)
     state = _make_state(boss=boss)
     state = acc.trigger_round_start(state)

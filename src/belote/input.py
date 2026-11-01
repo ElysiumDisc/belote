@@ -58,6 +58,31 @@ class KeyEvent:
     char: str | None = None
 
 
+# Single-character shortcuts shared by the Unix and Windows readers (they used
+# to keep separate if/elif chains that drifted). Case-insensitive. WASD nav
+# aliases (4.5.0) are mapped at the reader so every selection screen inherits
+# them; the bid prompt's quick keys moved to X/N to make room.
+CHAR_ALIASES: dict[str, Key] = {
+    "w": Key.UP,
+    "a": Key.LEFT,
+    "s": Key.DOWN,
+    "d": Key.RIGHT,
+    "q": Key.QUIT,
+    "?": Key.HELP,
+    "h": Key.HIST,
+    "t": Key.THEME,
+    "o": Key.SORT,
+    "i": Key.OVERLAY,
+    "v": Key.INVENTORY,
+}
+
+
+def char_event(ch: str) -> KeyEvent:
+    """Map a decoded printable character to its event (alias or plain CHAR)."""
+    key = CHAR_ALIASES.get(ch.lower())
+    return KeyEvent(key) if key is not None else KeyEvent(Key.CHAR, ch)
+
+
 # Final bytes shared by CSI (ESC [ X) and SS3 (ESC O X) cursor keys.
 _ARROW_FINALS: dict[bytes, Key] = {
     b"A": Key.UP,
@@ -203,34 +228,7 @@ class _UnixKeyReader:
 
         # Printable character
         try:
-            ch = chr(byte)
-            # WASD nav aliases (4.5.0). Mapped at the reader so every selection
-            # screen inherits them without per-consumer edits. A/S were bid
-            # quick-keys pre-4.5.0; the bid prompt's quick keys moved to X/N.
-            if ch.lower() == "w":
-                return KeyEvent(Key.UP)
-            if ch.lower() == "a":
-                return KeyEvent(Key.LEFT)
-            if ch.lower() == "s":
-                return KeyEvent(Key.DOWN)
-            if ch.lower() == "d":
-                return KeyEvent(Key.RIGHT)
-            if ch.lower() == "q":
-                return KeyEvent(Key.QUIT)
-            if ch == "?":
-                return KeyEvent(Key.HELP)
-            if ch.lower() == "h":
-                return KeyEvent(Key.HIST)
-            if ch.lower() == "t":
-                return KeyEvent(Key.THEME)
-            if ch.lower() == "o":
-                return KeyEvent(Key.SORT)
-            if ch.lower() == "i":
-                return KeyEvent(Key.OVERLAY)
-            if ch.lower() == "v":
-                return KeyEvent(Key.INVENTORY)
-
-            return KeyEvent(Key.CHAR, ch)
+            return char_event(chr(byte))
         except (ValueError, UnicodeDecodeError):
             return KeyEvent(Key.ESC)
 
@@ -370,33 +368,8 @@ if os.name == "nt":
                 return KeyEvent(Key.TAB)
             if ch == b" ":
                 return KeyEvent(Key.SPACE)
-            # WASD nav aliases (4.5.0) — see _UnixKeyReader.read for rationale.
-            if ch.lower() == b"w":
-                return KeyEvent(Key.UP)
-            if ch.lower() == b"a":
-                return KeyEvent(Key.LEFT)
-            if ch.lower() == b"s":
-                return KeyEvent(Key.DOWN)
-            if ch.lower() == b"d":
-                return KeyEvent(Key.RIGHT)
-            if ch.lower() == b"q":
-                return KeyEvent(Key.QUIT)
-            if ch == b"?":
-                return KeyEvent(Key.HELP)
-            if ch.lower() == b"h":
-                return KeyEvent(Key.HIST)
-            if ch.lower() == b"t":
-                return KeyEvent(Key.THEME)
-            if ch.lower() == b"o":
-                return KeyEvent(Key.SORT)
-            if ch.lower() == b"i":
-                return KeyEvent(Key.OVERLAY)
-            if ch.lower() == b"v":
-                return KeyEvent(Key.INVENTORY)
-
             try:
-                char = ch.decode("utf-8")
-                return KeyEvent(Key.CHAR, char)
+                return char_event(ch.decode("utf-8"))
             except Exception:
                 return KeyEvent(Key.ESC)
 

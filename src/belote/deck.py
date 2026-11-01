@@ -139,6 +139,21 @@ _NONTRUMP_ORDER: dict[Rank, int] = {
 }
 
 
+def is_trump_card(card: Card, trump: Suit | None, seven_eight_trump: bool = False) -> bool:
+    """True when `card` plays as a trump.
+
+    Tout Atout makes every card trump; otherwise the trump suit, plus — under
+    La Déluge (`seven_eight_trump`) — every 7 and 8 regardless of suit. Sans
+    Atout (`trump=None`) has no trumps except Déluge 7/8s. Single source of
+    truth for the predicate (trick ranking, card points, legal cards, AI).
+    """
+    return (
+        trump == Suit.TOUT_ATOUT
+        or card.suit == trump
+        or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
+    )
+
+
 def trick_rank(card: Card, trump: Suit | None, seven_eight_trump: bool = False) -> int:
     """Higher value = stronger card. Returns 0-15 (trump cards get 8-15).
 
@@ -146,12 +161,7 @@ def trick_rank(card: Card, trump: Suit | None, seven_eight_trump: bool = False) 
     annotation widened to `Suit | None` to match runtime callers; the
     body's `==` checks already handled None correctly.
     """
-    is_trump = (
-        trump == Suit.TOUT_ATOUT
-        or card.suit == trump
-        or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
-    )
-    if is_trump:
+    if is_trump_card(card, trump, seven_eight_trump):
         return 8 + _TRUMP_ORDER[card.rank]
     return _NONTRUMP_ORDER[card.rank]
 
@@ -167,12 +177,7 @@ def card_points(card: Card, trump: Suit | None, seven_eight_trump: bool = False)
     scale. 3.6.0 audit L2: annotation widened to `Suit | None` to match
     the actual SA callers in scoring.py.
     """
-    is_trump = (
-        trump == Suit.TOUT_ATOUT
-        or card.suit == trump
-        or (seven_eight_trump and card.rank in (Rank.SEVEN, Rank.EIGHT))
-    )
-    if is_trump:
+    if is_trump_card(card, trump, seven_eight_trump):
         match card.rank:
             case Rank.JACK:
                 return 20

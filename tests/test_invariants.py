@@ -19,7 +19,6 @@ import random
 
 from belote.deck import Suit
 from belote.game import (
-    BossModifiers,
     Phase,
     legal_cards,
     new_game,
@@ -29,18 +28,19 @@ from belote.game import (
     start_round,
 )
 from belote.scoring import score_round
+from belote.variants import RuleVariants
 
 
-def _drive(rng: random.Random, bm: BossModifiers, contract_bid: object = Suit.SPADES) -> object:
+def _drive(rng: random.Random, bm: RuleVariants, contract_bid: object = Suit.SPADES) -> object:
     """Run a full round under the given boss modifiers."""
     state = start_round(new_game(), rng)
-    state = replace(state, boss_modifiers=bm)
+    state = replace(state, variants=bm)
     is_round_2_only = contract_bid == Suit.TOUT_ATOUT or contract_bid == "sans_atout"
     if is_round_2_only:
         for _ in range(4):
             state = place_bid(state, None)
     state = place_bid(state, contract_bid)
-    state = replace(state, boss_modifiers=bm)  # bid preserves modifiers, but pin again to be safe
+    state = replace(state, variants=bm)  # bid preserves modifiers, but pin again to be safe
     while state.phase == Phase.PLAYING:
         seat = state.turn
         legal = legal_cards(state, seat)
@@ -71,7 +71,7 @@ def test_boss_modifier_pairs_complete_round() -> None:
     not crash, must drain all hands, and must yield a scoreable state.
     """
     for flag_a, flag_b in itertools.combinations(_SAFE_FLAGS, 2):
-        bm = BossModifiers(**{flag_a: True, flag_b: True})
+        bm = RuleVariants(**{flag_a: True, flag_b: True})
         rng = random.Random(hash((flag_a, flag_b)) & 0xFFFF)
         state = _drive(rng, bm, Suit.SPADES)
         assert len(state.completed_tricks) == 8, (
@@ -95,7 +95,7 @@ def test_la_rupture_makes_capot_unreachable() -> None:
     """
     for seed in range(25):
         rng = random.Random(seed)
-        bm = BossModifiers(no_consecutive_team_wins=True)
+        bm = RuleVariants(no_consecutive_team_wins=True)
         state = _drive(rng, bm, Suit.SPADES)
         bd = score_round(state)
         assert not bd.is_capot, (
@@ -114,7 +114,7 @@ def test_anarchie_plus_no_belote_suppresses_belote_across_rotations() -> None:
     """
     for seed in range(15):
         rng = random.Random(seed)
-        bm = BossModifiers(dynamic_trump=True, no_belote=True)
+        bm = RuleVariants(dynamic_trump=True, no_belote=True)
         state = _drive(rng, bm, Suit.SPADES)
         assert state.belote_tracker == (False, False), (
             f"seed={seed}: belote fired despite no_belote under L'Anarchie: "
@@ -135,7 +135,7 @@ def test_zero_rank_flags_never_increase_table_total() -> None:
     for flag in ("kings_zero", "aces_zero", "jacks_zero", "tens_zero"):
         for seed in range(8):
             rng = random.Random(seed * 7 + hash(flag) & 0xFF)
-            bm = BossModifiers(**{flag: True})
+            bm = RuleVariants(**{flag: True})
             state = _drive(rng, bm, Suit.SPADES)
             bd = score_round(state)
             total = bd.table_taker_pts + bd.table_defender_pts

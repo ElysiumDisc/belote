@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import (
     BidMadeEvent,
     EventBus,
@@ -99,7 +100,7 @@ def test_tout_atout_win_increments_unlock_counter_and_unlocks_joker(
     bus = EventBus()
     tracker.subscribe_to(bus)
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.TOUT_ATOUT,
         contract="tout_atout",
@@ -124,7 +125,7 @@ def test_sans_atout_win_increments_unlock_counter_and_unlocks_joker(
     bus = EventBus()
     tracker.subscribe_to(bus)
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=None,
         contract="sans_atout",
@@ -166,7 +167,7 @@ def test_failed_tout_atout_does_not_increment_counter(
             TrickCard(Seat.WEST, Card(s, Rank.TEN)),
             TrickCard(Seat.NORTH, Card(s, Rank.KING)),
         ))
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.TOUT_ATOUT,
         contract="tout_atout",
@@ -187,7 +188,7 @@ def test_le_fanatique_fires_on_tout_atout_5th_plus_trick() -> None:
     acc = ScoreAccumulator()
     acc.attach_jokers([LeFanatique()])
 
-    state = GameState(hands=((), (), (), ()), _chips=0, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
     # Inject contract via BidMadeEvent (matches round_driver's emission pattern).
     state = acc.update_state(
         state,
@@ -220,7 +221,7 @@ def test_lideologue_fires_on_sans_atout_jacks() -> None:
     acc = ScoreAccumulator()
     acc.attach_jokers([LIdeologue()])
 
-    state = GameState(hands=((), (), (), ()), _chips=0, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
     state = acc.update_state(
         state,
         TrickWonEvent(

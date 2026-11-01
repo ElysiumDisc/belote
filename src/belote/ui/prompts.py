@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Literal
 
 from ..ansi import (
@@ -20,22 +21,45 @@ from ..deck import Card, Suit
 from ..game import (
     GameState,
     RoundScore,
+    S,
     Seat,
     legal_cards,
     sort_south_hand,
 )
 from ..input import Key, KeyReader
 from ..rules import RULES_CONTENT, RulesPage
-from ..themes import THEMES, theme_manager
+from ..themes import theme_manager
 from .render import display, get_term_size, invalidate_diff
 
 
+@dataclass(frozen=True, slots=True)
+class ExtensionKey:
+    """A key an expansion registered: the prompt returns it unhandled."""
+
+    key: Key
+
+
+# Keys handed back to the caller instead of being handled (or ignored) by the
+# core prompts. Empty in classic play; an expansion registers its own keys
+# (BelAtro: the I overlay toggle and the V inventory) for the duration of a
+# run and unregisters them on exit.
+_EXTENSION_KEYS: set[Key] = set()
+
+
+def register_extension_keys(*keys: Key) -> None:
+    _EXTENSION_KEYS.update(keys)
+
+
+def unregister_extension_keys(*keys: Key) -> None:
+    _EXTENSION_KEYS.difference_update(keys)
+
+
 def prompt_card(
-    state: GameState,
+    state: S,
     reader: KeyReader,
     show_north_hand: bool = False,
-    after_display: Callable[[GameState], None] | None = None,
-) -> tuple[Card | Literal["UNDO", "OVERLAY", "INVENTORY"] | None, GameState]:
+    after_display: Callable[[S], None] | None = None,
+) -> tuple[Card | Literal["UNDO"] | ExtensionKey | None, S]:
     """Interactive card selection with arrow keys.
 
     Returns (card, state) where state may differ from the input if the hand was
@@ -76,6 +100,8 @@ def prompt_card(
         if after_display is not None:
             after_display(state)
         event = reader.read()
+        if event.key in _EXTENSION_KEYS:
+            return ExtensionKey(event.key), state
 
         match event.key:
             case Key.QUIT | Key.EOF:
@@ -115,24 +141,11 @@ def prompt_card(
                 sel = next((i for i, c in enumerate(hand) if c == selected_card), 0)
                 continue
             case Key.THEME:
-                themes_list = list(THEMES.keys())
-                curr_theme = theme_manager.current_name
-                new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
-                theme_manager.set_current(themes_list[new_idx])
+                theme_manager.cycle()
                 continue
             case Key.HIST:
                 show_history(state, reader)
                 continue
-            case Key.OVERLAY:
-                return "OVERLAY", state
-            case Key.INVENTORY:
-                # 4.7.0: V split off from I and opens the BelAtro inventory
-                # overlay. Classic Belote's prompt_card has no UI for this
-                # (no run-state to inspect), so the wrapper in
-                # `belatro/main.py::UICallbacks.prompt_card` is the only
-                # site that acts on the return; under classic Belote the
-                # outermost loop falls through and treats this like a no-op.
-                return "INVENTORY", state
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()
@@ -199,7 +212,7 @@ def prompt_surcoinche(
             return True
 
 
-def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
+def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | ExtensionKey | None:
     """Interactive bid selection. Returns 'QUIT' if QUIT is pressed.
 
     Round 2 offers Tout Atout (TA, quick-key X) and Sans Atout (SA, quick-key
@@ -213,14 +226,9 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
     display() would scroll the alt-screen on stricter terminals (Konsole) and
     leak previous frames onto blank padding rows.
     """
-    from ..game import SANS_ATOUT_BID
+    from ..game import SANS_ATOUT_BID, legal_bids
 
-    if state.bidding_round == 1:
-        options: list[Suit | str | None] = [state.up_card.suit, None]  # type: ignore[union-attr]
-    else:
-        all_suits = [Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS]
-        other_suits = [s for s in all_suits if s != state.up_card.suit]  # type: ignore[union-attr]
-        options = [*other_suits, Suit.TOUT_ATOUT, SANS_ATOUT_BID, None]
+    options = legal_bids(state)
 
     sel = 0
 
@@ -228,6 +236,8 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
         display(state, None, bid_selection=sel)
 
         event = reader.read()
+        if event.key in _EXTENSION_KEYS:
+            return ExtensionKey(event.key)
         match event.key:
             case Key.QUIT | Key.EOF:
                 # EOF (closed stdin) is treated as a quit so the bid loop
@@ -243,16 +253,11 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | None:
                 show_help(reader)
                 continue
             case Key.THEME:
-                themes_list = list(THEMES.keys())
-                curr_theme = theme_manager.current_name
-                new_idx = (themes_list.index(curr_theme) + 1) % len(themes_list)
-                theme_manager.set_current(themes_list[new_idx])
+                theme_manager.cycle()
                 continue
             case Key.HIST:
                 show_history(state, reader)
                 continue
-            case Key.OVERLAY:
-                return "OVERLAY"
             case Key.CHAR:
                 if event.char:
                     char = event.char.lower()

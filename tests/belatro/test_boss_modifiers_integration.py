@@ -4,19 +4,21 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from belote.belatro.core.state import BelatroState
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
+from belote.game import Phase, Seat, TrickCard
 from belote.scoring import is_capot, score_round
+from belote.variants import RuleVariants
 
 
 def test_boss_no_belote():
     """1. Boss: No Belote - Verify belote points are suppressed."""
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(no_belote=True),
+        variants=RuleVariants(no_belote=True),
         belote_holders={Suit.HEARTS: Seat.SOUTH},
         belote_tracker=(True, True)
     )
@@ -48,12 +50,12 @@ def test_boss_kings_zero():
     king_tricks = tuple(
         _trick_won_by_south(Card(Suit.SPADES, Rank.KING)) for _ in range(4)
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(kings_zero=True),
+        variants=RuleVariants(kings_zero=True),
         completed_tricks=king_tricks,
     )
     breakdown = score_round(state)
@@ -66,12 +68,12 @@ def test_boss_tens_zero():
     ten_tricks = tuple(
         _trick_won_by_south(Card(Suit.SPADES, Rank.TEN)) for _ in range(4)
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(tens_zero=True),
+        variants=RuleVariants(tens_zero=True),
         completed_tricks=ten_tricks,
     )
     breakdown = score_round(state)
@@ -81,12 +83,12 @@ def test_boss_tens_zero():
 
 def test_boss_queen_spades_penalty():
     """6. Boss: Queen of Spades Penalty - Verify -25 points for QS."""
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(queen_spades_penalty=True),
+        variants=RuleVariants(queen_spades_penalty=True),
         completed_tricks=tuple(
             [(TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.QUEEN)),
               TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.SEVEN)),
@@ -122,12 +124,12 @@ def test_boss_invert_scoring():
         TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.TEN)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(invert_scoring=True),
+        variants=RuleVariants(invert_scoring=True),
         completed_tricks=tuple([ns_win] * 5 + [ew_win] * 3),
         last_trick_winner=Seat.EAST,
     )
@@ -153,12 +155,12 @@ def test_boss_invert_scoring_4_4_tie_zeros_taker():
         TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.TEN)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(invert_scoring=True),
+        variants=RuleVariants(invert_scoring=True),
         completed_tricks=tuple([ns_win] * 4 + [ew_win] * 4),
         last_trick_winner=Seat.EAST,
     )
@@ -197,12 +199,12 @@ def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
             Rank.JACK, Rank.ACE, Rank.TEN, Rank.KING]
     tricks = tuple(south_wins(r) for r in high)
 
-    rupture_state = GameState(
+    rupture_state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        variants=RuleVariants(no_consecutive_team_wins=True),
         completed_tricks=tricks,
     )
 
@@ -213,7 +215,7 @@ def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
     assert is_capot(rupture_state, tricks=list(tricks)) is None
 
     # Sanity: without Rupture, both branches see the raw NS sweep.
-    no_rupture = replace(rupture_state, boss_modifiers=BossModifiers())
+    no_rupture = replace(rupture_state, variants=RuleVariants())
     assert is_capot(no_rupture) == 0
     assert is_capot(no_rupture, tricks=list(tricks)) == 0
 
@@ -250,12 +252,12 @@ def test_dix_de_der_announcement_honors_rupture() -> None:
     )
     eighth = south_wins(Rank.KING)
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.PLAYING,
-        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        variants=RuleVariants(no_consecutive_team_wins=True),
         completed_tricks=completed,
     )
 
@@ -263,7 +265,7 @@ def test_dix_de_der_announcement_honors_rupture() -> None:
     winners = compute_trick_winners(state, state.trump, False, tricks=projected)
 
     # Without Rupture every trick (including the 8th) is South's.
-    no_rupture = replace(state, boss_modifiers=BossModifiers())
+    no_rupture = replace(state, variants=RuleVariants())
     raw_winners = compute_trick_winners(no_rupture, no_rupture.trump, False, tricks=projected)
     assert raw_winners[-1] == Seat.SOUTH
 
@@ -283,13 +285,13 @@ def test_dix_de_der_announcement_honors_rupture() -> None:
 
 def test_invariant_no_underscore_boss_attrs() -> None:
     """Architecture-pinned anti-pattern: boss flags must be reached via
-    `state.boss_modifiers.X`, NOT `getattr(state, "_X", False)`. After the
+    `state.variants.X`, NOT `getattr(state, "_X", False)`. After the
     underscore-shim removal in modifier_patch.py (3.1.0), no leading-underscore
     boss attribute should ever resolve on a vanilla GameState. Reading one
     indicates the foot-gun pattern has crept back into the codebase."""
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
-        boss_modifiers=BossModifiers(no_belote=True, kings_zero=True),
+        variants=RuleVariants(no_belote=True, kings_zero=True),
     )
 
     for name in (
@@ -305,12 +307,12 @@ def test_invariant_no_underscore_boss_attrs() -> None:
         assert getattr(state, name, None) is None, (
             f"GameState resolved attribute {name!r} — the leading-underscore "
             "boss-flag access pattern is pinned against (see project memory). "
-            "Read via state.boss_modifiers.<name> instead."
+            "Read via state.variants.<name> instead."
         )
 
     # And the canonical access path still works.
-    assert state.boss_modifiers.no_belote is True
-    assert state.boss_modifiers.kings_zero is True
+    assert state.variants.no_belote is True
+    assert state.variants.kings_zero is True
 
 
 def test_patched_state_rejects_only_underscore_boss_attrs() -> None:
@@ -320,9 +322,9 @@ def test_patched_state_rejects_only_underscore_boss_attrs() -> None:
     fields like `_chips`, `_mult`, `_joker_state`, `_rng` must remain
     patchable so a future joker/boss effect can adjust them."""
     from belote.belatro.engine.modifier_patch import PatchedGameState
-    from belote.game import BossModifiers, GameState
+    from belote.variants import RuleVariants
 
-    state = GameState(hands=((), (), (), ()), boss_modifiers=BossModifiers())
+    state = BelatroState(hands=((), (), (), ()), variants=RuleVariants())
     proxy = PatchedGameState(state)
 
     # The genuine anti-pattern must still raise.
@@ -374,9 +376,9 @@ def test_rupture_play_card_resolves_consistently_with_scoring() -> None:
     east_hand = (Card(Suit.SPADES, Rank.NINE),)
 
     pre_winners = compute_trick_winners(
-        GameState(
+        BelatroState(
             hands=((), (), (), ()),
-            boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+            variants=RuleVariants(no_consecutive_team_wins=True),
             completed_tricks=completed,
         ),
         Suit.HEARTS,
@@ -386,14 +388,14 @@ def test_rupture_play_card_resolves_consistently_with_scoring() -> None:
     assert team_of(pre_winners[0]) == 0
     assert team_of(pre_winners[1]) == 1
 
-    state = GameState(
+    state = BelatroState(
         hands=(south_hand, east_hand, north_hand, west_hand),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.PLAYING,
         leader=Seat.SOUTH,
         turn=Seat.SOUTH,
-        boss_modifiers=BossModifiers(no_consecutive_team_wins=True),
+        variants=RuleVariants(no_consecutive_team_wins=True),
         completed_tricks=completed,
         last_trick_winner=pre_winners[-1],  # EW, the resolved winner
     )

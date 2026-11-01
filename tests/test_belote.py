@@ -1113,8 +1113,8 @@ def test_belote_announcer_without_tracker_flag_raises() -> None:
     """
     import pytest
 
-    from belote.game import BossModifiers
     from belote.scoring import _compute_belote_points, _ScoringContext
+    from belote.variants import RuleVariants
 
     bad_state = GameState(
         hands=((), (), (), ()),
@@ -1125,7 +1125,7 @@ def test_belote_announcer_without_tracker_flag_raises() -> None:
         belote_tracker=(False, False),  # tracker NOT flipped
         belote_announcer=Seat.SOUTH,  # but announcer set — invariant violated
         belote_trump=None,
-        boss_modifiers=BossModifiers(),
+        variants=RuleVariants(),
     )
     ctx = _ScoringContext(
         state=bad_state,
@@ -1150,7 +1150,8 @@ def test_anarchie_rebelote_survives_cross_rotation_play() -> None:
     dropped the rebelote. The fix captures `belote_trump` at first-belote
     and matches the Q against the captured suit.
     """
-    from belote.game import BossModifiers, _PlayContext, _record_belote_announcement
+    from belote.game import _PlayContext, _record_belote_announcement
+    from belote.variants import RuleVariants
 
     # Construct a state mid-round where:
     #   - belote_tracker = (True, False) — belote already announced
@@ -1168,7 +1169,7 @@ def test_anarchie_rebelote_survives_cross_rotation_play() -> None:
         belote_tracker=(True, False),
         belote_announcer=south_seat,
         belote_trump=Suit.HEARTS,
-        boss_modifiers=BossModifiers(dynamic_trump=True),
+        variants=RuleVariants(dynamic_trump=True),
     )
     ctx = _PlayContext(
         state=state,
@@ -1192,7 +1193,8 @@ def test_anarchie_normal_belote_still_works_without_rotation() -> None:
     """Sanity check: when trump has NOT rotated, the rebelote path uses
     the current trump (which equals belote_trump). Pre-3.9.3 behavior
     must remain unchanged in the no-rotation case."""
-    from belote.game import BossModifiers, _PlayContext, _record_belote_announcement
+    from belote.game import _PlayContext, _record_belote_announcement
+    from belote.variants import RuleVariants
 
     south_seat = Seat.SOUTH
     state = GameState(
@@ -1204,7 +1206,7 @@ def test_anarchie_normal_belote_still_works_without_rotation() -> None:
         belote_tracker=(True, False),
         belote_announcer=south_seat,
         belote_trump=Suit.HEARTS,
-        boss_modifiers=BossModifiers(),
+        variants=RuleVariants(),
     )
     ctx = _PlayContext(
         state=state,

@@ -13,8 +13,9 @@ from contextlib import redirect_stderr
 
 from belote import a11y
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
+from belote.game import GameState, Phase, Seat, TrickCard
 from belote.scoring import trick_card_points
+from belote.variants import RuleVariants
 
 
 def _trump_jack_trick() -> tuple[TrickCard, ...]:
@@ -41,7 +42,7 @@ def test_trick_card_points_jacks_zero_zeroes_jack() -> None:
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         phase=Phase.PLAYING,
-        boss_modifiers=BossModifiers(jacks_zero=True),
+        variants=RuleVariants(jacks_zero=True),
     )
     assert trick_card_points(state, _trump_jack_trick()) == 14  # only 9
 
@@ -57,7 +58,7 @@ def test_trick_card_points_kings_zero_zeroes_king() -> None:
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         phase=Phase.PLAYING,
-        boss_modifiers=BossModifiers(kings_zero=True),
+        variants=RuleVariants(kings_zero=True),
     )
     assert trick_card_points(state, trick) == 10
 
@@ -73,7 +74,7 @@ def test_trick_card_points_aces_zero_zeroes_ace() -> None:
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         phase=Phase.PLAYING,
-        boss_modifiers=BossModifiers(aces_zero=True),
+        variants=RuleVariants(aces_zero=True),
     )
     assert trick_card_points(state, trick) == 0
 
@@ -89,7 +90,7 @@ def test_trick_card_points_ban_clubs_zeroes_club_led_trick() -> None:
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         phase=Phase.PLAYING,
-        boss_modifiers=BossModifiers(ban_clubs=True),
+        variants=RuleVariants(ban_clubs=True),
     )
     assert trick_card_points(state, trick) == 0
 

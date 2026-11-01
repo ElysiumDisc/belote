@@ -22,6 +22,7 @@ import pytest
 
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState, as_belatro
 from belote.belatro.engine.event_bus import EventBus, RoundEndEvent
 from belote.belatro.engine.round_driver import RoundUICallbacks, drive_round
 from belote.belatro.partner.partner_state import PartnerState
@@ -179,9 +180,9 @@ def test_all_pass_redeals_and_plays_the_new_deal() -> None:
     assert len(state.completed_tricks) == 8
     assert state.taker == Seat.SOUTH
     # Boss flags survive start_round's reset; round setup ran exactly once.
-    assert state.boss_modifiers.kings_zero is True
-    assert state.boss_modifiers.agent_double_active is True
-    assert len(state._joker_state["agent_double_tricks"]) == 1
+    assert state.variants.kings_zero is True
+    assert state.variants.agent_double_active is True
+    assert len(state.variants.sabotage_tricks) == 1
     assert starts == [1]
     # Only the played deal produces a RoundEndEvent.
     assert sum(isinstance(e, RoundEndEvent) for e in events) == 1
@@ -246,7 +247,7 @@ def test_pluto_and_mercury_only_pay_ns(taker: Seat, capot_team: int, paid: bool)
         "diamonds": {"add_chips": 6, "add_money": 1},
     }
     bd = SimpleNamespace(is_failed=False, taker_total=0, taker_team=capot_team)
-    state = GameState(hands=((), (), (), ()))
+    state = BelatroState(hands=((), (), (), ()))
     acc.update_state(state, RoundEndEvent(bd, taker, Suit.DIAMONDS, capot=True,  # type: ignore[arg-type]
                                           capot_team=capot_team))
     logged = " ".join(acc._log)
@@ -261,7 +262,7 @@ def test_pluto_skips_defensive_ns_capot() -> None:
     acc.contract_levels = {"capot": {"capot_bonus": 48}}  # type: ignore[assignment]
     bd = SimpleNamespace(is_failed=True, taker_total=0, taker_team=1)
     acc.update_state(
-        GameState(hands=((), (), (), ())),
+        BelatroState(hands=((), (), (), ())),
         RoundEndEvent(bd, Seat.EAST, Suit.DIAMONDS, capot=True, capot_team=0),  # type: ignore[arg-type]
     )
     assert "Pluton" not in " ".join(acc._log)
@@ -303,7 +304,7 @@ def _sabotage_tricks(boss: Any, flags: dict[str, object]) -> frozenset[int]:
         drive_round(EventBus(), PartnerState(), ui, acc=ScoreAccumulator(), boss=boss,
                     seed=1, card_enhancements=dict(flags))
     assert ui.captured is not None
-    tricks = ui.captured._joker_state["agent_double_tricks"]
+    tricks = ui.captured.variants.sabotage_tricks
     assert isinstance(tricks, frozenset)
     return tricks
 
@@ -345,7 +346,7 @@ def _play_blind_harness(
     monkeypatch.setattr("belote.belatro.ui.hud.BelAtroHUD", MagicMock())
     monkeypatch.setattr("belote.belatro.ui.trust_bar.TrustBar", MagicMock())
 
-    final_state = new_game()
+    final_state = as_belatro(new_game())
 
     def _fake_drive(**kwargs: Any) -> GameState:
         captured["drive_kwargs"] = kwargs
@@ -556,3 +557,30 @@ def test_shop_with_every_joker_owned_offers_no_duplicate(
     owned = {j.id for j in run.jokers}
     assert not any(getattr(it, "id", None) in owned for it in shop.inventory)
     assert shop.inventory  # tarot/planet/voucher still offered
+
+
+# ── Sans Atout from the normal BelAtro bid prompt ──────────────────────────
+
+
+@pytest.mark.parametrize("pick", [SANS_ATOUT_BID, Suit.TOUT_ATOUT, Suit.SPADES])
+def test_belatro_prompt_bid_keeps_special_contracts(
+    monkeypatch: pytest.MonkeyPatch, pick: object
+) -> None:
+    """SANS_ATOUT_BID is the plain string "sans_atout"; pre-4.10.0 the
+    `isinstance(res, str)` sentinel filter turned it into a pass."""
+    from belote.belatro.main import UICallbacks
+
+    monkeypatch.setattr("belote.ui.prompts.prompt_bid", lambda state, reader: pick)
+    run = BelAtroRun(seed=1)
+    ui = UICallbacks(MagicMock(), run, MagicMock(), MagicMock(), ScoreAccumulator(),
+                     MagicMock(), MagicMock(), False)
+    assert ui.prompt_bid(_round_state(2)) == pick
+
+
+def test_belatro_prompt_bid_undo_sentinel_is_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from belote.belatro.main import UICallbacks
+
+    monkeypatch.setattr("belote.ui.prompts.prompt_bid", lambda state, reader: "UNDO")
+    ui = UICallbacks(MagicMock(), BelAtroRun(seed=1), MagicMock(), MagicMock(),
+                     ScoreAccumulator(), MagicMock(), MagicMock(), False)
+    assert ui.prompt_bid(_round_state(2)) is None

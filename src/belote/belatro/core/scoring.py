@@ -4,11 +4,13 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypedDict
 
+from .state import BelatroState, as_belatro
+
 if TYPE_CHECKING:
     from ..items.base import Joker, JokerResult
     from .round_ledger import RoundLedger
 
-from belote.deck import Rank, Suit
+from belote.deck import Rank, Suit, is_trump_card
 from belote.game import GameState, Seat
 
 from ..engine.event_bus import (
@@ -22,6 +24,8 @@ from ..engine.event_bus import (
 _log = logging.getLogger(__name__)
 
 _NS_TEAM = {Seat.SOUTH, Seat.NORTH}
+
+_HONOR_RANKS = (Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN, Rank.JACK, Rank.NINE)
 
 _SUIT_TO_CONTRACT: dict[Suit, str] = {
     Suit.SPADES: "spades",
@@ -64,9 +68,9 @@ class ScoreAccumulator:
     Accumulates Chips and Mult across one round,
     processing Joker triggers as events arrive.
 
-    4.6.2: per-event `dataclasses.replace(GameState, ...)` is eliminated.
+    4.6.2: per-event `dataclasses.replace(BelatroState, ...)` is eliminated.
     A `RoundLedger` holds chips/mult/money mutably and is sealed to a
-    canonical immutable GameState exactly once at round end. The ledger's
+    canonical immutable BelatroState exactly once at round end. The ledger's
     joker_state dict is shared (same object) with `state._joker_state`
     via a single `replace()` at round start, so classic-Belote read sites
     (ai.py, scoring.py, game.py) see live mutations without further
@@ -75,7 +79,6 @@ class ScoreAccumulator:
 
     deck_id: str = "classique"
     carnet_active: bool = False
-    partner_jokers_double: bool = False
     partner_tier: int = 1  # Phase 2.3 — 0=degraded … 4=elite
     target_score: int = 80
     # 4.7.0: Dix de Der Heist — economy.interest_rate snapshot at round start.
@@ -142,12 +145,15 @@ class ScoreAccumulator:
         # entries in `_handler_index`.
         self._attached_joker_ids = {id(j) for j in jokers}
 
-    def _make_ledger(self, state: GameState) -> RoundLedger:
+    def _make_ledger(self, state: BelatroState) -> RoundLedger:
         from .round_ledger import RoundLedger
         return RoundLedger(joker_state=dict(state._joker_state))
 
-    def trigger_round_start(self, state: GameState) -> GameState:
-        """Initialize joker state at the beginning of a round."""
+    def trigger_round_start(self, state: GameState) -> BelatroState:
+        """Initialize joker state at the beginning of a round.
+
+        Accepts a plain GameState too (upgraded via `as_belatro`)."""
+        state = as_belatro(state)
         self._log.clear()
         # 4.6.2: build the ledger; its joker_state dict will be installed
         # AS state._joker_state below so further mutations need no replace.
@@ -156,7 +162,7 @@ class ScoreAccumulator:
         joker_state = ledger.joker_state
 
         # Inject round context so jokers can read it via state.get(...)
-        joker_state["no_dix_de_der"] = state.boss_modifiers.no_dix_de_der
+        joker_state["no_dix_de_der"] = state.variants.no_dix_de_der
         joker_state["target_score"] = self.target_score
         # 4.5.0: drop any leftover annonce-card sets from a prior round
         # before this round's DeclarationScoredEvents rebuild them. Read by
@@ -218,19 +224,20 @@ class ScoreAccumulator:
             _bonus_money=ledger.money,
         )
 
-    def update_state(self, state: GameState, event: object) -> GameState:
-        """Process an event and return an updated GameState with new score/joker state.
+    def update_state(self, state: GameState, event: object) -> BelatroState:
+        """Process an event and return an updated BelatroState with new score/joker state.
 
         4.6.2: thin backward-compat wrapper around `process_event` +
         `materialize`. Pre-4.6.2 this method did the per-event
         `dataclasses.replace` that is now eliminated for callers using
         `process_event` directly (round_driver). Tests and external callers
-        that still expect a GameState return continue to work unchanged
+        that still expect a BelatroState return continue to work unchanged
         because the lazy-init path below stamps the ledger's joker_state
         onto the input state via a one-time `replace`, restoring the
         shared-dict invariant that trigger_round_start would otherwise
         establish.
         """
+        state = as_belatro(state)
         # Lazily seed a ledger if no trigger_round_start was called — protects
         # legacy unit tests that build a state directly and call update_state.
         if self._ledger is None:
@@ -247,13 +254,16 @@ class ScoreAccumulator:
         self.process_event(state, event)
         return self.materialize(state)
 
-    def process_event(self, state: GameState, event: object) -> None:
+    def process_event(self, state: BelatroState, event: object) -> None:
         """4.6.2 hot-path entry. Mutates the ledger in place. No `replace()`.
 
         Caller is responsible for having called `trigger_round_start` first so
         the ledger and `state._joker_state` share the same dict. Subsequent
         reads of `state._joker_state.get(...)` from classic-Belote code see
         live mutations.
+
+        4.10.0: split into one handler per event type (previously a 369-line
+        body that rebuilt three closures on every call).
         """
         ledger = self._ledger
         assert ledger is not None, (
@@ -261,369 +271,306 @@ class ScoreAccumulator:
             "trigger_round_start installs the RoundLedger and shares its "
             "joker_state dict with state._joker_state."
         )
-        joker_state = ledger.joker_state
-
-        def _apply(result: JokerResult, source: str) -> None:
-            if result.add_chips:
-                ledger.chips += result.add_chips
-                self._log.append(f"{source}: +{result.add_chips} chips")
-            if result.add_mult:
-                ledger.mult += result.add_mult
-                self._log.append(f"{source}: +{result.add_mult} Mult")
-            if result.times_mult:
-                ledger.mult *= result.times_mult
-                self._log.append(f"{source}: ×{result.times_mult} Mult")
-            if result.add_money:
-                ledger.money += result.add_money
-                self._log.append(f"{source}: +${result.add_money}")
-
-        def _apply_edition(joker: Any) -> None:
-            """3.0.0: Foil/Holo/Polychrome ride along with each successful
-            joker trigger. Imported lazily to avoid a circular import via
-            base.py at module load."""
-            from ..items.base import Edition, JokerResult
-
-            ed = getattr(joker, "edition", Edition.NONE)
-            if ed == Edition.FOIL:
-                _apply(JokerResult(add_chips=50), source=f"{joker.name} (Foil)")
-            elif ed == Edition.HOLO:
-                _apply(JokerResult(add_mult=10.0), source=f"{joker.name} (Holo)")
-            elif ed == Edition.POLYCHROME:
-                _apply(JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)")
-
-        def _fire_jokers(method_name: str, event_obj: Any) -> None:
-            # 4.6.2: read pre-resolved (joker, method) pairs from the registry
-            # so the per-event getattr cascade is gone. Lazy build on first
-            # use if a caller forgot to call `attach_jokers` (this also
-            # protects tests that mutate `self._jokers` directly).
-            #
-            # 4.8.2 (B3): also rebuild if the current `_jokers` list differs
-            # from the identity-set captured at the most recent attach. Pre-
-            # 4.8.2 the gate was `not _handler_index and _jokers` — False once
-            # `attach_jokers([])` runs (the index has 5 truthy keys with empty
-            # lists), so tests that appended to `_jokers` after the empty
-            # attach were silently ignored. Identity-set comparison catches
-            # that case and any other post-attach mutation.
-            if self._attached_joker_ids is None:
-                if self._jokers:
-                    self.attach_jokers(self._jokers)
-            elif self._attached_joker_ids != {id(j) for j in self._jokers}:
-                self.attach_jokers(self._jokers)
-            for joker, method in self._handler_index.get(method_name, ()):
-                # 4.6.4: per-joker transactional + EventBus-style isolation.
-                # The transactional() guard documented on RoundLedger was
-                # never wired in pre-4.6.4 — a joker raising mid-dispatch
-                # could leave chips/mult/money/joker_state in a partial
-                # state AND skip every sibling joker. Snapshot self._log
-                # too since `_apply` writes to it (the ledger.log roll-back
-                # alone covers the ledger's own log only).
-                snap_log_len = len(self._log)
-                try:
-                    with ledger.transactional():
-                        result = method(event_obj, joker_state)
-                        if not result:
-                            continue
-                        _apply(result, source=joker.name)
-                        _apply_edition(joker)
-                        # Phase 2.3: partner-joker tier scaling.
-                        # tier 0 (degraded) / 1 (base) → just the baseline apply.
-                        # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect),
-                        #                               matches legacy partner_jokers_double at trust ≥ 7.
-                        # tier 4 (elite) → +2 applies (≈ ×3 effect).
-                        #
-                        # `partner_jokers_double` is the legacy boolean flag (pre-3.5.0
-                        # back-compat for tests that set it directly). When both are
-                        # set, `max()` picks whichever is larger; a one-shot
-                        # DeprecationWarning fires so callers migrate to tier. Kept
-                        # for back-compat with external test fixtures — remove when
-                        # bumping the major (the 4.0 removal target was missed; 4.9.x
-                        # is the current line).
-                        if getattr(joker, "is_partner_joker", False):
-                            # Clamp to the documented [0, 4] tier range; out-of-band
-                            # values from corrupted save state or future mutations
-                            # should degrade to the nearest valid tier rather than
-                            # crash the round with IndexError.
-                            _tier = max(0, min(self.partner_tier, 4))
-                            tier_extras = (0, 0, 1, 1, 2)[_tier]
-                            if self.partner_jokers_double and tier_extras > 0:
-                                import warnings
-                                warnings.warn(
-                                    "ScoreAccumulator.partner_jokers_double is deprecated "
-                                    "alongside partner_tier; set only one. The flag will "
-                                    "be removed in 4.0.",
-                                    DeprecationWarning,
-                                    stacklevel=2,
-                                )
-                            extra_applies = max(
-                                tier_extras, 1 if self.partner_jokers_double else 0
-                            )
-                            for _ in range(extra_applies):
-                                _apply(result, source=f"{joker.name} (T{self.partner_tier})")
-                except Exception:
-                    # Roll back any log lines the partial application wrote
-                    # (the ledger restore is handled by transactional()).
-                    del self._log[snap_log_len:]
-                    _log.exception(
-                        "Joker %s raised on %s; ledger restored, continuing with siblings.",
-                        joker.name, method_name,
-                    )
-
         if isinstance(event, TrickWonEvent):
-            # Base chips from card points
-            ledger.chips += event.card_points
-
-            # Le Républicain: +5 chips per 7 or 8 in any trick (regardless of winner)
-            if self.deck_id == "republicain":
-                wilds = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
-                if wilds:
-                    ledger.chips += wilds * 5
-                    self._log.append(f"Républicain: +{wilds * 5} chips ({wilds}× wild)")
-
-            # Le Carnet: +1 Mult when South personally wins a trick
-            if self.carnet_active and event.winner == Seat.SOUTH:
-                ledger.mult += 1.0
-                self._log.append("Le Carnet: +1 Mult (South won trick)")
-
-            # Planet contract_levels bonuses (applied when NS team wins the trick)
-            if event.winner in _NS_TEAM and self.contract_levels:
-                # Per-suit trump bonuses (Saturn, Venus, Mercury, Jupiter)
-                contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
-                if contract_id:
-                    reward = self.contract_levels.get(contract_id, {})
-                    if reward.get("add_chips"):
-                        ledger.chips += reward["add_chips"]
-                        self._log.append(f"Planet ({contract_id}): +{reward['add_chips']} chips")
-                    if reward.get("add_mult"):
-                        ledger.mult += reward["add_mult"]
-                        self._log.append(f"Planet ({contract_id}): +{reward['add_mult']} Mult")
-                    if reward.get("jack_9_bonus"):
-                        count = sum(1 for c in event.cards if c.rank in (Rank.JACK, Rank.NINE))
-                        if count:
-                            bonus = count * reward["jack_9_bonus"]
-                            ledger.chips += bonus
-                            self._log.append(f"Planet ({contract_id}): +{bonus} chips (J/9)")
-                # The Moon (Sans Atout): honor bonus per honor won
-                if event.trump is None:
-                    moon_reward = self.contract_levels.get("sans_atout", {})
-                    # 4.8.2 (B6): default to `0` (int) so the type-narrowed
-                    # path stays aligned with the `ContractReward.honor_bonus:
-                    # int` TypedDict declaration. The 0.0 default worked by
-                    # accident under Python's numeric duck-typing.
-                    honor_bonus = moon_reward.get("honor_bonus", 0)
-                    if honor_bonus:
-                        honors = sum(
-                            1 for c in event.cards
-                            if c.rank in (Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN, Rank.JACK, Rank.NINE)
-                        )
-                        if honors:
-                            bonus_int = int(honors * honor_bonus)
-                            ledger.chips += bonus_int
-                            self._log.append(f"La Lune: +{bonus_int} chips (honors)")
-                # The Sun (Tout Atout): +X Mult per trick beyond the 4th
-                if event.trump == Suit.TOUT_ATOUT and event.trick_number > 4:
-                    sun_reward = self.contract_levels.get("tout_atout", {})
-                    sun_mult = sun_reward.get("bonus_mult_per_trick", 0.0)
-                    if sun_mult:
-                        ledger.mult += sun_mult
-                        self._log.append(
-                            f"Le Soleil: +{sun_mult} Mult (trick #{event.trick_number})"
-                        )
-
-            # 4.5.0 deck rules — separate from planets (`self.contract_levels`
-            # is empty on a fresh run, so these can't share the gate above).
-            if event.winner in _NS_TEAM:
-                # L'Infiltré: Ghost Lead. When NS wins a trick by playing a
-                # Trump on a non-trump lead, the winner must have been void
-                # of lead (legal_cards forbids trumping while holding lead).
-                # +2 Mult, +$1.
-                if joker_state.get("ghost_lead") and event.trump is not None:
-                    lead_card = event.cards[0] if event.cards else None
-                    lead_suit = lead_card.suit if lead_card else None
-                    # Under TOUT_ATOUT every card is trump, so no play can be
-                    # "void of the led suit" — is_trump_lead resolves to True
-                    # and the bonus is correctly gated off.
-                    # Under La Déluge (seven_eight_trump), a 7 or 8 of any
-                    # suit also functions as trump — a 7-led trick is a
-                    # trump-led trick even when lead_suit != event.trump.
-                    se_lead = (
-                        state.boss_modifiers.seven_eight_trump
-                        and lead_card is not None
-                        and lead_card.rank in (Rank.SEVEN, Rank.EIGHT)
-                    )
-                    is_trump_lead = (
-                        lead_suit == event.trump
-                        or event.trump == Suit.TOUT_ATOUT
-                        or se_lead
-                    )
-                    if lead_suit is not None and not is_trump_lead:
-                        seat = event.leader_seat
-                        for card in event.cards:
-                            if seat == event.winner and card.suit == event.trump:
-                                ledger.mult += 2.0
-                                ledger.money += 1
-                                self._log.append(
-                                    "L'Infiltré: +2 Mult, +$1 (ghost lead)"
-                                )
-                                break
-                            seat = seat.next_seat()
-
-                # L'Architecte: +$2 on NS-won tricks that contain any card
-                # from a declared NS Annonce. The Annonce card-set is
-                # stamped into joker_state by the DeclarationScoredEvent
-                # branch; we look it up here.
-                if joker_state.get("annonce_cash_x2"):
-                    ns_annonce_cards = joker_state.get(
-                        "_architecte_ns_annonce_cards", frozenset()
-                    )
-                    if ns_annonce_cards and any(
-                        (c.suit.name, c.rank.name) in ns_annonce_cards
-                        for c in event.cards
-                    ):
-                        ledger.money += 2
-                        self._log.append("L'Architecte: +$2 (Annonce trick)")
-
-            # 4.7.0: Dix de Der Heist resolution. Two paths share this branch:
-            #   (a) Tricks 1-7 with NS winner: accumulate the forfeit basis.
-            #       We add `event.card_points` (the same value just added to
-            #       `ledger.chips`) into the running sum; symmetric add/subtract
-            #       guarantees that on a forfeit we subtract exactly what we put
-            #       in, regardless of boss modifiers (La Compétition's per-seat
-            #       split is computed elsewhere at round-end and doesn't touch
-            #       `event.card_points`).
-            #   (b) Trick 8 (`is_last`) with a heist declared and unresolved:
-            #       multiply mult by (1 + interest_rate) on NS win, or subtract
-            #       the accumulated NS trick chips on EW win. Sentinel
-            #       `heist_outcome` blocks any re-application — important
-            #       because the HUD calls materialize() ~30× per round and we
-            #       want strict idempotency.
-            #
-            # Ordering: this block runs BEFORE `_fire_jokers("on_trick_won")`
-            # so trick-8 jokers (LeDernierMot ×2, LExecuteur ×1.5, etc.) layer
-            # on top of the heisted base. The heist is the player's contract;
-            # jokers compose on the realized outcome.
-            if joker_state.get("heist_declared"):
-                if event.winner in _NS_TEAM and event.trick_number <= 7:
-                    joker_state["heist_ns_trick_chips"] = (
-                        int(joker_state.get("heist_ns_trick_chips", 0))
-                        + event.card_points
-                    )
-                if event.is_last and joker_state.get("heist_outcome") is None:
-                    if event.winner in _NS_TEAM:
-                        rate = self.interest_rate
-                        multiplier = 1 + rate
-                        if multiplier != 1:
-                            ledger.mult *= float(multiplier)
-                        joker_state["heist_outcome"] = "won"
-                        self._log.append(
-                            f"Dix de Der HEIST SECURED: ×{multiplier} Mult"
-                        )
-                    else:
-                        forfeit = int(joker_state.get("heist_ns_trick_chips", 0))
-                        if forfeit:
-                            ledger.chips -= forfeit
-                        joker_state["heist_outcome"] = "lost"
-                        self._log.append(
-                            f"Dix de Der HEIST BUSTED: -{forfeit} chips "
-                            "(tricks 1-7 forfeited)"
-                        )
-
-            # Fire all Joker triggers
-            _fire_jokers("on_trick_won", event)
-
+            self._on_trick_won(ledger, state, event)
         elif isinstance(event, BeloteAnnouncedEvent):
-            _fire_jokers("on_belote", event)
-
+            self._fire_jokers(ledger, "on_belote", event)
         elif isinstance(event, DeclarationScoredEvent):
-            ledger.chips += event.points
-            # Harvest the NS-team Annonce card-set so downstream consumers
-            # (L'Architecte deck rule, LeCollectionneur joker) can check
-            # trick membership in O(1) on later TrickWonEvents. Rebuilt from
-            # state.declarations on each event — declarations all fire on
-            # trick 1 so the cost is paid once. Frozenset of (suit, rank)
-            # tuples for hashability and joker_state scalar-only invariant.
-            #
-            # 4.6.4: skip the harvest under Le Mime (`declarations_zero`).
-            # The boss's promise is "all declaration value zeroed for the
-            # round" — L'Architecte's `annonce_cash_x2` deck rule and
-            # LeCollectionneur's per-trick bonus are declaration-derived,
-            # so they must be suppressed too. Pre-4.6.4 the harvest ran
-            # regardless of points, leaving Le Mime + L'Architecte as a
-            # score-leak combo (+$2/trick on declared-card tricks).
-            if not state.boss_modifiers.declarations_zero:
-                ns_cards: set[tuple[str, str]] = set()
-                for d in state.declarations:
-                    if d.seat not in _NS_TEAM:
-                        continue
-                    detail = d.detail
-                    cards = getattr(detail, "cards", ()) if detail else ()
-                    for c in cards:
-                        ns_cards.add((c.suit.name, c.rank.name))
-                frozen_ns_cards = frozenset(ns_cards)
-                # L'Architecte's key is kept for backwards-compat with the deck
-                # test that pins it; new consumers read `_ns_annonce_cards`.
-                joker_state["_architecte_ns_annonce_cards"] = frozen_ns_cards
-                joker_state["_ns_annonce_cards"] = frozen_ns_cards
-            _fire_jokers("on_declaration", event)
-
+            self._on_declaration(ledger, state, event)
         elif isinstance(event, RoundEndEvent):
-            # Planet contract_levels money bonuses at round end (Mercury)
-            if self.contract_levels:
-                contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
-                if contract_id:
-                    reward = self.contract_levels.get(contract_id, {})
-                    # Only the player's (NS) successful contracts pay — an EW
-                    # take must not credit NS money.
-                    if (
-                        reward.get("add_money")
-                        and event.taker_seat in _NS_TEAM
-                        and not event.breakdown.is_failed
-                    ):
-                        ledger.money += reward["add_money"]
-                        self._log.append(f"Planet ({contract_id}): +${reward['add_money']}")
-                # Pluto (Capot bonus): only when NS took the contract AND made
-                # it as a capot — planets level up the player's own contracts
-                # (same rule as Mercury above). `event.capot` alone is also
-                # True for an EW capot, and a defensive NS capot doesn't count.
-                if (
-                    event.ns_capot
-                    and event.taker_seat in _NS_TEAM
-                    and not event.breakdown.is_failed
-                ):
-                    pluto_reward = self.contract_levels.get("capot", {})
-                    if pluto_reward.get("capot_bonus"):
-                        ledger.chips += pluto_reward["capot_bonus"]
-                        self._log.append(f"Pluton: +{pluto_reward['capot_bonus']} chips (capot)")
-                # Libra (Coinche): +X Mult per coinche level on success
-                if (
-                    event.coinche_level > 0
-                    and event.taker_seat in _NS_TEAM
-                    and not event.breakdown.is_failed
-                ):
-                    libra_reward = self.contract_levels.get("coinche", {})
-                    libra_mult: float = libra_reward.get("coinche_multiplier", 0.0)
-                    if libra_mult:
-                        libra_bonus: float = libra_mult * event.coinche_level
-                        ledger.mult += libra_bonus
-                        self._log.append(
-                            f"Balance: +{libra_bonus} Mult (coinche×{event.coinche_level})"
-                        )
-            _fire_jokers("on_round_end", event)
-
+            self._on_round_end(ledger, event)
         elif isinstance(event, BidMadeEvent):
-            # Inject contract type into joker state so jokers can read it
-            joker_state["contract"] = event.contract
+            # Inject contract type into joker state so jokers can read it.
+            ledger.joker_state["contract"] = event.contract
             # Re-emits (post-coinche refresh) update derived state but must not
             # re-fire on_bid jokers — those already fired for the original bid.
             if not event.re_emit:
-                _fire_jokers("on_bid", event)
-
+                self._fire_jokers(ledger, "on_bid", event)
         # 4.6.2: no `replace(state, ...)` here — the ledger holds chips/mult/
         # money, and joker_state is the same dict object as state._joker_state
         # (installed at trigger_round_start). seal_round / materialize stamp
-        # the values back into a frozen GameState when the caller needs it.
+        # the values back into a frozen BelatroState when the caller needs it.
 
-    def materialize(self, state: GameState) -> GameState:
-        """Return a sealed GameState with ledger values stamped in.
+    # ── ledger application helpers ──────────────────────────────────────
+
+    def _apply(self, ledger: RoundLedger, result: JokerResult, source: str) -> None:
+        if result.add_chips:
+            ledger.chips += result.add_chips
+            self._log.append(f"{source}: +{result.add_chips} chips")
+        if result.add_mult:
+            ledger.mult += result.add_mult
+            self._log.append(f"{source}: +{result.add_mult} Mult")
+        if result.times_mult:
+            ledger.mult *= result.times_mult
+            self._log.append(f"{source}: ×{result.times_mult} Mult")
+        if result.add_money:
+            ledger.money += result.add_money
+            self._log.append(f"{source}: +${result.add_money}")
+
+    def _apply_edition(self, ledger: RoundLedger, joker: Joker) -> None:
+        """3.0.0: Foil/Holo/Polychrome ride along with each successful joker
+        trigger. Imported lazily to avoid a circular import via base.py."""
+        from ..items.base import Edition, JokerResult
+
+        ed = getattr(joker, "edition", Edition.NONE)
+        if ed == Edition.FOIL:
+            self._apply(ledger, JokerResult(add_chips=50), source=f"{joker.name} (Foil)")
+        elif ed == Edition.HOLO:
+            self._apply(ledger, JokerResult(add_mult=10.0), source=f"{joker.name} (Holo)")
+        elif ed == Edition.POLYCHROME:
+            self._apply(
+                ledger, JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)"
+            )
+
+    def _fire_jokers(self, ledger: RoundLedger, method_name: str, event_obj: Any) -> None:
+        # 4.6.2: read pre-resolved (joker, method) pairs from the registry so
+        # the per-event getattr cascade is gone. Lazy build on first use if a
+        # caller forgot to call `attach_jokers`.
+        #
+        # 4.8.2 (B3): also rebuild if the current `_jokers` list differs from
+        # the identity-set captured at the most recent attach (catches tests
+        # that append to `_jokers` after an empty attach, and any other
+        # post-attach mutation).
+        if self._attached_joker_ids is None:
+            if self._jokers:
+                self.attach_jokers(self._jokers)
+        elif self._attached_joker_ids != {id(j) for j in self._jokers}:
+            self.attach_jokers(self._jokers)
+        joker_state = ledger.joker_state
+        for joker, method in self._handler_index.get(method_name, ()):
+            # 4.6.4: per-joker transactional + EventBus-style isolation. A
+            # joker raising mid-dispatch must not leave chips/mult/money/
+            # joker_state half-applied nor skip its siblings. self._log is
+            # snapshotted too since `_apply` writes to it.
+            snap_log_len = len(self._log)
+            try:
+                with ledger.transactional():
+                    result = method(event_obj, joker_state)
+                    if not result:
+                        continue
+                    self._apply(ledger, result, source=joker.name)
+                    self._apply_edition(ledger, joker)
+                    # Phase 2.3: partner-joker tier scaling.
+                    # tier 0 (degraded) / 1 (base) → just the baseline apply.
+                    # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect, trust 5–8).
+                    # tier 4 (elite) → +2 applies (≈ ×3 effect).
+                    # (The pre-3.5.0 `partner_jokers_double` flag was removed
+                    # in 4.10.0; tier fully subsumes it.)
+                    if getattr(joker, "is_partner_joker", False):
+                        # Clamp to [0, 4] so corrupted save state degrades to
+                        # the nearest valid tier instead of an IndexError.
+                        tier = max(0, min(self.partner_tier, 4))
+                        for _ in range((0, 0, 1, 1, 2)[tier]):
+                            self._apply(
+                                ledger, result, source=f"{joker.name} (T{self.partner_tier})"
+                            )
+            except Exception:
+                # Roll back any log lines the partial application wrote
+                # (the ledger restore is handled by transactional()).
+                del self._log[snap_log_len:]
+                _log.exception(
+                    "Joker %s raised on %s; ledger restored, continuing with siblings.",
+                    joker.name, method_name,
+                )
+
+    # ── TrickWonEvent ───────────────────────────────────────────────────
+
+    def _on_trick_won(self, ledger: RoundLedger, state: BelatroState, event: TrickWonEvent) -> None:
+        # Base chips from card points.
+        ledger.chips += event.card_points
+        self._trick_deck_bonuses(ledger, event)
+        if event.winner in _NS_TEAM:
+            if self.contract_levels:
+                self._trick_planet_bonuses(ledger, event)
+            # 4.5.0 deck rules — separate from planets (`contract_levels` is
+            # empty on a fresh run, so these can't share the gate above).
+            self._trick_infiltre(ledger, state, event)
+            self._trick_architecte(ledger, event)
+        # Heist runs BEFORE on_trick_won jokers so trick-8 jokers (LeDernierMot
+        # ×2, LExecuteur ×1.5, ...) layer on top of the heisted base. The heist
+        # is the player's contract; jokers compose on the realized outcome.
+        self._trick_heist(ledger, event)
+        self._fire_jokers(ledger, "on_trick_won", event)
+
+    def _trick_deck_bonuses(self, ledger: RoundLedger, event: TrickWonEvent) -> None:
+        # Le Républicain: +5 chips per 7 or 8 in any trick (regardless of winner).
+        if self.deck_id == "republicain":
+            wilds = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
+            if wilds:
+                ledger.chips += wilds * 5
+                self._log.append(f"Républicain: +{wilds * 5} chips ({wilds}× wild)")
+        # Le Carnet: +1 Mult when South personally wins a trick.
+        if self.carnet_active and event.winner == Seat.SOUTH:
+            ledger.mult += 1.0
+            self._log.append("Le Carnet: +1 Mult (South won trick)")
+
+    def _trick_planet_bonuses(self, ledger: RoundLedger, event: TrickWonEvent) -> None:
+        """Planet contract_levels bonuses on an NS-won trick."""
+        # Per-suit trump bonuses (Saturn, Venus, Mercury, Jupiter).
+        contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
+        if contract_id:
+            reward = self.contract_levels.get(contract_id, {})
+            if reward.get("add_chips"):
+                ledger.chips += reward["add_chips"]
+                self._log.append(f"Planet ({contract_id}): +{reward['add_chips']} chips")
+            if reward.get("add_mult"):
+                ledger.mult += reward["add_mult"]
+                self._log.append(f"Planet ({contract_id}): +{reward['add_mult']} Mult")
+            if reward.get("jack_9_bonus"):
+                count = sum(1 for c in event.cards if c.rank in (Rank.JACK, Rank.NINE))
+                if count:
+                    bonus = count * reward["jack_9_bonus"]
+                    ledger.chips += bonus
+                    self._log.append(f"Planet ({contract_id}): +{bonus} chips (J/9)")
+        # The Moon (Sans Atout): honor bonus per honor won.
+        if event.trump is None:
+            # 4.8.2 (B6): int default to match `ContractReward.honor_bonus: int`.
+            honor_bonus = self.contract_levels.get("sans_atout", {}).get("honor_bonus", 0)
+            if honor_bonus:
+                honors = sum(1 for c in event.cards if c.rank in _HONOR_RANKS)
+                if honors:
+                    bonus_int = int(honors * honor_bonus)
+                    ledger.chips += bonus_int
+                    self._log.append(f"La Lune: +{bonus_int} chips (honors)")
+        # The Sun (Tout Atout): +X Mult per trick beyond the 4th.
+        if event.trump == Suit.TOUT_ATOUT and event.trick_number > 4:
+            sun_reward = self.contract_levels.get("tout_atout", {})
+            sun_mult = sun_reward.get("bonus_mult_per_trick", 0.0)
+            if sun_mult:
+                ledger.mult += sun_mult
+                self._log.append(f"Le Soleil: +{sun_mult} Mult (trick #{event.trick_number})")
+
+    def _trick_infiltre(self, ledger: RoundLedger, state: BelatroState, event: TrickWonEvent) -> None:
+        """L'Infiltré (Ghost Lead): NS wins by trumping a non-trump lead (the
+        winner must have been void of the lead suit) → +2 Mult, +$1.
+
+        Under Tout Atout every card is trump, so no lead is "non-trump" and the
+        bonus is gated off; under La Déluge a led 7/8 is a trump lead.
+        """
+        if not ledger.joker_state.get("ghost_lead") or event.trump is None or not event.cards:
+            return
+        lead_card = event.cards[0]
+        se = state.variants.seven_eight_trump
+        if is_trump_card(lead_card, event.trump, se):
+            return
+        seat = event.leader_seat
+        for card in event.cards:
+            if seat == event.winner and card.suit == event.trump:
+                ledger.mult += 2.0
+                ledger.money += 1
+                self._log.append("L'Infiltré: +2 Mult, +$1 (ghost lead)")
+                return
+            seat = seat.next_seat()
+
+    def _trick_architecte(self, ledger: RoundLedger, event: TrickWonEvent) -> None:
+        """L'Architecte: +$2 on NS-won tricks containing a card from a declared
+        NS Annonce (card-set stamped by `_on_declaration`)."""
+        joker_state = ledger.joker_state
+        if not joker_state.get("annonce_cash_x2"):
+            return
+        ns_annonce_cards = joker_state.get("_architecte_ns_annonce_cards", frozenset())
+        if ns_annonce_cards and any(
+            (c.suit.name, c.rank.name) in ns_annonce_cards for c in event.cards
+        ):
+            ledger.money += 2
+            self._log.append("L'Architecte: +$2 (Annonce trick)")
+
+    def _trick_heist(self, ledger: RoundLedger, event: TrickWonEvent) -> None:
+        """4.7.0 Dix de Der Heist.
+
+        (a) Tricks 1-7 won by NS: accumulate the forfeit basis — the same
+            `event.card_points` just added to `ledger.chips`, so a forfeit
+            subtracts exactly what was put in regardless of boss modifiers.
+        (b) Trick 8 with a heist declared and unresolved: ×(1 + interest_rate)
+            Mult on an NS win, or subtract the accumulated chips on an EW win.
+            The `heist_outcome` sentinel blocks re-application (the HUD calls
+            materialize() ~30× per round, so this must be idempotent).
+        """
+        joker_state = ledger.joker_state
+        if not joker_state.get("heist_declared"):
+            return
+        if event.winner in _NS_TEAM and event.trick_number <= 7:
+            joker_state["heist_ns_trick_chips"] = (
+                int(joker_state.get("heist_ns_trick_chips", 0)) + event.card_points
+            )
+        if not event.is_last or joker_state.get("heist_outcome") is not None:
+            return
+        if event.winner in _NS_TEAM:
+            multiplier = 1 + self.interest_rate
+            if multiplier != 1:
+                ledger.mult *= float(multiplier)
+            joker_state["heist_outcome"] = "won"
+            self._log.append(f"Dix de Der HEIST SECURED: ×{multiplier} Mult")
+        else:
+            forfeit = int(joker_state.get("heist_ns_trick_chips", 0))
+            if forfeit:
+                ledger.chips -= forfeit
+            joker_state["heist_outcome"] = "lost"
+            self._log.append(
+                f"Dix de Der HEIST BUSTED: -{forfeit} chips (tricks 1-7 forfeited)"
+            )
+
+    # ── DeclarationScoredEvent ──────────────────────────────────────────
+
+    def _on_declaration(
+        self, ledger: RoundLedger, state: BelatroState, event: DeclarationScoredEvent
+    ) -> None:
+        ledger.chips += event.points
+        # Harvest the NS-team Annonce card-set so L'Architecte (deck rule) and
+        # LeCollectionneur (joker) can check trick membership in O(1) on later
+        # TrickWonEvents. Frozenset of (suit, rank) name tuples (hashable,
+        # satisfies the joker_state scalar-only invariant).
+        #
+        # 4.6.4: skipped under Le Mime (`declarations_zero`) — those consumers
+        # are declaration-derived, so the boss must suppress them too.
+        if not state.variants.declarations_zero:
+            frozen_ns_cards = frozenset(
+                (c.suit.name, c.rank.name)
+                for d in state.declarations
+                if d.seat in _NS_TEAM and d.detail is not None
+                for c in d.detail.cards
+            )
+            # L'Architecte's key is kept for the deck test that pins it; new
+            # consumers read `_ns_annonce_cards`.
+            ledger.joker_state["_architecte_ns_annonce_cards"] = frozen_ns_cards
+            ledger.joker_state["_ns_annonce_cards"] = frozen_ns_cards
+        self._fire_jokers(ledger, "on_declaration", event)
+
+    # ── RoundEndEvent ───────────────────────────────────────────────────
+
+    def _on_round_end(self, ledger: RoundLedger, event: RoundEndEvent) -> None:
+        # Planets only level up the player's own (NS) successful contracts.
+        ns_success = event.taker_seat in _NS_TEAM and not event.breakdown.is_failed
+        if self.contract_levels and ns_success:
+            # Mercury & co.: per-contract money bonus.
+            contract_id = _SUIT_TO_CONTRACT.get(event.trump) if event.trump else None
+            if contract_id:
+                reward = self.contract_levels.get(contract_id, {})
+                if reward.get("add_money"):
+                    ledger.money += reward["add_money"]
+                    self._log.append(f"Planet ({contract_id}): +${reward['add_money']}")
+            # Pluto (Capot): `event.capot` alone is also True for an EW capot;
+            # require an NS capot on an NS contract.
+            if event.ns_capot:
+                capot_bonus = self.contract_levels.get("capot", {}).get("capot_bonus")
+                if capot_bonus:
+                    ledger.chips += capot_bonus
+                    self._log.append(f"Pluton: +{capot_bonus} chips (capot)")
+            # Libra (Coinche): +X Mult per coinche level.
+            if event.coinche_level > 0:
+                libra_mult: float = self.contract_levels.get("coinche", {}).get(
+                    "coinche_multiplier", 0.0
+                )
+                if libra_mult:
+                    libra_bonus: float = libra_mult * event.coinche_level
+                    ledger.mult += libra_bonus
+                    self._log.append(
+                        f"Balance: +{libra_bonus} Mult (coinche×{event.coinche_level})"
+                    )
+        self._fire_jokers(ledger, "on_round_end", event)
+
+    def materialize(self, state: BelatroState) -> BelatroState:
+        """Return a sealed BelatroState with ledger values stamped in.
 
         Cheap to call (one `replace()` per call). Round_driver invokes this
         at HUD-render boundaries and at round-end. Idempotent within a round:
@@ -634,7 +581,7 @@ class ScoreAccumulator:
             return state
         return self._ledger.seal_round(state)
 
-    def seal_round(self, state: GameState) -> GameState:
+    def seal_round(self, state: BelatroState) -> BelatroState:
         """Round-end synonym for `materialize`. Use this at the round boundary
         for readability; semantically identical to `materialize`."""
         return self.materialize(state)
@@ -645,17 +592,17 @@ class ScoreAccumulator:
         per-render `dataclasses.replace`."""
         if self._ledger is not None:
             return int(self._ledger.chips)
-        return int(state._chips)
+        return int(as_belatro(state)._chips)
 
     def _live_mult(self, state: GameState) -> float:
         if self._ledger is not None:
             return float(self._ledger.mult)
-        return float(state._mult)
+        return float(as_belatro(state)._mult)
 
     def _live_money(self, state: GameState) -> int:
         if self._ledger is not None:
             return int(self._ledger.money)
-        return int(state._bonus_money)
+        return int(as_belatro(state)._bonus_money)
 
     # Public accessors for the HUD — read these mid-round instead of
     # state._chips / state._mult / state._bonus_money to avoid stale values.
@@ -679,7 +626,7 @@ class ScoreAccumulator:
             return chips * int(mult)
         return int(chips * mult)
 
-    def get_popup_lines(self, state: GameState) -> list[str]:
+    def get_popup_lines(self, state: BelatroState) -> list[str]:
         # Match the clamp in get_total(): L'Égoïste can push _chips negative
         # mid-round; the popup line would otherwise read "Chips -12 × Mult …
         # = 0" which looks like a UI bug rather than the intended clamp.

@@ -16,31 +16,10 @@ if TYPE_CHECKING:
     from ..core.scoring import ScoreAccumulator
     from ..run.boss import BossModifier
 
-OVERLAY = "OVERLAY"
-
-_overlay_visible: bool = False
-
-# 4.6.3: separate flag for the BelAtro top-row overlays (joker pip strip,
+# 4.6.3: visibility flag for the BelAtro top-row overlays (joker pip strip,
 # ante/blind/target line, chips×mult score, trust bar, synergy tooltip).
-# Default visible; toggled by the I/V key. Kept independent of
-# `_overlay_visible` because that flag is owned by the score-popup transient
-# and gets flipped on/off inside `score_popup()`.
+# Default visible; toggled by the I key.
 _top_hud_visible: bool = True
-
-
-def is_overlay_visible() -> bool:
-    return _overlay_visible
-
-
-def toggle_overlay() -> None:
-    global _overlay_visible
-    _overlay_visible = not _overlay_visible
-
-
-def reset_overlay_state() -> None:
-    """Reset overlay state to False. Call between tests to prevent state leakage."""
-    global _overlay_visible
-    _overlay_visible = False
 
 
 def is_top_hud_visible() -> bool:
@@ -332,36 +311,6 @@ class BelAtroAnnounce:
             invalidate_diff()
 
     @staticmethod
-    def score_popup(lines: list[str], reader: KeyReader) -> None:
-        """Show a temporary score breakdown popup."""
-        from belote.ui.render import get_term_size
-
-        term_w, term_h = get_term_size()
-        if not lines:
-            return
-        toggle_overlay()
-        start_row = max(1, term_h - len(lines) - 4)
-        for i, line in enumerate(lines):
-            print(move(start_row + i, 1) + ansi_center(gold_fg() + line + RESET, term_w))
-        end = time.time() + 1.5
-        remaining = end - time.time()
-        while remaining > 0:
-            event = reader.read_timeout(remaining)
-            if event is None:
-                break
-            key = event.key
-            if key in (Key.SPACE, Key.ESC, Key.ENTER, Key.EOF):
-                break
-            remaining = end - time.time()
-        toggle_overlay()
-        # The popup painted lines directly to stdout. Without resetting the
-        # diff baseline, the next display() call diffs the (unchanged) game
-        # state against the cached pre-popup baseline, sees no row changes,
-        # and writes nothing — leaving the popup lines visible "the whole
-        # time" until something forces a full redraw.
-        invalidate_diff()
-
-    @staticmethod
     def slot_machine_tally(
         acc: ScoreAccumulator,
         state: GameState,
@@ -383,7 +332,7 @@ class BelAtroAnnounce:
           - >= target      : gold
           - >= target × 1.2: gold + flame row above the odometer
 
-        Suppressed under `state.boss_modifiers.hide_hud` (Le Brouillard's
+        Suppressed under `state.variants.hide_hud` (Le Brouillard's
         "hide the score" promise) — the round still progresses, just no
         animation. `invalidate_diff()` always runs in the `finally` block
         per the 4.6.4 overlay rule (pinned by
@@ -405,8 +354,8 @@ class BelAtroAnnounce:
         new_total = acc.get_total(state)
         term_w, term_h = get_term_size()
         if (
-            state.boss_modifiers.hide_hud
-            or state.boss_modifiers.separate_scoring
+            state.variants.hide_hud
+            or state.variants.separate_scoring
             or term_h < 6
         ):
             _last_tally_total = new_total

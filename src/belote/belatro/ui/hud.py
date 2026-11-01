@@ -26,8 +26,6 @@ if TYPE_CHECKING:
     from ..core.scoring import ScoreAccumulator
 
 
-_BLIND_NAMES = ["Small Blind", "Big Blind", "Boss Blind"]
-
 _MOOD_GLYPH = {
     "degraded": "✗",
     "sulking": "·",
@@ -118,7 +116,7 @@ def _emit_tally_readout(
 
     if _last_tally_readout is None:
         return
-    if state.boss_modifiers.hide_hud:
+    if state.variants.hide_hud:
         return
     if term_h < 6:
         return
@@ -168,7 +166,7 @@ class BelAtroHUD:
         # instead of once. Compact path mirrors this (see `_render_compact`).
         pip_strip = ""
         synergy_tip = ""
-        if not state.boss_modifiers.hide_hud:
+        if not state.variants.hide_hud:
             pip_strip = build_joker_pip_strip(run, term_w, row=1)
             # Row 5 in both layouts: TrustBar.render() paints row 4 col 2 right
             # after the HUD, which used to overwrite the compact tooltip.
@@ -224,8 +222,8 @@ class BelAtroHUD:
         # adds trick points sequentially while the final score takes the
         # per-seat max — the two diverge, so showing a misleading running
         # total during play would confuse the player. 3.9.3.
-        if not state.boss_modifiers.hide_hud:
-            if state.boss_modifiers.separate_scoring:
+        if not state.variants.hide_hud:
+            if state.variants.separate_scoring:
                 disclaimer = "[Compétition: score par siège — total final caché]"
                 col = max(2, term_w - len(disclaimer) - 2)
                 parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
@@ -344,8 +342,8 @@ class BelAtroHUD:
         # Row 3: chips × mult on the right (hidden by Le Brouillard, also
         # suppressed under La Compétition since the running total diverges
         # from the per-seat-max final score — 3.9.3).
-        if not state.boss_modifiers.hide_hud:
-            if state.boss_modifiers.separate_scoring:
+        if not state.variants.hide_hud:
+            if state.variants.separate_scoring:
                 disclaimer = "[Compétition]"
                 col = max(2, term_w - len(disclaimer) - 2)
                 parts.append(move(3, col) + DIM + disclaimer + RESET + "\n")
@@ -379,16 +377,9 @@ class BelAtroHUD:
 
 # ── 3.4.0: joker pip strip + synergy tooltip ────────────────────────────────
 
-# Edition glyph & colour for the pip strip. Polychrome cycles colours but we
-# keep a stable accent so the strip doesn't flicker — the visual interest
-# comes from the colour difference between editions, not animation.
-_EDITION_GLYPH: dict[str, str] = {
-    "none": " ",
-    "foil": "F",
-    "holo": "H",
-    "poly": "P",
-    "neg": "N",
-}
+# Edition colour for the pip strip. Polychrome cycles colours but we keep a
+# stable accent so the strip doesn't flicker — the visual interest comes from
+# the colour difference between editions, not animation.
 
 
 def _edition_color(ed_value: str) -> str:

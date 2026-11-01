@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
-
-def _is_windows() -> bool:
-    # Indirection so tests can exercise the Windows branch without patching
-    # os.name globally (pathlib picks its flavour from it).
-    return os.name == "nt"
+from .paths import data_dir
 
 
 @dataclass(frozen=True)
@@ -52,39 +47,19 @@ class Config:
     def SPEED_TIMINGS(self) -> dict[str, tuple[float, float, float]]:  # noqa: N802
         return dict(self._SPEED_TIMINGS)
 
-    # UI Dimensions — kept for backward compatibility with code that hasn't been
-    # migrated to the layout system yet. New code should read from
-    # `belote.ui.layout.choose_layout(cols, rows)` instead.
-    CARD_W: int = 9
-    CARD_H: int = 7
-    CARD_GAP: int = 1
-    # Hard floor — `belote.ui.layout.MIN_COLS/MIN_ROWS` is the canonical source;
-    # these mirror it for the startup-time check in main.py.
-    MIN_TERM_W: int = 80
-    MIN_TERM_H: int = 32
-    THEME_NAME: str = "classic_green"
+    # UI dimensions live in `belote.ui.layout` (choose_layout / MIN_COLS /
+    # MIN_ROWS); the theme selection lives in `belote.themes`.
 
     @property
     def stats_path(self) -> Path:
-        xdg_data = os.environ.get("XDG_DATA_HOME")
-        appdata = os.environ.get("APPDATA")
-        if _is_windows() and appdata:
-            # Mirror belatro.progression.save.SaveManager so classic stats and
-            # the BelAtro profile live side by side under %APPDATA%\belote.
-            base = Path(appdata) / "belote"
-        elif xdg_data:
-            base = Path(xdg_data) / "belote"
-        else:
-            base = Path.home() / ".local" / "share" / "belote"
+        # Shared with the BelAtro profile / run history / ghosts via
+        # belote.paths so every data file lives side by side.
+        base = data_dir()
         # Don't mkdir here — every reader/writer that actually persists
         # (stats.save_stats, save.SaveManager.save_profile) ensures the
         # directory exists at write time. Side-effecting on every property
         # access used to syscall on every render path.
         return base / "stats.json"
-
-    def ensure_stats_dir(self) -> None:
-        """Create stats directory if it doesn't exist."""
-        self.stats_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 GLOBAL_CONFIG = Config()

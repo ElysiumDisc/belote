@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import EventBus, TrickWonEvent
 from belote.belatro.engine.round_driver import RoundUICallbacks, drive_round
 from belote.belatro.items.base import Joker, JokerResult
@@ -31,7 +32,7 @@ def test_score_accumulator_chip_overflow():
     large_chips = 2**60 + 123456789
     large_mult = 10**12
     # Ensure _mult is effectively an int for our new precise get_total
-    state = GameState(hands=((), (), (), ()), _chips=large_chips, _mult=float(large_mult))
+    state = BelatroState(hands=((), (), (), ()), _chips=large_chips, _mult=float(large_mult))
 
     total = acc.get_total(state)
 
@@ -41,7 +42,7 @@ def test_score_accumulator_chip_overflow():
 def test_score_accumulator_mult_zero():
     # 29. ScoreAccumulator mult ×0 edge case - If mult somehow becomes 0, verify total is 0.
     acc = ScoreAccumulator()
-    state = GameState(hands=((), (), (), ()), _chips=1000, _mult=0.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=1000, _mult=0.0)
     assert acc.get_total(state) == 0
 
 def test_multiple_jokers_same_event():
@@ -59,7 +60,7 @@ def test_multiple_jokers_same_event():
     acc = ScoreAccumulator()
     acc.attach_jokers([joker1, joker2])
 
-    state = GameState(hands=((), (), (), ()), _chips=0, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
     event = TrickWonEvent(winner=Seat.SOUTH, cards=(), trick_number=1, is_last=False, card_points=10, trump=None)
 
     state = acc.update_state(state, event)
@@ -130,7 +131,7 @@ def test_boss_modifier_patch_persistence():
     from belote.belatro.engine.modifier_patch import PatchedGameState
     from belote.belatro.run.boss import BossModifier
 
-    state = GameState(hands=((), (), (), ()))
+    state = BelatroState(hands=((), (), (), ()))
     proxy = PatchedGameState(state)
 
     class MockBoss(BossModifier):
@@ -142,17 +143,17 @@ def test_boss_modifier_patch_persistence():
             # removed in modifier_patch.py).
             state_proxy.invert_scoring = True
             # Test that we can read it back from proxy via the canonical path
-            assert state_proxy.boss_modifiers.invert_scoring is True
+            assert state_proxy.variants.invert_scoring is True
             # Test that we can read something else from base state
             assert state_proxy.phase == Phase.DEAL
             return state_proxy
 
     MockBoss().apply(proxy)
 
-    assert proxy.boss_modifiers.invert_scoring is True
+    assert proxy.variants.invert_scoring is True
     patches = dict(object.__getattribute__(proxy, "_patches"))
-    assert "boss_modifiers" in patches
-    assert patches["boss_modifiers"].invert_scoring is True
+    assert "variants" in patches
+    assert patches["variants"].invert_scoring is True
 
 
 # ── B1 regression: sabotage_tricks populated for any agent_double_active source ──
@@ -208,7 +209,7 @@ def test_agent_double_boss_populates_sabotage_tricks() -> None:
     from belote.belatro.run.boss import LAgentDoubleBoss
 
     state = _capture_post_setup_state(boss=LAgentDoubleBoss())
-    tricks = state._joker_state.get("agent_double_tricks")
+    tricks = state.variants.sabotage_tricks
     assert isinstance(tricks, frozenset)
     assert len(tricks) == 3
     assert all(1 <= t <= 8 for t in tricks)
@@ -224,17 +225,17 @@ def test_betrayal_arc_populates_late_sabotage_tricks() -> None:
     from belote.belatro.run.boss import BetrayalArc
 
     state = _capture_post_setup_state(boss=BetrayalArc())
-    assert state.boss_modifiers.agent_double_active is True
-    assert state.boss_modifiers.agent_double_late_only is True
-    assert state._joker_state.get("agent_double_tricks") == frozenset(range(4, 9))
+    assert state.variants.agent_double_active is True
+    assert state.variants.agent_double_late_only is True
+    assert state.variants.sabotage_tricks == frozenset(range(4, 9))
 
 
 def test_traitre_joker_sabotage_preserved_when_no_boss() -> None:
     """Le Traître joker (card_enhancement) sets a single sabotage trick that the
     flag-based dispatch must not clobber."""
     state = _capture_post_setup_state(card_enhancements={"traitre_active": True})
-    assert state.boss_modifiers.agent_double_active is True
-    tricks = state._joker_state.get("agent_double_tricks")
+    assert state.variants.agent_double_active is True
+    tricks = state.variants.sabotage_tricks
     assert isinstance(tricks, frozenset)
     assert len(tricks) == 1  # traitre's "single random trick" pattern
 
@@ -313,10 +314,9 @@ def test_ew_should_coinche_baseline_rate() -> None:
 
     from belote.belatro.engine.round_driver import _ew_should_coinche
     from belote.deck import Card, Rank, Suit
-    from belote.game import GameState
 
     # Balanced (no defender holds 2+ J/A) → baseline 20% rate.
-    weak_state = GameState(
+    weak_state = BelatroState(
         hands=(
             (),
             (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT)),  # East
@@ -331,7 +331,7 @@ def test_ew_should_coinche_baseline_rate() -> None:
     assert 1700 <= fires <= 2300, f"baseline fire-rate out of band: {fires}/10000"
 
     # Strong defender (East holds 2 honours) → bumps to 35%.
-    strong_state = GameState(
+    strong_state = BelatroState(
         hands=(
             (),
             (Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.ACE)),  # East
@@ -537,7 +537,7 @@ def test_d3_default_callback_returns_false() -> None:
     """Default RoundUICallbacks.prompt_surcoinche must return False (no-op)."""
     cb = MockUICallbacks()
     # MockUICallbacks inherits the default from RoundUICallbacks.
-    state = GameState(hands=((), (), (), ()))
+    state = BelatroState(hands=((), (), (), ()))
     assert cb.prompt_surcoinche(state, Seat.EAST) is False
 
 
@@ -548,7 +548,7 @@ def test_d3_default_callback_returns_false() -> None:
 def test_boss_flags_applied_before_trigger_round_start() -> None:
     """3.8.1 fix: round_driver previously called acc.trigger_round_start
     BEFORE boss.apply, so any joker_state field derived from
-    state.boss_modifiers.X (e.g. joker_state["no_dix_de_der"]) captured the
+    state.variants.X (e.g. joker_state["no_dix_de_der"]) captured the
     default value instead of the boss-patched one. The order must be
     boss.apply → trigger_round_start.
 
@@ -587,7 +587,7 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
 
     class _SpyAcc(ScoreAccumulator):
         def trigger_round_start(self, state):  # type: ignore[no-untyped-def, override]
-            captured["no_dix_de_der"] = state.boss_modifiers.no_dix_de_der
+            captured["no_dix_de_der"] = state.variants.no_dix_de_der
             return super().trigger_round_start(state)
 
     acc = _SpyAcc(target_score=80)
@@ -608,7 +608,7 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
 
     assert captured.get("no_dix_de_der") is True, (
         "Boss flag was not applied before trigger_round_start — the joker "
-        "state snapshot would see stale BossModifiers defaults."
+        "state snapshot would see stale RuleVariants defaults."
     )
 
 
@@ -707,7 +707,7 @@ def test_raising_joker_isolated_via_transactional(caplog):
     acc = ScoreAccumulator()
     acc.attach_jokers([HalfThenRaise(), AlwaysAdds()])
 
-    state = GameState(hands=((), (), (), ()), _chips=0, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
     event = TrickWonEvent(
         winner=Seat.SOUTH, cards=(), trick_number=1,
         is_last=False, card_points=10, trump=None,

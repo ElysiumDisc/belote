@@ -3,18 +3,19 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from belote.game import BossModifiers, GameState
+from belote.game import GameState
+from belote.variants import RuleVariants
 
-# Derived from BossModifiers so new flags added there are picked up
+# Derived from RuleVariants so new flags added there are picked up
 # automatically; previously this was a hardcoded set that silently no-op'd
 # any new boss field not added here in lockstep.
-_BOSS_FIELDS: frozenset[str] = frozenset(f.name for f in dataclasses.fields(BossModifiers))
+_BOSS_FIELDS: frozenset[str] = frozenset(f.name for f in dataclasses.fields(RuleVariants))
 
 
 class PatchedGameState:
     """
     Thin proxy around a classic GameState.
-    BossModifiers register patches; everything else falls through untouched.
+    RuleVariants register patches; everything else falls through untouched.
     """
 
     def __init__(self, state: GameState) -> None:
@@ -34,7 +35,7 @@ class PatchedGameState:
         `test_invariant_no_underscore_boss_attrs`.
 
         3.6.0 (audit M3): narrowed the leading-underscore guard so it only
-        rejects `_X` where `X` is an actual BossModifiers field name — the
+        rejects `_X` where `X` is an actual RuleVariants field name — the
         precise anti-pattern. Legitimate GameState scalars like `_chips`,
         `_mult`, `_joker_state`, `_rng` are now patchable through this
         proxy, which a future joker / boss effect may need.
@@ -47,10 +48,9 @@ class PatchedGameState:
             )
 
         if attr in _BOSS_FIELDS:
-            current_bm = self.boss_modifiers
-            from belote.game import replace
-            new_bm = replace(current_bm, **{attr: value})
-            object.__getattribute__(self, "_patches")["boss_modifiers"] = new_bm
+            current_bm = self.variants
+            new_bm = dataclasses.replace(current_bm, **{attr: value})
+            object.__getattribute__(self, "_patches")["variants"] = new_bm
         else:
             object.__getattribute__(self, "_patches")[attr] = value
 
@@ -71,4 +71,5 @@ class PatchedGameState:
 
     @property
     def raw(self) -> GameState:
-        return object.__getattribute__(self, "_state")
+        state: GameState = object.__getattribute__(self, "_state")
+        return state

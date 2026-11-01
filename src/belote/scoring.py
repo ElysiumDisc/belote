@@ -8,7 +8,6 @@ from .config import GLOBAL_CONFIG
 from .deck import Card, Contract, Rank, Suit
 from .deck import card_points as card_points_fn
 from .game import (
-    BossModifiers,
     Carre,
     Declaration,
     GameState,
@@ -22,6 +21,7 @@ from .game import (
     reset_round_fields,
     team_of,
 )
+from .variants import RuleVariants
 
 # Rank numeric values for sequence detection (ascending order)
 _RANK_VALUES: dict[Rank, int] = {
@@ -491,7 +491,7 @@ def _detect_all_declarations(
 
 
 def _trick_zeroed_by_ban_clubs(
-    trick: tuple[TrickCard, ...], bm: BossModifiers
+    trick: tuple[TrickCard, ...], bm: RuleVariants
 ) -> bool:
     """``ban_clubs`` zeros the entire trick if ANY card is a club. Matches
     the rule in `_calculate_base_points` — earlier the separate-scoring
@@ -500,10 +500,10 @@ def _trick_zeroed_by_ban_clubs(
     return bm.ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick)
 
 
-def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: BossModifiers) -> int:
+def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: RuleVariants) -> int:
     """Per-card point value after applying every active zero-rank boss flag.
 
-    When a new zero-rank flag is added to BossModifiers, this is the only
+    When a new zero-rank flag is added to RuleVariants, this is the only
     site that needs to learn about it. Also propagates `seven_eight_trump`
     to `card_points` for correctness even though current point tables zero
     those cards anyway."""
@@ -521,7 +521,7 @@ def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: BossModifie
     return card_points_fn(card, trump, bm.seven_eight_trump)
 
 
-def card_points_with_modifiers(card: Card, trump: Suit | None, bm: BossModifiers) -> int:
+def card_points_with_modifiers(card: Card, trump: Suit | None, bm: RuleVariants) -> int:
     """Public helper: per-card point value with active zero-rank boss flags.
 
     Mirrors `trick_card_points` (per-trick canonical helper) at the per-card
@@ -534,7 +534,7 @@ def card_points_with_modifiers(card: Card, trump: Suit | None, bm: BossModifiers
 
 
 def _trick_points_with_modifiers(
-    trick: tuple[TrickCard, ...], trump: Suit | None, bm: BossModifiers
+    trick: tuple[TrickCard, ...], trump: Suit | None, bm: RuleVariants
 ) -> int:
     """Total card points for a single trick after every boss modifier."""
     if not trick:
@@ -552,7 +552,7 @@ def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
     Returns 0 if the trick is empty. The dix-de-der bonus is NOT included
     here — it's a per-round concept, not per-trick.
     """
-    return _trick_points_with_modifiers(trick, state.trump, state.boss_modifiers)
+    return _trick_points_with_modifiers(trick, state.trump, state.variants)
 
 
 def _calculate_base_points(
@@ -573,7 +573,7 @@ def _calculate_base_points(
     taker_pts = 0
     defender_pts = 0
     is_sa = state.contract == Contract.SANS_ATOUT
-    bm = state.boss_modifiers
+    bm = state.variants
 
     if winners is None:
         winners = compute_trick_winners(state, trump, is_sa)
@@ -613,9 +613,9 @@ def _apply_scoring_modifiers(
 
     # Boss: La Competition (Separate scoring) — applies under any active
     # contract, including Sans Atout (trump=None).
-    if state.boss_modifiers.separate_scoring and state.contract is not None:
+    if state.variants.separate_scoring and state.contract is not None:
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
-        bm = state.boss_modifiers
+        bm = state.variants
         trumps = per_trick_trumps(state, trump, len(state.completed_tricks))
         for trick, winner, t_trump in zip(
             state.completed_tricks, winners, trumps, strict=True
@@ -627,9 +627,9 @@ def _apply_scoring_modifiers(
         # Add 10 de der to individual winner (suppressed by Le Zéro Final).
         if (
             state.last_trick_winner in scores
-            and not state.boss_modifiers.no_dix_de_der
+            and not state.variants.no_dix_de_der
         ):
-            scores[state.last_trick_winner] += 10
+            scores[state.last_trick_winner] += GLOBAL_CONFIG.LAST_TRICK_BONUS
 
         if taker_team == 0:
             taker_pts = max(scores[Seat.SOUTH], scores[Seat.NORTH])
@@ -640,7 +640,7 @@ def _apply_scoring_modifiers(
         messages.append("Compétition: Higher individual score used!")
 
     # Boss: La Reine Noire (Queen of Spades penalty)
-    if state.boss_modifiers.queen_spades_penalty:
+    if state.variants.queen_spades_penalty:
         qs = Card(Suit.SPADES, Rank.QUEEN)
         for trick, winner in zip(state.completed_tricks, winners, strict=True):
             if winner is not None and any(tc.card == qs for tc in trick):
@@ -721,9 +721,7 @@ def _compute_belote_points(ctx: _ScoringContext) -> tuple[int, int, bool, bool]:
     else:
         belote_holder = state.belote_holders.get(ctx.trump) if ctx.trump is not None else None
 
-    no_belote = state.boss_modifiers.no_belote or bool(
-        state._joker_state.get("no_belote_rebelote")
-    )
+    no_belote = state.variants.no_belote or state.variants.no_belote_rebelote
     if belote_holder is None or no_belote:
         return 0, 0, False, False
 
@@ -766,12 +764,12 @@ def _compute_declaration_points(
                 defender_declarations += _carre_points(carre)
 
     # Le Marseillais deck: annonces (Tierce/Quarte/Quinte/Carré) score x2.
-    if state._joker_state.get("announce_x2"):
+    if state.variants.double_declarations:
         taker_declarations *= 2
         defender_declarations *= 2
 
     # 3.0.0 Le Mime boss: all declaration points zeroed for the round.
-    if state.boss_modifiers.declarations_zero:
+    if state.variants.declarations_zero:
         return 0, 0
     return taker_declarations, defender_declarations
 
@@ -804,7 +802,7 @@ def _score_capot_outcome(
     # Le Zéro Final: if last-trick bonus is suppressed, the Capot reward (which
     # includes the +10) must drop by 10 too. Matches the chute-pool logic
     # in _score_normal_outcome.
-    if state.boss_modifiers.no_dix_de_der:
+    if state.variants.no_dix_de_der:
         capot_base -= GLOBAL_CONFIG.LAST_TRICK_BONUS
 
     is_failed = False
@@ -877,7 +875,7 @@ def _score_normal_outcome(
 
     if comp_taker == comp_defender:
         # La Balance voucher: taker wins automatically on a card-point tie.
-        if state._joker_state.get("tie_breaks_for_taker"):
+        if state.variants.tie_breaks_for_taker:
             messages.append("La Balance: tie awarded to taker.")
             taker_total = (
                 taker_card_pts + taker_declarations + taker_belote + state.litige_points
@@ -903,7 +901,7 @@ def _score_normal_outcome(
         # Le Zéro Final boss zeros the dix-de-der; the chute pool must drop
         # the +10 too. The in-round scoring path already gates the bonus on
         # no_dix_de_der; this branch used to ignore it.
-        dix_de_der = 0 if state.boss_modifiers.no_dix_de_der else GLOBAL_CONFIG.LAST_TRICK_BONUS
+        dix_de_der = 0 if state.variants.no_dix_de_der else GLOBAL_CONFIG.LAST_TRICK_BONUS
         defender_total = (
             chute_total
             + dix_de_der
@@ -919,7 +917,7 @@ def _score_normal_outcome(
         defender_total = defender_card_pts + defender_declarations + defender_belote
 
     # Boss: La Malediction (Invert scoring)
-    if state.boss_modifiers.invert_scoring:
+    if state.variants.invert_scoring:
         t_tricks = ctx.tricks_ns if ctx.taker_team == 0 else ctx.tricks_ew
         defender_tricks = 8 - t_tricks
         if t_tricks > defender_tricks:
@@ -1004,7 +1002,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     # 2. Last trick bonus (dix-de-der), gated by Le Zéro Final.
     last_trick_winner = state.last_trick_winner
     last_trick_team: int | None = None
-    if last_trick_winner is not None and not state.boss_modifiers.no_dix_de_der:
+    if last_trick_winner is not None and not state.variants.no_dix_de_der:
         last_trick_team = team_of(last_trick_winner)
         if last_trick_team == taker_team:
             taker_card_pts += GLOBAL_CONFIG.LAST_TRICK_BONUS

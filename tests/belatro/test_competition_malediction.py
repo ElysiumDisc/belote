@@ -22,20 +22,12 @@ No design opinion is asserted here — just the observed behaviour.
 
 from __future__ import annotations
 
-from belote.belatro.engine.modifier_patch import PatchedGameState
-from belote.belatro.run.boss import LaCompetition, LaMalediction
+from belote.belatro.core.state import BelatroState
 from belote.deck import Card, Rank, Suit
-from belote.game import GameState, Phase, Seat, TrickCard, new_game
+from belote.game import GameState, Phase, Seat, TrickCard
 
-
-def test_competition_malediction_flags_coexist() -> None:
-    """Re-pin (sanity) that both flags hold after sequential apply()."""
-    state = PatchedGameState(new_game())
-    LaCompetition().apply(state)
-    LaMalediction().apply(state)
-    bm = state.boss_modifiers
-    assert bm.separate_scoring is True
-    assert bm.invert_scoring is True
+# (Flag coexistence is pinned by test_boss_contracts.py::
+# test_competition_malediction_combo_flags_set.)
 
 
 def _build_finished_round_state(*, taker_team: int = 0) -> GameState:
@@ -43,7 +35,7 @@ def _build_finished_round_state(*, taker_team: int = 0) -> GameState:
     SOUTH (NS) and 3 won by EAST (EW). Avoids the capot path because
     `_score_capot_outcome` skips La Malédiction by design (the Malédiction
     branch lives in `_score_normal_outcome`)."""
-    from belote.game import BossModifiers
+    from belote.variants import RuleVariants
 
     # Non-trump cards only so winners are determined by lead-suit rank.
     # Trump is hearts; these tricks are in spades / diamonds / clubs.
@@ -64,7 +56,7 @@ def _build_finished_round_state(*, taker_team: int = 0) -> GameState:
     completed = (ns_winning_trick,) * 5 + (ew_winning_trick,) * 3
 
     taker = Seat.SOUTH if taker_team == 0 else Seat.EAST
-    return GameState(
+    return BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         contract="hearts",
@@ -72,7 +64,7 @@ def _build_finished_round_state(*, taker_team: int = 0) -> GameState:
         completed_tricks=completed,
         last_trick_winner=Seat.EAST,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(
+        variants=RuleVariants(
             separate_scoring=True,
             invert_scoring=True,
         ),
@@ -105,12 +97,12 @@ def test_competition_alone_substitutes_per_seat_max() -> None:
     score. Verify this part of the chain is functional before the combo."""
     from dataclasses import replace
 
-    from belote.game import BossModifiers
     from belote.scoring import score_round
+    from belote.variants import RuleVariants
 
     state = _build_finished_round_state()
     # Strip La Malédiction; keep Compétition only.
-    state = replace(state, boss_modifiers=BossModifiers(separate_scoring=True))
+    state = replace(state, variants=RuleVariants(separate_scoring=True))
     breakdown = score_round(state)
     assert "Compétition" in " | ".join(breakdown.messages)
     # Smoke: well-formed breakdown.

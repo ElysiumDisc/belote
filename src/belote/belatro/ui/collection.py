@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
 from belote.ansi import (
@@ -19,6 +20,7 @@ from belote.ansi import (
 )
 from belote.input import Key
 from belote.ui.render import get_term_size, invalidate_diff
+from belote.ui.text import wrap_words
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -26,114 +28,114 @@ if TYPE_CHECKING:
     from ..progression.save import Profile
 
 
+def collection_top(n_items: int, selected: int, max_rows: int) -> int:
+    """First visible row of the item list so `selected` stays on screen.
+
+    Pre-4.10.0 the list was sliced from the selected item itself, pinning the
+    cursor to the top row and hiding every item above it.
+    """
+    if max_rows <= 0 or n_items <= max_rows:
+        return 0
+    return max(0, min(selected - max_rows + 1, n_items - max_rows))
+
+
+def collection_frame(
+    categories: Sequence[tuple[str, Sequence[Any]]],
+    discovered: Collection[str],
+    cat_idx: int,
+    item_idx: int,
+    term_w: int,
+    term_h: int,
+) -> str:
+    """Pure frame builder for the collection gallery (one full repaint)."""
+    cat_name, items = categories[cat_idx]
+    out = [clear_screen(), hide_cursor()]
+
+    # Header
+    title = f"COLLECTION - {cat_name} ({len(discovered)} Discovered)"
+    out.append(move(2, 1) + ansi_center(gold_fg() + BOLD + title + RESET, term_w))
+    out.append(move(3, 1) + ansi_center(menu_border_fg() + "─" * (len(title) + 4) + RESET, term_w))
+
+    # Category tabs
+    cat_line = []
+    for i, (name, _) in enumerate(categories):
+        label = f"[{name}]" if i == cat_idx else f" {name} "
+        color = gold_fg() + BOLD if i == cat_idx else white_fg()
+        cat_line.append(color + label + RESET)
+    out.append(move(5, 1) + ansi_center("  ".join(cat_line), term_w))
+
+    # Item list (scrolls to keep the selection visible)
+    start_row = 7
+    max_rows = term_h - 12
+    top = collection_top(len(items), item_idx, max_rows)
+    for i, item_cls in enumerate(items[top : top + max(0, max_rows)]):
+        real_idx = top + i
+        is_discovered = item_cls.id in discovered
+        prefix = "> " if real_idx == item_idx else "  "
+        color = white_fg() if is_discovered else DIM
+        name = item_cls.name if is_discovered else "???"
+        out.append(move(start_row + i, 10) + color + prefix + name + RESET)
+
+    # Details for the selected item on the right
+    if items:
+        out.extend(_detail_panel(items[item_idx], item_idx, discovered, start_row, term_w))
+
+    # Footer
+    out.append(
+        move(term_h - 1, 1)
+        + ansi_center(light_gray_fg() + "←/→: Category  ↑/↓: Item  Esc/Q: Back" + RESET, term_w)
+    )
+    return "".join(out)
+
+
+def _detail_panel(
+    item_cls: Any, item_idx: int, discovered: Collection[str], start_row: int, term_w: int
+) -> list[str]:
+    info_col = max(40, term_w // 2)
+    if item_cls.id not in discovered:
+        return [
+            move(start_row, info_col) + DIM + "??? (Undiscovered)" + RESET,
+            move(start_row + 2, info_col) + DIM + "Keep playing to find this item!" + RESET,
+        ]
+    wrap_w = max(20, term_w - info_col - 2)
+    out = [
+        move(start_row, info_col) + gold_fg() + BOLD + item_cls.name + RESET,
+        move(start_row + 1, info_col) + menu_border_fg() + "─" * min(30, wrap_w) + RESET,
+    ]
+    art = getattr(item_cls, "ascii_art", []) or []
+    for j, art_line in enumerate(art):
+        out.append(move(start_row + 2 + j, info_col) + menu_art_fg() + art_line + RESET)
+    desc_start = start_row + 2 + len(art) + 1
+    desc = getattr(item_cls, "description", "No description.")
+    for r, line in enumerate(wrap_words(desc, wrap_w)):
+        out.append(move(desc_start + r, info_col) + white_fg() + line + RESET)
+    return out
+
+
 def show_collection(reader: KeyReader, profile: Profile) -> None:
     """Gallery browser for discovered items."""
+    from belote.ui.fit_guard import require_minimum
+
     from ..items.registry import registry
 
-    # Categorize all items
     categories: list[tuple[str, list[Any]]] = [
         ("Jokers", list(registry.jokers.values())),
         ("Tarots", list(registry.tarots.values())),
         ("Planets", list(registry.planets.values())),
         ("Vouchers", list(registry.vouchers.values())),
     ]
-
     cat_idx = 0
     item_idx = 0
-
-    from belote.ui.fit_guard import require_minimum
-
     while True:
         require_minimum(reader)
         term_w, term_h = get_term_size()
-        cat_name, items = categories[cat_idx]
+        items = categories[cat_idx][1]
         item_idx = min(item_idx, len(items) - 1) if items else 0
-
-        out = [clear_screen(), hide_cursor()]
-
-        # Header
-        title = f"COLLECTION - {cat_name} ({len(profile.discovered_items)} Discovered)"
-        out.append(move(2, 1) + ansi_center(gold_fg() + BOLD + title + RESET, term_w))
-        out.append(
-            move(3, 1) + ansi_center(menu_border_fg() + "─" * (len(title) + 4) + RESET, term_w)
+        sys.stdout.write(
+            collection_frame(
+                categories, profile.discovered_items, cat_idx, item_idx, term_w, term_h
+            )
         )
-
-        # Category Tabs
-        cat_line = []
-        for i, (name, _) in enumerate(categories):
-            label = f"[{name}]" if i == cat_idx else f" {name} "
-            color = gold_fg() + BOLD if i == cat_idx else white_fg()
-            cat_line.append(color + label + RESET)
-        out.append(move(5, 1) + ansi_center("  ".join(cat_line), term_w))
-
-        # Item Grid (simple list for now)
-        start_row = 7
-        max_rows = term_h - 12
-        visible_items = items[item_idx : item_idx + max_rows] if items else []
-
-        for i, item_cls in enumerate(visible_items):
-            row = start_row + i
-            real_idx = item_idx + i
-            is_discovered = item_cls.id in profile.discovered_items
-
-            prefix = "> " if real_idx == item_idx else "  "
-            color = white_fg() if is_discovered else DIM
-            name = item_cls.name if is_discovered else "???"
-
-            text = f"{prefix}{name}"
-            out.append(move(row, 10) + color + text + RESET)
-
-            # Show details for discovered item on the right
-            if real_idx == item_idx:
-                info_col = max(40, term_w // 2)
-                wrap_w = max(20, term_w - info_col - 2)
-                divider_w = min(30, wrap_w)
-                if is_discovered:
-                    out.append(move(start_row, info_col) + gold_fg() + BOLD + item_cls.name + RESET)
-                    out.append(
-                        move(start_row + 1, info_col)
-                        + menu_border_fg()
-                        + "─" * divider_w
-                        + RESET
-                    )
-
-                    # Try to show ASCII art if available
-                    art = getattr(item_cls, "ascii_art", [])
-                    for j, art_line in enumerate(art):
-                        out.append(
-                            move(start_row + 2 + j, info_col) + menu_art_fg() + art_line + RESET
-                        )
-
-                    desc_start = start_row + 2 + (len(art) if art else 0) + 1
-                    desc = getattr(item_cls, "description", "No description.")
-                    words = desc.split()
-                    line = ""
-                    r = desc_start
-                    for w in words:
-                        if len(line) + len(w) + 1 > wrap_w:
-                            out.append(move(r, info_col) + white_fg() + line + RESET)
-                            line = w
-                            r += 1
-                        else:
-                            line = (line + " " + w).strip()
-                    if line:
-                        out.append(move(r, info_col) + white_fg() + line + RESET)
-                else:
-                    out.append(move(start_row, info_col) + DIM + "??? (Undiscovered)" + RESET)
-                    out.append(
-                        move(start_row + 2, info_col)
-                        + DIM
-                        + "Keep playing to find this item!"
-                        + RESET
-                    )
-
-        # Footer
-        out.append(
-            move(term_h - 1, 1)
-            + ansi_center(light_gray_fg() + "←/→: Category  ↑/↓: Item  Esc/Q: Back" + RESET, term_w)
-        )
-
-        sys.stdout.write("".join(out))
         sys.stdout.flush()
         invalidate_diff()
 

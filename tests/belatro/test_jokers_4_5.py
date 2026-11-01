@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import (
     DeclarationScoredEvent,
     TrickWonEvent,
@@ -153,7 +154,7 @@ def _state_with_tierce_in_hearts() -> GameState:
         ),
     )
     decl = Declaration(seat=Seat.SOUTH, kind="sequence", detail=seq)
-    return GameState(hands=((), (), (), ()), declarations=(decl,))
+    return BelatroState(hands=((), (), (), ()), declarations=(decl,))
 
 
 def test_collectionneur_pays_per_annonce_card_in_late_trick() -> None:
@@ -309,7 +310,7 @@ def test_preteur_round_start_result_lands_on_accumulator() -> None:
     j = LePreteur()
     acc = ScoreAccumulator()
     acc.attach_jokers([j])
-    state = GameState(hands=((), (), (), ()), _joker_state={"current_money": 0})
+    state = BelatroState(hands=((), (), (), ()), _joker_state={"current_money": 0})
     out = acc.trigger_round_start(state)
     assert out._bonus_money == 15
 
@@ -324,7 +325,7 @@ def test_preteur_skim_actually_debits_economy() -> None:
     j = LePreteur()
     acc = ScoreAccumulator()
     acc.attach_jokers([j])
-    state = GameState(hands=((), (), (), ()), _joker_state={"current_money": 60})
+    state = BelatroState(hands=((), (), (), ()), _joker_state={"current_money": 60})
     out = acc.trigger_round_start(state)
     assert out._bonus_money == -5
 

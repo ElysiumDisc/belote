@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 VOID_INFO_THRESHOLD = 3
 DUO_CONTRACT_THRESHOLD = 5
-DOUBLE_TRIGGER_THRESHOLD = 7
 AUTO_CAPOT_THRESHOLD = 9
 AI_DEGRADE_THRESHOLD = 2
 
@@ -51,11 +50,6 @@ class TrustTrack:
         return self.value >= DUO_CONTRACT_THRESHOLD
 
     @property
-    def partner_jokers_double(self) -> bool:
-        """Partner joker effects count double."""
-        return self.value >= DOUBLE_TRIGGER_THRESHOLD
-
-    @property
     def auto_capot_available(self) -> bool:
         """Partner will attempt a capot if conditions are right."""
         return self.value >= AUTO_CAPOT_THRESHOLD and not self.auto_capot_used
@@ -83,9 +77,7 @@ class TrustTrack:
         3 (strong,   value 7–8) — +1 apply  (≈ ×2 effect)
         4 (elite,    value 9–10) — +2 applies (≈ ×3 effect)
 
-        Used by partner_jokers/* to scale their JokerResult payloads. The
-        legacy `partner_jokers_double` flag (value≥7) still exists for backward
-        compatibility but tier is the new path.
+        Used by partner_jokers/* to scale their JokerResult payloads.
         """
         if self.value <= 2:
             return 0

@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..paths import data_dir
+
 if TYPE_CHECKING:
     from .core.run_state import BelAtroRun
 
@@ -30,12 +32,7 @@ def _summary_path() -> Path:
     global _PATH_CACHE
     if _PATH_CACHE is not None:
         return _PATH_CACHE
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", "."))
-    else:
-        xdg = os.environ.get("XDG_DATA_HOME", "")
-        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-    path = base / "belote"
+    path = data_dir()
     path.mkdir(parents=True, exist_ok=True)
     _PATH_CACHE = path / "run_history.jsonl"
     return _PATH_CACHE
@@ -51,6 +48,7 @@ def append_summary(run: BelAtroRun, *, won: bool) -> None:
         record = {
             "ts": int(time.time()),
             "deck_id": run.deck_id,
+            "daily": run.daily,
             "ante_reached": run.ante_number,
             "blind_index": run.blind_index,
             "endless": run.endless,

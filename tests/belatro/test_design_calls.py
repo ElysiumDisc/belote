@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from belote.belatro.core.run_state import BelAtroRun
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.round_driver import _diable_overcut
 from belote.belatro.items.base import Joker
 from belote.belatro.run.shop import Shop
@@ -19,7 +20,7 @@ def _north_to_play(
     trump: Suit | None = H,
     contract: str = Contract.NORMAL,
 ) -> GameState:
-    return GameState(
+    return BelatroState(
         hands=((), (), north, ()),
         turn=Seat.NORTH,
         phase=Phase.PLAYING,
@@ -65,7 +66,7 @@ def test_void_label_lists_north_empty_suits_during_play() -> None:
 
 def test_void_label_generic_outside_play() -> None:
     assert _void_label(None) == "Void Info"
-    bidding = GameState(hands=((), (), (Card(H, Rank.JACK),), ()), phase=Phase.BIDDING)
+    bidding = BelatroState(hands=((), (), (Card(H, Rank.JACK),), ()), phase=Phase.BIDDING)
     assert _void_label(bidding) == "Void Info"
 
 

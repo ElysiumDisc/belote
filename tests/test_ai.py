@@ -4,7 +4,8 @@ import unittest.mock
 
 from belote.ai import AIPlayer, Difficulty
 from belote.deck import Card, Rank, Suit
-from belote.game import BossModifiers, GameState, Phase, Seat, TrickCard
+from belote.game import GameState, Phase, Seat, TrickCard
+from belote.variants import RuleVariants
 
 
 def test_ai_easy_play() -> None:
@@ -87,7 +88,7 @@ def test_ai_void_inference_skips_wild_seven_under_republicain() -> None:
         completed_tricks=(trick1,),
         phase=Phase.PLAYING,
         trump=Suit.DIAMONDS,
-        _joker_state={"republicain_wild": True},
+        variants=RuleVariants(wild_seven_eight=True),
     )
     player._update_voids(state)
     # No void should be inferred for West.
@@ -133,7 +134,7 @@ def test_ai_void_inference_still_flags_non_wild_offsuit_under_republicain() -> N
         completed_tricks=(trick1,),
         phase=Phase.PLAYING,
         trump=Suit.DIAMONDS,
-        _joker_state={"republicain_wild": True},
+        variants=RuleVariants(wild_seven_eight=True),
     )
     player._update_voids(state)
     assert Suit.SPADES in player.memory.known_voids[Seat.WEST]
@@ -238,7 +239,7 @@ def test_opp_trumps_excludes_own_and_partner_hand() -> None:
     """C4 regression: pre-3.4.2, `opp_trumps = 8 - played_trumps` over-counted
     by treating South's own trumps and partner's visible trumps as still
     in opponents' hands. The fix subtracts both."""
-    from belote.game import BossModifiers
+    from belote.variants import RuleVariants
 
     # South holds 1 trump (HEARTS), 1 non-trump (SPADES). North (partner)
     # is visible with 1 trump. 2 trumps already played. Lead Spades so the
@@ -255,7 +256,7 @@ def test_opp_trumps_excludes_own_and_partner_hand() -> None:
         turn=Seat.SOUTH,
         phase=Phase.PLAYING,
         trump=Suit.HEARTS,
-        boss_modifiers=BossModifiers(),
+        variants=RuleVariants(),
     )
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     player.update_memory(state)
@@ -331,7 +332,7 @@ def test_hard_ai_bids_ta_on_jack_heavy_hand_under_normal_scoring() -> None:
         bidding_round=2,
         bidder_index=2,
         dealer=Seat.SOUTH,
-        boss_modifiers=BossModifiers(),
+        variants=RuleVariants(),
     )
     bid = player.decide_bid(state)
     assert bid == Suit.TOUT_ATOUT
@@ -348,7 +349,7 @@ def test_hard_ai_does_not_bid_ta_when_jacks_zero_suppresses_jacks() -> None:
         bidding_round=2,
         bidder_index=2,
         dealer=Seat.SOUTH,
-        boss_modifiers=BossModifiers(jacks_zero=True),
+        variants=RuleVariants(jacks_zero=True),
     )
     bid = player.decide_bid(state)
     assert bid != Suit.TOUT_ATOUT, (
@@ -361,7 +362,7 @@ def test_hard_ai_does_not_bid_ta_when_jacks_zero_suppresses_jacks() -> None:
 
 
 def test_hard_ai_avoids_clubs_bid_under_ban_clubs() -> None:
-    """4.1.0 audit: under LesClubsBannis (BossModifiers.ban_clubs=True) all
+    """4.1.0 audit: under LesClubsBannis (RuleVariants.ban_clubs=True) all
     clubs score 0, so the AI's `_hard_bid` must NOT pick clubs even when the
     hand is club-heavy. The fix relies on `card_points_with_modifiers`
     returning 0 for any clubs card under the flag — the bid heuristic
@@ -386,7 +387,7 @@ def test_hard_ai_avoids_clubs_bid_under_ban_clubs() -> None:
         bidding_round=2,
         bidder_index=2,
         dealer=Seat.SOUTH,
-        boss_modifiers=BossModifiers(ban_clubs=True),
+        variants=RuleVariants(ban_clubs=True),
     )
     bid = player.decide_bid(state)
     assert bid != Suit.CLUBS, (
@@ -484,7 +485,7 @@ def test_hard_ai_play_score_uses_jacks_zero() -> None:
         phase=Phase.PLAYING,
         trump=trump,
         contract=Contract.NORMAL,
-        boss_modifiers=BossModifiers(jacks_zero=True),
+        variants=RuleVariants(jacks_zero=True),
     )
 
     # (trick, partner_winning, hand_suit_counts, my_trumps, opp_trumps)
@@ -530,7 +531,7 @@ def test_hard_ai_play_score_uses_ban_clubs() -> None:
         phase=Phase.PLAYING,
         trump=trump,
         contract=Contract.NORMAL,
-        boss_modifiers=BossModifiers(ban_clubs=True),
+        variants=RuleVariants(ban_clubs=True),
     )
 
     args = (trick, True, {Suit.CLUBS: 1}, 0, 8)
@@ -571,7 +572,7 @@ def test_medium_ai_discard_consults_boss_modifier_helper() -> None:
         trump=Suit.HEARTS,
         contract=Contract.NORMAL,
         current_trick=(TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.ACE)),),
-        boss_modifiers=BossModifiers(kings_zero=True),
+        variants=RuleVariants(kings_zero=True),
     )
     player = AIPlayer(Seat.WEST, Difficulty.MEDIUM)
 

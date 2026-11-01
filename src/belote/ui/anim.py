@@ -41,6 +41,12 @@ def animations_enabled() -> bool:
     return _ANIMATIONS_ENABLED
 
 
+def set_animations_enabled(on: bool) -> None:
+    """Switch animations on/off (the Settings screen; see belote.settings)."""
+    global _ANIMATIONS_ENABLED
+    _ANIMATIONS_ENABLED = on
+
+
 def _refresh_animations_enabled_from_env() -> None:
     """Test-only: re-read the env var after `monkeypatch.setenv`."""
     global _ANIMATIONS_ENABLED

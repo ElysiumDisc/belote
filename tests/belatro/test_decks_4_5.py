@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import (
     DeclarationScoredEvent,
     TrickWonEvent,
@@ -46,7 +47,7 @@ def test_architecte_sets_buy_contract_and_annonce_flags() -> None:
 
 
 def _state_with(flag: str) -> GameState:
-    return GameState(hands=((), (), (), ()), _joker_state={flag: True})
+    return BelatroState(hands=((), (), (), ()), _joker_state={flag: True})
 
 
 def test_ghost_lead_pays_when_ns_trumps_void() -> None:
@@ -76,7 +77,7 @@ def test_ghost_lead_pays_when_ns_trumps_void() -> None:
 
 
 def test_ghost_lead_silent_when_flag_off() -> None:
-    state = GameState(hands=((), (), (), ()))  # no flag
+    state = BelatroState(hands=((), (), (), ()))  # no flag
     acc = ScoreAccumulator()
     event = TrickWonEvent(
         winner=Seat.NORTH,
@@ -175,12 +176,12 @@ def test_ghost_lead_silent_when_lead_is_seven_under_deluge() -> None:
     `lead_suit != event.trump`. Pre-4.7.3 the is_trump_lead check
     didn't honour the boss flag and the bonus fired spuriously.
     """
-    from belote.game import BossModifiers
+    from belote.variants import RuleVariants
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         _joker_state={"ghost_lead": True},
-        boss_modifiers=BossModifiers(seven_eight_trump=True),
+        variants=RuleVariants(seven_eight_trump=True),
     )
     acc = ScoreAccumulator()
     event = TrickWonEvent(
@@ -220,7 +221,7 @@ def _state_with_ns_tierce_in_hearts() -> GameState:
         ),
     )
     decl = Declaration(seat=Seat.SOUTH, kind="sequence", detail=seq)
-    return GameState(
+    return BelatroState(
         hands=((), (), (), ()),
         _joker_state={"annonce_cash_x2": True},
         declarations=(decl,),
@@ -301,18 +302,18 @@ def test_le_mime_suppresses_architecte_annonce_cash() -> None:
 
     Pre-4.6.4 the DeclarationScoredEvent handler stamped
     `_ns_annonce_cards` into joker_state unconditionally, even when
-    `state.boss_modifiers.declarations_zero` zeroed `event.points`. Le
+    `state.variants.declarations_zero` zeroed `event.points`. Le
     Mime's promise is "all declaration value zeroed" — the L'Architecte
     +$2/trick payout is declaration-derived, so it must be gated too.
     """
     from dataclasses import replace
 
-    from belote.game import BossModifiers
+    from belote.variants import RuleVariants
 
     state = _state_with_ns_tierce_in_hearts()
     # Activate Le Mime on the state.
     state = replace(
-        state, boss_modifiers=BossModifiers(declarations_zero=True)
+        state, variants=RuleVariants(declarations_zero=True)
     )
     acc = ScoreAccumulator()
     # Declaration scores 0 chips under Le Mime — the round_driver passes

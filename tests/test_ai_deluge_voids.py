@@ -30,11 +30,8 @@ def _state_with_completed_trick(
     trump: Suit | None = Suit.HEARTS,
     seven_eight_trump: bool = False,
 ) -> GameState:
-    from belote.game import BossModifiers
-    bm = BossModifiers(seven_eight_trump=seven_eight_trump)
-    joker_state: dict[str, object] = {}
-    if republicain_wild:
-        joker_state["republicain_wild"] = True
+    from belote.variants import RuleVariants
+    bm = RuleVariants(seven_eight_trump=seven_eight_trump, wild_seven_eight=republicain_wild)
     return GameState(
         hands=((), (), (), ()),
         turn=Seat.SOUTH,
@@ -43,8 +40,7 @@ def _state_with_completed_trick(
         contract="hearts",
         taker=Seat.SOUTH,
         completed_tricks=completed,
-        boss_modifiers=bm,
-        _joker_state=joker_state,
+        variants=bm,
     )
 
 

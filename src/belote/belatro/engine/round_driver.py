@@ -2,25 +2,28 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
-from dataclasses import replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
 
 from belote.ai import AIPlayer, Difficulty
 from belote.deck import Card, Suit
 from belote.game import (
     SANS_ATOUT_BID,
     BidValue,
-    GameState,
+    Carre,
     Phase,
     Seat,
+    Sequence,
     clear_legal_cards_cache,
+    legal_bids,
     new_game,
-    play_card,
-    process_bid,
     start_round,
 )
+from belote.round_engine import RoundPolicy, play_round
 from belote.scoring import get_declaration_points, is_capot, score_round
+from belote.variants import RuleVariants
 
+from ..core.state import BelatroState, as_belatro
 from .event_bus import (
     AnyEvent,
     BeloteAnnouncedEvent,
@@ -42,7 +45,7 @@ if TYPE_CHECKING:
 _MAX_REDEALS = 32
 
 
-def _ew_should_coinche(state: GameState, rng: random.Random) -> bool:
+def _ew_should_coinche(state: BelatroState, rng: random.Random) -> bool:
     """Defender-side AI for the EW seats when NS is taker.
 
     Light, deterministic heuristic gated by the round's seeded RNG so
@@ -69,28 +72,28 @@ class RoundUICallbacks(ABC):
     """Interface for UI interaction during a round."""
 
     @abstractmethod
-    def prompt_bid(self, state: GameState) -> Suit | None: ...
+    def prompt_bid(self, state: BelatroState) -> BidValue: ...
 
     @abstractmethod
-    def prompt_card(self, state: GameState) -> tuple[Card, GameState]: ...
+    def prompt_card(self, state: BelatroState) -> tuple[Card, BelatroState]: ...
 
     @abstractmethod
-    def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None: ...
+    def on_card_played(self, state: BelatroState, seat: Seat, card: Card) -> None: ...
 
     @abstractmethod
-    def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None: ...
+    def on_trick_end(self, state: BelatroState, winner: Seat, points: int) -> None: ...
 
     @abstractmethod
     def on_round_end(self, breakdown: object) -> None: ...
 
-    def prompt_coinche(self, state: GameState, taker: Seat) -> bool:
+    def prompt_coinche(self, state: BelatroState, taker: Seat) -> bool:
         """Ask the player whether to coinche the AI's bid.
 
         Default no-op returns False. Override in concrete UI (e.g. BelAtro main).
         """
         return False
 
-    def prompt_heist(self, state: GameState) -> bool:
+    def prompt_heist(self, state: BelatroState) -> bool:
         """Ask the player whether to declare a Dix de Der Heist (4.7.0).
 
         Fired by `drive_round` after the bidding/coinche flow and before the
@@ -104,14 +107,14 @@ class RoundUICallbacks(ABC):
         """
         return False
 
-    def on_redeal(self, state: GameState) -> None:  # noqa: B027 - optional hook
+    def on_redeal(self, state: BelatroState) -> None:  # noqa: B027 - optional hook
         """Notify the UI that everyone passed and the cards were redealt.
 
         ``state`` is the fresh deal, already back in Phase.BIDDING. Default
         no-op; BelAtro main shows a short banner.
         """
 
-    def prompt_surcoinche(self, state: GameState, coincheur: Seat) -> bool:
+    def prompt_surcoinche(self, state: BelatroState, coincheur: Seat) -> bool:
         """Ask the player whether to surcoinche (NS-taker path, 3.7.1 D3).
 
         Fired when the player is the taker (NS) and the EW AI lands a
@@ -123,7 +126,7 @@ class RoundUICallbacks(ABC):
         return False
 
 
-def _diable_overcut(state: GameState) -> Card | None:
+def _diable_overcut(state: BelatroState) -> Card | None:
     """Le Diable tarot: North over-cuts whenever it legally can (one round).
 
     When North is following and some legal trump would take the trick, play
@@ -131,21 +134,17 @@ def _diable_overcut(state: GameState) -> Card | None:
     "sometimes ruinous" half of the card. Returns None (keep the AI's choice)
     when North leads, holds no winning trump, or under Sans Atout.
     """
-    from belote.deck import Contract, Rank, trick_rank
+    from belote.deck import Contract, is_trump_card, trick_rank
     from belote.game import TrickCard, legal_cards, trick_winner_seat
 
     trick = state.current_trick
     trump = state.trump
     if not trick or trump is None or state.contract == Contract.SANS_ATOUT:
         return None
-    se = state.boss_modifiers.seven_eight_trump
+    se = state.variants.seven_eight_trump
 
     def _is_trump(c: Card) -> bool:
-        return (
-            trump == Suit.TOUT_ATOUT
-            or c.suit == trump
-            or (se and c.rank in (Rank.SEVEN, Rank.EIGHT))
-        )
+        return is_trump_card(c, trump, se)
 
     winning_trumps = [
         c
@@ -158,6 +157,103 @@ def _diable_overcut(state: GameState) -> Card | None:
     return min(winning_trumps, key=lambda c: trick_rank(c, trump, se))
 
 
+@dataclass
+class _RoundContext(RoundPolicy[BelatroState]):
+    """BelAtro's policy over the shared round engine (`belote.round_engine`),
+    plus everything one `drive_round` call threads through the round."""
+
+    bus: EventBus
+    partner: PartnerState
+    ui: RoundUICallbacks
+    acc: ScoreAccumulator | None
+    rng: random.Random
+    recorder: GhostRecorder | None
+    ai_players: dict[Seat, AIPlayer] = field(default_factory=dict)
+    redeals: int = 0
+
+    def emit(self, event: AnyEvent, s: BelatroState) -> BelatroState:
+        """Route an event to the accumulator, then the EventBus.
+
+        4.6.2: process_event mutates the ledger in place (no per-event
+        `replace()`); chips/mult/money are sealed once at round end. The
+        ledger's joker_state IS state._joker_state (installed by
+        trigger_round_start), so classic read sites see live mutations.
+
+        4.6.4: also publish to the EventBus so external subscribers
+        (UnlockTracker, ghost-run tooling) receive events. The accumulator
+        runs first so its ledger mutations are visible to subscribers.
+        """
+        if self.acc is not None:
+            self.acc.process_event(s, event)
+        self.bus.emit(event)
+        return s
+
+    # ── RoundPolicy: bidding ────────────────────────────────────────────
+
+    def choose_bid(self, state: BelatroState, seat: Seat) -> BidValue:
+        return _decide_bid(self, state, seat)
+
+    def after_bid(self, state: BelatroState, seat: Seat) -> BelatroState:
+        # The BidMadeEvent's `trump` is the actual trump suit (Suit | None)
+        # from state, which place_bid set correctly.
+        state = self.emit(
+            BidMadeEvent(seat=seat, trump=state.trump, contract=state.contract or "normal"),
+            state,
+        )
+        if self.recorder is not None:
+            self.recorder.note_bid(
+                seat=seat.name.lower(),
+                trump=state.trump.name.lower() if state.trump is not None else None,
+                contract=state.contract or "normal",
+            )
+        return state
+
+    def on_all_pass(self, state: BelatroState) -> BelatroState | None:
+        """Classic Belote redeals (dealer already rotated by place_bid) and
+        bidding restarts. start_round resets variants, so carry the boss/joker
+        rule variants over instead of re-running setup; _joker_state (the
+        ledger alias) is not reset by start_round. No RoundEndEvent fires for
+        the abandoned deal, so round-end jokers never score an unplayed hand.
+        The cap is purely defensive (tests that mock every seat to pass);
+        past it the round ends at Phase.DEAL with 0 tricks."""
+        if self.redeals >= _MAX_REDEALS:
+            return None
+        self.redeals += 1
+        state = replace(start_round(state, self.rng), variants=state.variants)
+        self.ui.on_redeal(state)
+        return state
+
+    def on_contract(self, state: BelatroState) -> BelatroState:
+        state = _run_coinche(self, state)
+        _offer_heist(self, state)
+        return state
+
+    # ── RoundPolicy: play ───────────────────────────────────────────────
+
+    def choose_card(self, state: BelatroState, seat: Seat) -> tuple[Card, BelatroState]:
+        if seat == Seat.SOUTH:
+            card, after = self.ui.prompt_card(state)
+            return card, as_belatro(after)
+        card = self.ai_players[seat].decide_card(state)
+        if seat == Seat.NORTH and state._joker_state.get("partner_overcut_round"):
+            card = _diable_overcut(state) or card
+        return card, state
+
+    def after_card(
+        self, before: BelatroState, state: BelatroState, seat: Seat, card: Card
+    ) -> BelatroState:
+        self.ui.on_card_played(state, seat, card)
+        if self.recorder is not None:
+            # If the 4th card just closed the trick, completed_tricks already
+            # includes it; otherwise the in-progress trick is one past.
+            trick_no = len(state.completed_tricks) + (1 if state.current_trick else 0)
+            self.recorder.note_play(trick=trick_no, seat=seat.name.lower(), card=str(card))
+        state = _emit_belote_if_announced(self, state, seat, before.belote_tracker)
+        if is_last_in_trick(state):
+            state = _on_trick_complete(self, state, sum(before.current_round_points))
+        return state
+
+
 def drive_round(
     bus: EventBus,
     partner: PartnerState,
@@ -168,437 +264,34 @@ def drive_round(
     seed: int | None = None,
     card_enhancements: dict[str, object] | None = None,
     recorder: GhostRecorder | None = None,
-) -> GameState:
+) -> BelatroState:
     """
     Core engine loop for a single round in BelAtro.
     Orchestrates the sequence of events (Dealing -> Bidding -> Playing -> Scoring).
+
+    4.10.0: the round's flow is the shared `belote.round_engine.play_round`;
+    `_RoundContext` is BelAtro's policy over it (partner personality,
+    sabotage, heist, events, ghost recording). The seeded RNG is drawn in the
+    same order as before (ghost runs and replays depend on it): deal →
+    sabotage picks → bidding/redeals → coinche.
     """
-    rng = random.Random(seed)
-    # Initialize the base game state
-    state = new_game(target=1000)  # Target doesn't matter for single round
-    state = start_round(state, rng)
-
-    # Merge per-run deck/voucher flags so scoring/legal_cards can read them.
-    if card_enhancements:
-        new_jstate = {**state._joker_state, **card_enhancements}
-        state = replace(state, _joker_state=new_jstate)
-
-    # B1: Apply boss modifier flags onto the frozen GameState so play_card sees them.
-    # Must run BEFORE acc.trigger_round_start so the accumulator's snapshot of
-    # boss-derived flags (e.g. joker_state["no_dix_de_der"]) reflects the live
-    # boss state instead of the BossModifiers defaults.
-    if boss is not None:
-        from ..engine.modifier_patch import PatchedGameState
-
-        _proxy = PatchedGameState(state)
-        boss.apply(_proxy)
-        _patches = dict(object.__getattribute__(_proxy, "_patches"))
-        state = replace(state, **_patches)
-
-        # Ensure boss modifiers don't use stale cached logic/values
-        clear_legal_cards_cache()
-
-    # Le Traître joker (corrupted, partner_throws_trick): pick one random trick
-    # for partner sabotage and reuse the existing agent_double AI path. Skip if
-    # a boss already activates agent_double — its 3-trick set takes precedence.
-    # These joker blocks MUST run after boss.apply() above: before, the
-    # boss flag was never set yet, so the guard always passed and the joker's
-    # 1-2 trick set pre-filled agent_double_tricks, suppressing the boss's.
-    # (boss.apply() draws no RNG, so the seeded sequence is unchanged.)
-    if state._joker_state.get("traitre_active") and not state.boss_modifiers.agent_double_active:
-        sabotage = frozenset({rng.randint(1, 8)})
-        new_bm = replace(state.boss_modifiers, agent_double_active=True)
-        new_jstate2 = {**state._joker_state, "agent_double_tricks": sabotage}
-        state = replace(state, boss_modifiers=new_bm, _joker_state=new_jstate2)
-
-    # L'Agent Double joker (corrupted): like Le Traître but two sabotage tricks.
-    # Same precedence rule — boss agent_double takes priority.
-    if (
-        state._joker_state.get("agent_double_joker_active")
-        and not state.boss_modifiers.agent_double_active
-    ):
-        sabotage2 = frozenset(rng.sample(range(1, 9), 2))
-        new_bm2 = replace(state.boss_modifiers, agent_double_active=True)
-        new_jstate3 = {**state._joker_state, "agent_double_tricks": sabotage2}
-        state = replace(state, boss_modifiers=new_bm2, _joker_state=new_jstate3)
-
+    ctx = _RoundContext(
+        bus=bus,
+        partner=partner,
+        ui=ui_callbacks,
+        acc=acc,
+        rng=random.Random(seed),
+        recorder=recorder,
+    )
+    state = _setup_round(ctx, boss, card_enhancements)
+    ctx.ai_players = _build_ai_players(partner, ctx.rng)
     if acc is not None:
-        state = acc.trigger_round_start(state)
-
-    # Populate sabotage_tricks for any path that flagged agent_double_active.
-    # Sources: L'Agent Double boss (3 random tricks), BetrayalArc (tricks 4-8 via
-    # agent_double_late_only flag), traitre joker (already populated above).
-    # Reading the flag — not boss.id — keeps this site reusable.
-    #
-    # 4.8.2 (B4): mutate `state._joker_state` IN PLACE rather than via
-    # `replace(state, _joker_state={...})`. Post-`trigger_round_start` the
-    # dict IS `acc._ledger.joker_state`; preserving the alias means future
-    # ledger mutations remain visible to classic-Belote reads via
-    # `state._joker_state.get(...)`. Pre-4.8.2 this site broke the alias,
-    # forcing the heist code (below) into a defensive dual-write.
-    if state.boss_modifiers.agent_double_active and not state._joker_state.get(
-        "agent_double_tricks"
-    ):
-        if state.boss_modifiers.agent_double_late_only:
-            sabotage_tricks = frozenset(range(4, 9))
-        else:
-            sabotage_tricks = frozenset(rng.sample(range(1, 9), 3))
-        state._joker_state["agent_double_tricks"] = sabotage_tricks
-
-    # B4: Use partner trust-based difficulty for the North (partner) AI seat
-    _north_diff_str = partner.difficulty_for(Seat.NORTH)
-    _north_diff = {
-        "easy": Difficulty.EASY,
-        "medium": Difficulty.MEDIUM,
-        "hard": Difficulty.HARD,
-    }.get(_north_diff_str, Difficulty.MEDIUM)
-    # Thread the round's seeded RNG into every AI seat so easy-AI plays and
-    # personality jitter stay reproducible under a fixed seed. Ghost-run and
-    # replay tooling rely on this — without it, AIPlayer's old unseeded
-    # default RNG randomised behavior per process even at a fixed seed.
-    ai_players = {
-        Seat.EAST: AIPlayer(Seat.EAST, Difficulty.MEDIUM, rng=rng),
-        Seat.NORTH: AIPlayer(Seat.NORTH, _north_diff, rng=rng),
-        Seat.WEST: AIPlayer(Seat.WEST, Difficulty.MEDIUM, rng=rng),
-    }
-
-    if acc is not None:
-        acc.partner_jokers_double = partner.trust.partner_jokers_double
+        # Tier drives partner-joker scaling (see TrustTrack.tier).
         acc.partner_tier = partner.trust.tier
 
-    def _emit(event: AnyEvent, s: GameState) -> GameState:
-        # 4.6.2: hot-path entry now goes through process_event (no per-event
-        # `replace()`). The state is unchanged for chips/mult/money — those
-        # live in the ledger and get sealed once at round-end via
-        # `acc.seal_round` below. joker_state IS shared with state._joker_state
-        # (installed by trigger_round_start), so classic-Belote read sites
-        # (ai.py, scoring.py, game.py) see live mutations on the SAME state
-        # object we return here.
-        #
-        # 4.6.4: also publish to the EventBus so external subscribers
-        # (UnlockTracker, ghost-run replay tooling, future analytics) receive
-        # events. Pre-4.6.4 the bus parameter was accepted but never emitted
-        # to, silently breaking every event-driven unlock (L'Exécuteur,
-        # L'Idéologue, Le Fanatique, Quinte Royale). The accumulator runs
-        # first so its ledger mutations are visible to any subscriber that
-        # inspects state.
-        if acc is not None:
-            acc.process_event(s, event)
-        bus.emit(event)
-        return s
-
-    # Phase: BIDDING
-    redeals = 0
-    while state.phase == Phase.BIDDING:
-        bidder = state.turn
-        bid: BidValue = None
-
-        if bidder == Seat.SOUTH:
-            bid = ui_callbacks.prompt_bid(state)
-        elif (
-            bidder == Seat.NORTH
-            and partner is not None
-            and not partner.trust.ai_degraded
-        ):
-            # Use personality for the partner if trust is maintained
-            if state.boss_modifiers.partner_forced_pass:
-                bid = None
-            elif partner.personality.should_bid(state):
-                p_bid = partner.personality.bid_value(state)
-                # Trust-gate Tout Atout / Sans Atout: partner only bids these
-                # special contracts once the trust track unlocks them. Below
-                # the threshold, fall through to "pass" rather than bid a
-                # normal suit — the personality already chose to go big.
-                is_special = p_bid == Suit.TOUT_ATOUT or p_bid == SANS_ATOUT_BID
-                if is_special and not partner.trust.duo_contracts_available:
-                    p_bid = None
-                # Ensure the bid is legal for the current round: round 1 may
-                # only take the up-card suit; round 2 may name any other suit
-                # (or TA/SA). place_bid only enforces the TA/SA rule, so the
-                # suit rule is filtered here. Previously the up-card suit was
-                # forbidden in *both* rounds, letting round-1 partners take an
-                # arbitrary suit and blocking up-card-only personalities.
-                up_suit = state.up_card.suit if state.up_card else None
-                if state.bidding_round == 1:
-                    legal_bid = p_bid is None or p_bid == up_suit
-                else:
-                    legal_bid = is_special or p_bid != up_suit
-                if legal_bid:
-                    bid = p_bid
-        else:
-            # Standard AI for EAST/WEST
-            bid = ai_players[bidder].decide_bid(state)
-
-        state = process_bid(state, bid)
-        # `bid` was a BidValue; the BidMadeEvent's `trump` field is the actual
-        # trump suit (Suit | None) from state, which place_bid set correctly.
-        state = _emit(
-            BidMadeEvent(
-                seat=bidder,
-                trump=state.trump,
-                contract=state.contract or "normal",
-            ),
-            state
-        )
-        if recorder is not None:
-            recorder.note_bid(
-                seat=bidder.name.lower(),
-                trump=state.trump.name.lower() if state.trump is not None else None,
-                contract=state.contract or "normal",
-            )
-
-        # All four seats passed in both bidding rounds: classic Belote
-        # redeals (dealer already rotated by place_bid) and bidding restarts.
-        # Previously the round ended here with 0 tricks, which BelAtro scored
-        # as a failed blind (run over). start_round resets boss_modifiers, so
-        # carry the boss/joker flags applied above over instead of re-running
-        # that setup; _joker_state (the ledger alias, incl. sabotage tricks) is
-        # not reset by start_round. No RoundEndEvent fires for the abandoned
-        # deal, so round-end jokers never score an unplayed hand. The cap is
-        # purely defensive (e.g. tests that mock every seat to pass); past it
-        # we return at Phase.DEAL with 0 tricks, as before.
-        if state.phase == Phase.DEAL and redeals < _MAX_REDEALS:
-            redeals += 1
-            state = replace(start_round(state, rng), boss_modifiers=state.boss_modifiers)
-            ui_callbacks.on_redeal(state)
-
-    # ── Coinche / surcoinche flow ────────────────────────────────────────
-    # Either defending team may coinche the taker's bid. The branches below
-    # mirror each other: EW-taker → NS defenders may coinche (player or
-    # partner-AI fallback); NS-taker → EW AI defenders may coinche (3.6.0
-    # audit H1 — without this branch the Libra planet was unreachable in
-    # natural play because coinche_level stayed 0 whenever NS was taker).
-    coinche_level = 0
-    if state.taker is not None and state.phase == Phase.PLAYING:
-        surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
-
-        if state.taker in (Seat.EAST, Seat.WEST):
-            # EW taker → NS defends. Player gets first refusal; partner AI
-            # picks up if the player declined and trust isn't degraded.
-            if ui_callbacks.prompt_coinche(state, state.taker) or (
-                not partner.trust.ai_degraded
-                and partner.personality.should_coinche(state, rng)
-            ):
-                coinche_level = 1
-                if surcoinche_unlocked and rng.random() < 0.3:
-                    coinche_level = 2
-        else:
-            # NS taker → EW AI defends. Light heuristic gated by the seeded
-            # RNG (so behaviour is reproducible under a fixed seed). When
-            # the coinche lands and surcoinche is unlocked, the player gets
-            # first refusal to surcoinche back (3.7.1 D3); the AI surcoinche
-            # heuristic (30 %) still fires if the player declines.
-            if _ew_should_coinche(state, rng):
-                coinche_level = 1
-                if surcoinche_unlocked:
-                    # Pick a concrete EW seat for the prompt label. Either
-                    # works — both EW seats defend together. Branches are
-                    # split (player-accept vs AI-fallback) because they are
-                    # conceptually distinct decisions even though both raise
-                    # the level — keep them separate for readability.
-                    coincheur_seat = Seat.EAST
-                    if ui_callbacks.prompt_surcoinche(state, coincheur_seat) or rng.random() < 0.3:
-                        coinche_level = 2
-
-        # L'Avocat boss forces at least coinche=1 regardless of taker team.
-        if state.boss_modifiers.auto_coinche:
-            coinche_level = max(coinche_level, 1)
-
-        # Refresh joker_state with the resolved coinche level via a re-emit.
-        # `re_emit=True` updates derived state (HUD, joker_state["contract"])
-        # without re-firing on_bid jokers — those already fired in the loop.
-        if coinche_level > 0:
-            state = _emit(
-                BidMadeEvent(
-                    seat=state.taker,
-                    trump=state.trump,
-                    contract=state.contract or "normal",
-                    coinche_level=coinche_level,
-                    re_emit=True,
-                ),
-                state,
-            )
-
-    # Le Coincheur deck: every round starts pre-coinched (deck mod plumbed via
-    # card_enhancements → state._joker_state).
-    if (
-        state.phase == Phase.PLAYING
-        and state._joker_state.get("start_coinched")
-        and coinche_level == 0
-    ):
-        coinche_level = 1
-        state = _emit(
-            BidMadeEvent(
-                seat=state.taker if state.taker is not None else Seat.SOUTH,
-                trump=state.trump,
-                contract=state.contract or "normal",
-                coinche_level=coinche_level,
-                re_emit=True,
-            ),
-            state,
-        )
-
-    # 4.7.0: Dix de Der Heist declaration site. Fires after the bidding /
-    # coinche / surcoinche flow has settled all derived state (taker, trump,
-    # coinche_level, joker_state["contract"]) and before trick 1. Gated on
-    # SOUTH being the taker; the `phase == PLAYING` guard naturally skips
-    # the (capped-out) all-pass case, which leaves the round at Phase.DEAL.
-    # AI takers never get the prompt — the UICallbacks default returns False
-    # and the BelAtro override also gates on `state.taker == Seat.SOUTH`.
-    #
-    # 4.8.2 (B4): single-site mutation. `state._joker_state` IS
-    # `acc._ledger.joker_state` after `trigger_round_start` installs the
-    # alias — and the post-trigger sabotage block above now preserves the
-    # alias too (replaced its `replace(state, _joker_state=...)` with
-    # in-place mutation). The pre-4.8.2 dual-write was a workaround for
-    # the broken alias; with the alias hardened, single-write is enough.
-    if (
-        state.phase == Phase.PLAYING
-        and state.taker == Seat.SOUTH
-        and ui_callbacks.prompt_heist(state)
-    ):
-        state._joker_state["heist_declared"] = True
-
-    # Phase: PLAYING
-    while state.phase == Phase.PLAYING:
-        player = state.turn
-        card: Card | None = None
-
-        if player == Seat.SOUTH:
-            card, state = ui_callbacks.prompt_card(state)
-        else:
-            # AI Play
-            card = ai_players[player].decide_card(state)
-            if player == Seat.NORTH and state._joker_state.get("partner_overcut_round"):
-                card = _diable_overcut(state) or card
-
-        # Before playing, track points to emit TrickWonEvent with diff
-        old_pts_total = sum(state.current_round_points)
-        old_belote_tracker = state.belote_tracker
-
-        state = play_card(state, card)
-        ui_callbacks.on_card_played(state, player, card)
-        if recorder is not None:
-            # If the 4th card just closed the trick, completed_tricks already
-            # includes it; otherwise we're mid-trick and the in-progress trick
-            # number is one past the completed count.
-            trick_no = (
-                len(state.completed_tricks)
-                if not state.current_trick
-                else len(state.completed_tricks) + 1
-            )
-            recorder.note_play(trick=trick_no, seat=player.name.lower(), card=str(card))
-
-        # If this play flipped the belote tracker, emit the announce event.
-        # belote_tracker = (belote_played, rebelote_played); compare old vs new.
-        if state.belote_tracker != old_belote_tracker:
-            became_belote = state.belote_tracker[0] and not old_belote_tracker[0]
-            became_rebelote = state.belote_tracker[1] and not old_belote_tracker[1]
-            if became_belote or became_rebelote:
-                state = _emit(
-                    BeloteAnnouncedEvent(seat=player, is_rebelote=became_rebelote),
-                    state,
-                )
-
-        if is_last_in_trick(state):
-            last_trick = state.completed_tricks[-1]
-
-            # Use the resolved winner cached by play_card (Rupture-aware).
-            # 3.8.1: pre-fix this re-derived via trick_winner_seat, which
-            # returns the RAW winner; under La Rupture the event.winner
-            # would disagree with the team scoring authority.
-            winner = state.last_trick_winner
-            assert winner is not None, (
-                "last_trick_winner unset after a complete trick — "
-                "GameState invariant violated."
-            )
-            # Use state diff to get points; perfectly handles all boss-aware points and Dix de Der
-            points = sum(state.current_round_points) - old_pts_total
-
-            # Emit declarations first if it's the first trick
-            if len(state.completed_tricks) == 1:
-                # Le Mime (declarations_zero) zeros classic-scoring declaration
-                # points at `scoring.py::_carre_points` / `_sequence_points`,
-                # so the BelAtro accumulator must see zeroed points too —
-                # otherwise chips and on_declaration jokers (LeMathématicien,
-                # QuinteRoyale) keyed on event.points would credit value that
-                # the actual round scoring discards. TierceCharger keys on
-                # declaration_type only and is intentionally unaffected so the
-                # "announce" promise of its description holds even under LeMime.
-                declarations_zeroed = state.boss_modifiers.declarations_zero
-                for decl in state.declarations:
-                    pts = 0
-                    if not declarations_zeroed and decl.detail and decl.kind in ("sequence", "carre"):
-                        pts = get_declaration_points([decl.detail])
-                    state = _emit(
-                        DeclarationScoredEvent(
-                            seat=decl.seat,
-                            declaration_type=decl.kind,
-                            points=pts,
-                        ),
-                        state
-                    )
-
-            is_last = len(state.completed_tricks) == 8
-            cards = tuple(tc.card for tc in last_trick)
-            leader_seat = last_trick[0].seat
-            state = _emit(
-                TrickWonEvent(
-                    winner=winner,
-                    cards=cards,
-                    trick_number=len(state.completed_tricks),
-                    is_last=is_last,
-                    card_points=points,
-                    trump=state.trump,
-                    leader_seat=leader_seat,
-                ),
-                state
-            )
-            # Le Fantôme partner personality: "Every trick they win gives you
-            # +$1." Personalities don't subscribe to the event bus the way
-            # jokers do, so payout is wired through the accumulator's ledger.
-            # 4.6.2: previously did `replace(state, _bonus_money=...)` here —
-            # but state._bonus_money is stale until seal_round under the new
-            # ledger model. Writing to acc._ledger.money keeps the source of
-            # truth consistent; HUD reads via acc.current_money() see it.
-            if (
-                partner is not None
-                and getattr(partner.personality, "id", None) == "le_fantome"
-                and winner == Seat.NORTH
-            ):
-                if acc is not None and acc._ledger is not None:
-                    acc._ledger.money += 1
-                else:
-                    state = replace(state, _bonus_money=state._bonus_money + 1)
-            ui_callbacks.on_trick_end(state, winner, points)
-
-    # Round End / Scoring
+    state = play_round(state, ctx)
     if state.phase == Phase.SCORING:
-        breakdown = score_round(state)
-        hand_remainder = tuple(state.hand_of(Seat.SOUTH))
-        capot_team = is_capot(state)  # 0=NS, 1=EW, None
-        state = _emit(
-            RoundEndEvent(
-                breakdown=breakdown,
-                taker_seat=state.taker,
-                trump=state.trump,
-                capot=capot_team is not None,
-                capot_team=capot_team,
-                hand_remainder=hand_remainder,
-                contract=state.contract or "normal",
-                coinche_level=coinche_level,
-            ),
-            state
-        )
-        if recorder is not None:
-            recorder.note_round_end({
-                "taker_team": breakdown.taker_team,
-                "taker_total": breakdown.taker_total,
-                "defender_total": breakdown.defender_total,
-                "is_capot": breakdown.is_capot,
-                "is_failed": breakdown.is_failed,
-            })
-        ui_callbacks.on_round_end(breakdown)
+        state = _run_scoring(ctx, state)
 
     # 4.6.2: seal the round so the returned state carries the ledger's
     # chips/mult/money. One `replace()` per round (down from ~25 pre-4.6.2).
@@ -610,6 +303,342 @@ def drive_round(
     return state
 
 
-def is_last_in_trick(state: GameState) -> bool:
+# ── Phase: setup ────────────────────────────────────────────────────────
+
+
+def _setup_round(
+    ctx: _RoundContext,
+    boss: BossModifier | None,
+    card_enhancements: dict[str, object] | None,
+) -> BelatroState:
+    """Deal, merge run flags, apply the boss, pick sabotage tricks, and
+    install the accumulator's ledger."""
+    rng = ctx.rng
+    # Target doesn't matter for a single round.
+    state = start_round(as_belatro(new_game(target=1000)), rng)
+
+    # Merge per-run deck/voucher flags into joker_state (jokers read them),
+    # and switch on the core rule variants those flags stand for.
+    if card_enhancements:
+        state = replace(
+            state,
+            _joker_state={**state._joker_state, **card_enhancements},
+            variants=_variants_from_flags(state.variants, card_enhancements),
+        )
+
+    # B1: Apply boss modifier flags onto the frozen BelatroState so play_card sees
+    # them. Must run BEFORE acc.trigger_round_start so the accumulator's
+    # snapshot of boss-derived flags (e.g. joker_state["no_dix_de_der"])
+    # reflects the live boss state instead of the RuleVariants defaults.
+    if boss is not None:
+        state = _apply_boss(state, boss)
+
+    # Le Traître joker (corrupted, partner_throws_trick): one random sabotage
+    # trick reusing the agent_double AI path. L'Agent Double joker: two. A
+    # boss that already activates agent_double takes precedence, which is why
+    # these MUST run after the boss is applied. (boss.apply() draws no RNG,
+    # so the seeded sequence is unchanged.)
+    if state._joker_state.get("traitre_active") and not state.variants.agent_double_active:
+        state = _with_sabotage(state, frozenset({rng.randint(1, 8)}))
+    if (
+        state._joker_state.get("agent_double_joker_active")
+        and not state.variants.agent_double_active
+    ):
+        state = _with_sabotage(state, frozenset(rng.sample(range(1, 9), 2)))
+
+    if ctx.acc is not None:
+        state = ctx.acc.trigger_round_start(state)
+
+    # Populate sabotage tricks for any path that flagged agent_double_active
+    # without picking them: L'Agent Double boss (3 random tricks), BetrayalArc
+    # (tricks 4-8 via agent_double_late_only). Reading the flag — not boss.id —
+    # keeps this site reusable.
+    if state.variants.agent_double_active and not state.variants.sabotage_tricks:
+        if state.variants.agent_double_late_only:
+            sabotage_tricks = frozenset(range(4, 9))
+        else:
+            sabotage_tricks = frozenset(rng.sample(range(1, 9), 3))
+        # replace() keeps the same _joker_state dict object, so the ledger
+        # alias survives.
+        state = replace(state, variants=replace(state.variants, sabotage_tricks=sabotage_tricks))
+    return state
+
+
+def _apply_boss(state: BelatroState, boss: BossModifier) -> BelatroState:
+    from ..engine.modifier_patch import PatchedGameState
+
+    proxy = PatchedGameState(state)
+    boss.apply(proxy)
+    patches = dict(object.__getattribute__(proxy, "_patches"))
+    state = replace(state, **patches)
+    # Ensure boss modifiers don't use stale cached logic/values.
+    clear_legal_cards_cache()
+    return state
+
+
+def _with_sabotage(state: BelatroState, tricks: frozenset[int]) -> BelatroState:
+    """Joker-driven agent_double: the partner throws `tricks`."""
+    return replace(
+        state,
+        variants=replace(state.variants, agent_double_active=True, sabotage_tricks=tricks),
+    )
+
+
+# Run-level flag (deck / voucher, see BelAtroRun.card_enhancements) → the core
+# rule variant it switches on.
+_FLAG_TO_VARIANT: dict[str, str] = {
+    "republicain_wild": "wild_seven_eight",  # Le Républicain deck
+    "no_belote_rebelote": "no_belote_rebelote",  # Le Marseillais deck
+    "announce_x2": "double_declarations",  # Le Marseillais deck
+    "tie_breaks_for_taker": "tie_breaks_for_taker",  # La Balance voucher
+}
+
+
+def _variants_from_flags(variants: RuleVariants, flags: dict[str, object]) -> RuleVariants:
+    on: dict[str, Any] = {f: True for flag, f in _FLAG_TO_VARIANT.items() if flags.get(flag)}
+    return replace(variants, **on) if on else variants
+
+
+_DIFFICULTY_BY_NAME = {
+    "easy": Difficulty.EASY,
+    "medium": Difficulty.MEDIUM,
+    "hard": Difficulty.HARD,
+}
+
+
+def _build_ai_players(partner: PartnerState, rng: random.Random) -> dict[Seat, AIPlayer]:
+    # B4: the partner (North) AI uses trust-based difficulty. Every seat gets
+    # the round's seeded RNG so easy-AI plays and personality jitter stay
+    # reproducible under a fixed seed (ghost-run and replay tooling rely on it).
+    north_diff = _DIFFICULTY_BY_NAME.get(partner.difficulty_for(Seat.NORTH), Difficulty.MEDIUM)
+    return {
+        Seat.EAST: AIPlayer(Seat.EAST, Difficulty.MEDIUM, rng=rng),
+        Seat.NORTH: AIPlayer(Seat.NORTH, north_diff, rng=rng),
+        Seat.WEST: AIPlayer(Seat.WEST, Difficulty.MEDIUM, rng=rng),
+    }
+
+
+# ── Phase: bidding ──────────────────────────────────────────────────────
+
+
+def _decide_bid(ctx: _RoundContext, state: BelatroState, bidder: Seat) -> BidValue:
+    if bidder == Seat.SOUTH:
+        return ctx.ui.prompt_bid(state)
+    partner = ctx.partner
+    if bidder == Seat.NORTH and partner is not None and not partner.trust.ai_degraded:
+        # Use the partner personality while trust is maintained.
+        if state.variants.partner_forced_pass:
+            return None
+        if not partner.personality.should_bid(state):
+            return None
+        p_bid = partner.personality.bid_value(state)
+        # Trust-gate Tout Atout / Sans Atout: below the threshold the partner
+        # passes rather than bid a normal suit — it already chose to go big.
+        is_special = p_bid == Suit.TOUT_ATOUT or p_bid == SANS_ATOUT_BID
+        if is_special and not partner.trust.duo_contracts_available:
+            return None
+        # Only legal bids for this bidding round (place_bid itself only
+        # enforces the TA/SA rule, not the up-card suit rule).
+        return p_bid if p_bid in legal_bids(state) else None
+    # Standard AI for EAST/WEST (and a degraded partner).
+    return ctx.ai_players[bidder].decide_bid(state)
+
+
+# ── Phase: coinche / surcoinche ─────────────────────────────────────────
+
+
+def _run_coinche(ctx: _RoundContext, state: BelatroState) -> BelatroState:
+    """Either defending team may coinche the taker's bid.
+
+    EW taker → NS defends (player first, partner-AI fallback). NS taker → EW
+    AI defends (3.6.0 audit H1: without this the Libra planet was unreachable
+    in natural play). Returns the state with `coinche_level` set.
+    """
+    rng = ctx.rng
+    level = 0
+    if state.taker is not None and state.phase == Phase.PLAYING:
+        surcoinche_unlocked = bool(state._joker_state.get("surcoinche_unlocked"))
+        if state.taker in (Seat.EAST, Seat.WEST):
+            if ctx.ui.prompt_coinche(state, state.taker) or (
+                not ctx.partner.trust.ai_degraded
+                and ctx.partner.personality.should_coinche(state, rng)
+            ):
+                level = 1
+                if surcoinche_unlocked and rng.random() < 0.3:
+                    level = 2
+        elif _ew_should_coinche(state, rng):
+            level = 1
+            # When surcoinche is unlocked the player gets first refusal to
+            # surcoinche back (3.7.1 D3); the AI heuristic (30%) fires if the
+            # player declines. Either EW seat works as the prompt label.
+            if surcoinche_unlocked and (
+                ctx.ui.prompt_surcoinche(state, Seat.EAST) or rng.random() < 0.3
+            ):
+                level = 2
+
+        # L'Avocat boss forces at least coinche=1 regardless of taker team.
+        if state.variants.auto_coinche:
+            level = max(level, 1)
+        # Refresh joker_state with the resolved level via a re-emit, which
+        # updates derived state without re-firing on_bid jokers.
+        if level > 0:
+            state = _emit_coinche(ctx, state, state.taker, level)
+
+    # Le Coincheur deck: every round starts pre-coinched (deck mod plumbed via
+    # card_enhancements → state._joker_state).
+    if state.phase == Phase.PLAYING and state._joker_state.get("start_coinched") and level == 0:
+        level = 1
+        taker = state.taker if state.taker is not None else Seat.SOUTH
+        state = _emit_coinche(ctx, state, taker, level)
+
+    return replace(state, coinche_level=level)
+
+
+def _emit_coinche(ctx: _RoundContext, state: BelatroState, seat: Seat, level: int) -> BelatroState:
+    return ctx.emit(
+        BidMadeEvent(
+            seat=seat,
+            trump=state.trump,
+            contract=state.contract or "normal",
+            coinche_level=level,
+            re_emit=True,
+        ),
+        state,
+    )
+
+
+def _offer_heist(ctx: _RoundContext, state: BelatroState) -> None:
+    """4.7.0 Dix de Der Heist declaration, after bidding/coinche settle and
+    before trick 1. Only when SOUTH takes; the PLAYING guard skips the
+    capped-out all-pass case (left at Phase.DEAL).
+
+    4.8.2 (B4): single in-place write — `state._joker_state` IS the ledger's
+    joker_state after trigger_round_start, so no dual-write is needed.
+    """
+    if (
+        state.phase == Phase.PLAYING
+        and state.taker == Seat.SOUTH
+        and ctx.ui.prompt_heist(state)
+    ):
+        state._joker_state["heist_declared"] = True
+
+
+# ── Phase: play ─────────────────────────────────────────────────────────
+
+
+def _emit_belote_if_announced(
+    ctx: _RoundContext,
+    state: BelatroState,
+    player: Seat,
+    old_tracker: tuple[bool, bool],
+) -> BelatroState:
+    """belote_tracker = (belote_played, rebelote_played); emit on a flip."""
+    if state.belote_tracker == old_tracker:
+        return state
+    became_belote = state.belote_tracker[0] and not old_tracker[0]
+    became_rebelote = state.belote_tracker[1] and not old_tracker[1]
+    if not (became_belote or became_rebelote):
+        return state
+    return ctx.emit(BeloteAnnouncedEvent(seat=player, is_rebelote=became_rebelote), state)
+
+
+def _on_trick_complete(ctx: _RoundContext, state: BelatroState, old_pts_total: int) -> BelatroState:
+    last_trick = state.completed_tricks[-1]
+    # Use the resolved winner cached by play_card (Rupture-aware). 3.8.1:
+    # re-deriving via trick_winner_seat returned the RAW winner, disagreeing
+    # with the team scoring authority under La Rupture.
+    winner = state.last_trick_winner
+    assert winner is not None, (
+        "last_trick_winner unset after a complete trick — BelatroState invariant violated."
+    )
+    # The state diff handles all boss-aware points and Dix de Der.
+    points = sum(state.current_round_points) - old_pts_total
+
+    if len(state.completed_tricks) == 1:
+        state = _emit_declarations(ctx, state)
+
+    state = ctx.emit(
+        TrickWonEvent(
+            winner=winner,
+            cards=tuple(tc.card for tc in last_trick),
+            trick_number=len(state.completed_tricks),
+            is_last=len(state.completed_tricks) == 8,
+            card_points=points,
+            trump=state.trump,
+            leader_seat=last_trick[0].seat,
+        ),
+        state,
+    )
+    # Le Fantôme partner personality: "Every trick they win gives you +$1."
+    # Personalities don't subscribe to the event bus, so the payout goes
+    # through the accumulator's ledger (state._bonus_money is stale until
+    # seal_round under the 4.6.2 ledger model).
+    partner = ctx.partner
+    if (
+        partner is not None
+        and getattr(partner.personality, "id", None) == "le_fantome"
+        and winner == Seat.NORTH
+    ):
+        if ctx.acc is not None and ctx.acc._ledger is not None:
+            ctx.acc._ledger.money += 1
+        else:
+            state = replace(state, _bonus_money=state._bonus_money + 1)
+    ctx.ui.on_trick_end(state, winner, points)
+    return state
+
+
+def _emit_declarations(ctx: _RoundContext, state: BelatroState) -> BelatroState:
+    """Declarations score after the first trick.
+
+    Le Mime (declarations_zero) zeros declaration points in classic scoring,
+    so the accumulator must see zeroed points too — otherwise chips and
+    on_declaration jokers (LeMathématicien, QuinteRoyale) would credit value
+    the round discards. TierceCharger keys on declaration_type only and is
+    intentionally unaffected.
+    """
+    zeroed = state.variants.declarations_zero
+    for decl in state.declarations:
+        pts = 0
+        if not zeroed and isinstance(decl.detail, (Sequence, Carre)):
+            pts = get_declaration_points([decl.detail])
+        state = ctx.emit(
+            DeclarationScoredEvent(seat=decl.seat, declaration_type=decl.kind, points=pts),
+            state,
+        )
+    return state
+
+
+# ── Phase: scoring ──────────────────────────────────────────────────────
+
+
+def _run_scoring(ctx: _RoundContext, state: BelatroState) -> BelatroState:
+    breakdown = score_round(state)
+    capot_team = is_capot(state)  # 0=NS, 1=EW, None
+    state = ctx.emit(
+        RoundEndEvent(
+            breakdown=breakdown,
+            taker_seat=state.taker,
+            trump=state.trump,
+            capot=capot_team is not None,
+            capot_team=capot_team,
+            hand_remainder=tuple(state.hand_of(Seat.SOUTH)),
+            contract=state.contract or "normal",
+            coinche_level=state.coinche_level,
+        ),
+        state,
+    )
+    if ctx.recorder is not None:
+        ctx.recorder.note_round_end({
+            "taker_team": breakdown.taker_team,
+            "taker_total": breakdown.taker_total,
+            "defender_total": breakdown.defender_total,
+            "is_capot": breakdown.is_capot,
+            "is_failed": breakdown.is_failed,
+        })
+    ctx.ui.on_round_end(breakdown)
+    return state
+
+
+def is_last_in_trick(state: BelatroState) -> bool:
     """Helper to check if a trick just ended."""
     return len(state.current_trick) == 0 and len(state.completed_tricks) > 0

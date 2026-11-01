@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from belote.config import GLOBAL_CONFIG
 from belote.deck import Suit
 from belote.game import team_of
 
@@ -76,7 +77,9 @@ class LeDernierMot(Joker):
         if event.is_last and team_of(event.winner) == 0:
             # Remove the flat Dix de Der bonus and replace with ×2 mult.
             # If no_dix_de_der boss is active the bonus was already 0, so don't subtract.
-            dix_de_der = 0 if state.get("no_dix_de_der", False) else 10
+            dix_de_der = (
+                0 if state.get("no_dix_de_der", False) else GLOBAL_CONFIG.LAST_TRICK_BONUS
+            )
             return JokerResult(add_chips=-dix_de_der, times_mult=2.0)
         return None
 

@@ -1,6 +1,6 @@
 """4.6.2 audit matrix — per-boss contract pins.
 
-Each test verifies a boss's `apply()` produces the correct `BossModifiers`
+Each test verifies a boss's `apply()` produces the correct `RuleVariants`
 flag, and (where the flag is non-trivial) at least one downstream read site
 honours it. The declarations_zero × BelAtro accumulator fix from the
 4.6.2 audit is pinned in its own focused test below.
@@ -8,8 +8,12 @@ honours it. The declarations_zero × BelAtro accumulator fix from the
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import pytest
 
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import DeclarationScoredEvent
 from belote.belatro.engine.modifier_patch import PatchedGameState
 from belote.belatro.run.boss import (
@@ -37,7 +41,13 @@ from belote.belatro.run.boss import (
     LeZeroFinal,
     LIconoclaste,
 )
-from belote.game import BossModifiers, Seat, new_game
+from belote.game import Seat, new_game
+from belote.variants import RuleVariants
+
+if TYPE_CHECKING:
+    from belote.belatro.engine.event_bus import (
+        DeclarationScoredEvent,
+    )
 
 # ── Registry invariant ────────────────────────────────────────────────────
 
@@ -85,10 +95,10 @@ def test_every_boss_has_id_name_description(boss_cls: type[BossModifier]) -> Non
     ],
 )
 def test_boss_sets_expected_flag(boss_cls: type[BossModifier], expected_flag: str) -> None:
-    """flags() returns BossModifiers; the corresponding field must be True
+    """flags() returns RuleVariants; the corresponding field must be True
     while no unrelated field is accidentally flipped."""
     flags = boss_cls().flags()
-    assert isinstance(flags, BossModifiers)
+    assert isinstance(flags, RuleVariants)
     assert getattr(flags, expected_flag) is True, (
         f"{boss_cls.__name__} did not set {expected_flag}"
     )
@@ -108,12 +118,12 @@ def test_betrayal_arc_sets_three_flags() -> None:
 
 def test_no_underscore_boss_read_pattern_in_src() -> None:
     """Locks against `getattr(state, '_X', False)` foot-gun across the BelAtro
-    tree. Boss flags MUST be read as `state.boss_modifiers.X`."""
+    tree. Boss flags MUST be read as `state.variants.X`."""
     import re
     from pathlib import Path
 
     src_root = Path(__file__).parent.parent.parent / "src" / "belote"
-    boss_field_names = [f.name for f in BossModifiers.__dataclass_fields__.values()]
+    boss_field_names = [f.name for f in RuleVariants.__dataclass_fields__.values()]
     pattern = re.compile(
         r'getattr\(\s*state\s*,\s*["\'](_(' + "|".join(boss_field_names) + r'))["\']'
     )
@@ -145,7 +155,7 @@ def test_le_mime_zeros_event_points_in_belatro_path() -> None:
     )
     text = rd.read_text()
     assert "declarations_zero" in text, (
-        "round_driver must read state.boss_modifiers.declarations_zero "
+        "round_driver must read state.variants.declarations_zero "
         "to zero declaration points before emit"
     )
     # Round-trip through the LeMathematicien gate: with points=0 (as
@@ -173,11 +183,11 @@ def test_le_mime_and_quinte_royale_do_not_double_credit() -> None:
 
 def test_rupture_anarchie_combo_flags_set() -> None:
     """LaRupture + LAnarchie active simultaneously — both flags must hold
-    on the same BossModifiers instance after sequential apply()."""
+    on the same RuleVariants instance after sequential apply()."""
     state = PatchedGameState(new_game())
     LaRupture().apply(state)
     LAnarchie().apply(state)
-    bm = state.boss_modifiers
+    bm = state.variants
     assert bm.no_consecutive_team_wins is True
     assert bm.dynamic_trump is True
 
@@ -186,7 +196,7 @@ def test_competition_malediction_combo_flags_set() -> None:
     state = PatchedGameState(new_game())
     LaCompetition().apply(state)
     LaMalediction().apply(state)
-    bm = state.boss_modifiers
+    bm = state.variants
     assert bm.separate_scoring is True
     assert bm.invert_scoring is True
 
@@ -198,7 +208,7 @@ def test_three_zero_rank_bosses_combo() -> None:
     LeRoiMort().apply(state)
     LeSauvage().apply(state)
     LIconoclaste().apply(state)
-    bm = state.boss_modifiers
+    bm = state.variants
     assert bm.kings_zero is True
     assert bm.aces_zero is True
     assert bm.jacks_zero is True
@@ -206,11 +216,11 @@ def test_three_zero_rank_bosses_combo() -> None:
 
 def test_betrayal_arc_with_solitude_compounds_isolation() -> None:
     """BetrayalArc + LaSolitude = partner is forced to pass AND will sabotage
-    from trick 4. Both regimes coexist on the same boss_modifiers."""
+    from trick 4. Both regimes coexist on the same variants."""
     state = PatchedGameState(new_game())
     BetrayalArc().apply(state)
     LaSolitude().apply(state)
-    bm = state.boss_modifiers
+    bm = state.variants
     assert bm.partner_forced_pass is True
     assert bm.agent_double_active is True
     assert bm.agent_double_late_only is True
@@ -222,7 +232,7 @@ def test_betrayal_arc_with_solitude_compounds_isolation() -> None:
 
 def test_no_boss_id_string_branching_in_runtime() -> None:
     """Locks against `boss.id == 'la_grande_muette'`-style string branching in
-    runtime code. All branching MUST go through `state.boss_modifiers.X`.
+    runtime code. All branching MUST go through `state.variants.X`.
     `belatro/main.py` is permitted to reference ids for the ante UI label only."""
     import re
     from pathlib import Path
@@ -251,5 +261,71 @@ def test_no_boss_id_string_branching_in_runtime() -> None:
                         break
     assert not offenders, (
         f"Boss.id string branching detected in runtime code; use "
-        f"state.boss_modifiers.X instead: {offenders}"
+        f"state.variants.X instead: {offenders}"
     )
+
+
+class TestBossModifiers:
+    def setup_method(self) -> None:
+        from belote.belatro.engine.modifier_patch import PatchedGameState
+        from belote.belatro.run.boss import ALL_BOSS_MODIFIERS
+
+        self.ALL_BOSS_MODIFIERS = ALL_BOSS_MODIFIERS
+        hands = ((), (), (), ())
+        self.gs = BelatroState(hands=hands)
+        self.PatchedGameState = PatchedGameState
+
+    def test_all_boss_modifiers_is_nonempty(self) -> None:
+        assert len(self.ALL_BOSS_MODIFIERS) > 0
+
+    def test_each_boss_has_id(self) -> None:
+        for cls in self.ALL_BOSS_MODIFIERS:
+            assert hasattr(cls, "id")
+            assert isinstance(cls.id, str)
+            assert len(cls.id) > 0
+
+    def test_each_boss_has_name(self) -> None:
+        for cls in self.ALL_BOSS_MODIFIERS:
+            assert hasattr(cls, "name")
+            assert isinstance(cls.name, str)
+
+    def test_each_boss_has_description(self) -> None:
+        for cls in self.ALL_BOSS_MODIFIERS:
+            assert hasattr(cls, "description")
+            assert isinstance(cls.description, str)
+
+    def test_each_boss_apply_returns_patched_game_state(self) -> None:
+        from belote.belatro.engine.modifier_patch import PatchedGameState
+
+        for cls in self.ALL_BOSS_MODIFIERS:
+            pgs = self.PatchedGameState(self.gs)
+            result = cls().apply(pgs)
+            assert isinstance(result, PatchedGameState)
+
+    def test_la_grande_muette_patches_no_belote(self) -> None:
+        from belote.belatro.run.boss import LaGrandeMuette
+
+        pgs = self.PatchedGameState(self.gs)
+        LaGrandeMuette().apply(pgs)
+        # 3.1.0: read via the unprefixed canonical path (the underscore shim
+        # was removed; see tests/belatro/test_boss_modifiers_integration.py
+        # `test_invariant_no_underscore_boss_attrs`).
+        assert pgs.variants.no_belote is True
+
+    def test_le_roi_mort_patches_kings_zero(self) -> None:
+        from belote.belatro.run.boss import LeRoiMort
+
+        pgs = self.PatchedGameState(self.gs)
+        LeRoiMort().apply(pgs)
+        assert pgs.variants.kings_zero is True
+
+    def test_l_anarchie_patches_dynamic_trump(self) -> None:
+        from belote.belatro.run.boss import LAnarchie
+
+        pgs = self.PatchedGameState(self.gs)
+        LAnarchie().apply(pgs)
+        assert pgs.variants.dynamic_trump is True
+
+    def test_all_boss_ids_are_unique(self) -> None:
+        ids = [cls.id for cls in self.ALL_BOSS_MODIFIERS]
+        assert len(ids) == len(set(ids))

@@ -7,8 +7,12 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import GLOBAL_CONFIG
+
+if TYPE_CHECKING:
+    from .achievements import Achievement
 
 _log = logging.getLogger(__name__)
 
@@ -176,7 +180,7 @@ class StatisticsManager:
 
     def update_stats_round(
         self, is_capot: bool, points_scored: int, trump_symbol: str | None = None
-    ) -> None:
+    ) -> list[Achievement]:
         stats = self.load_stats()
         stats.total_rounds += 1
         stats.total_points_scored += points_scored
@@ -204,7 +208,7 @@ class StatisticsManager:
         # depend on the UI). Callers can read stats.achievements to detect
         # the new entries.
         from .achievements import evaluate_round
-        evaluate_round(
+        unlocked = evaluate_round(
             stats,
             points_scored=points_scored,
             was_capot=is_capot,
@@ -214,8 +218,9 @@ class StatisticsManager:
         # Persist after every round so a mid-game crash doesn't lose
         # round-level stats or freshly-unlocked achievements.
         self.flush_stats()
+        return unlocked
 
-    def update_stats_game(self, won: bool, num_rounds: int, difficulty: str) -> None:
+    def update_stats_game(self, won: bool, num_rounds: int, difficulty: str) -> list[Achievement]:
         stats = self.load_stats()
         stats.games_played += 1
         self._session_stats.games_played += 1
@@ -232,9 +237,10 @@ class StatisticsManager:
                 stats.difficulty_stats[difficulty]["won"] += 1
 
         from .achievements import evaluate_game
-        evaluate_game(stats, won=won, difficulty=difficulty)
+        unlocked = evaluate_game(stats, won=won, difficulty=difficulty)
 
         self.flush_stats()
+        return unlocked
 
     def reset_stats(self) -> None:
         self._stats_cache = Statistics()
@@ -264,12 +270,16 @@ def flush_stats() -> None:
     _MANAGER.flush_stats()
 
 
-def update_stats_round(is_capot: bool, points_scored: int, trump_symbol: str | None = None) -> None:
-    _MANAGER.update_stats_round(is_capot, points_scored, trump_symbol)
+def update_stats_round(
+    is_capot: bool, points_scored: int, trump_symbol: str | None = None
+) -> list[Achievement]:
+    """Record a finished round; returns the achievements it newly unlocked."""
+    return _MANAGER.update_stats_round(is_capot, points_scored, trump_symbol)
 
 
-def update_stats_game(won: bool, num_rounds: int, difficulty: str) -> None:
-    _MANAGER.update_stats_game(won, num_rounds, difficulty)
+def update_stats_game(won: bool, num_rounds: int, difficulty: str) -> list[Achievement]:
+    """Record a finished game; returns the achievements it newly unlocked."""
+    return _MANAGER.update_stats_game(won, num_rounds, difficulty)
 
 
 def get_session_stats() -> SessionStats:

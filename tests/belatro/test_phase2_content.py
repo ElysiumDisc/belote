@@ -7,6 +7,7 @@ from typing import Any
 
 from belote.belatro.core.run_state import BelAtroRun
 from belote.belatro.core.scoring import ScoreAccumulator
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import (
     BeloteAnnouncedEvent,
     DeclarationScoredEvent,
@@ -26,7 +27,7 @@ from belote.belatro.partner.trust import TrustTrack
 from belote.belatro.run.boss import ALL_BOSS_MODIFIERS, BetrayalArc
 from belote.belatro.run.decks import STARTING_DECKS
 from belote.deck import Suit
-from belote.game import GameState, Seat
+from belote.game import Seat
 
 # ── Coinche jokers ─────────────────────────────────────────────────────────
 
@@ -370,7 +371,7 @@ def test_partner_joker_tier_scaling_amplifies_effect() -> None:
     boosted = ScoreAccumulator(partner_tier=3)
     boosted.attach_jokers([_PartnerStub()])
 
-    state = GameState(hands=((), (), (), ()))
+    state = BelatroState(hands=((), (), (), ()))
     evt = TrickWonEvent(
         winner=Seat.SOUTH,
         cards=(),
@@ -463,7 +464,7 @@ def test_le_rebelle_fires_once_per_belote_pair() -> None:
 
     acc = ScoreAccumulator(target_score=100)
     acc.attach_jokers([LeRebelle()])
-    state = GameState(hands=((), (), (), ()), _chips=100, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=100, _mult=1.0)
 
     # First event: belote (is_rebelote=False) — fires.
     e1 = BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False)
@@ -484,7 +485,7 @@ def test_le_notaire_pays_once_per_belote_pair() -> None:
 
     acc = ScoreAccumulator(target_score=100)
     acc.attach_jokers([LeNotaire()])
-    state = GameState(hands=((), (), (), ()), _chips=100, _mult=1.0)
+    state = BelatroState(hands=((), (), (), ()), _chips=100, _mult=1.0)
 
     state = acc.update_state(state, BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False))
     state = acc.update_state(state, BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=True))

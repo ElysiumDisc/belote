@@ -10,13 +10,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from belote.belatro.core.run_state import BelAtroRun
+from belote.belatro.core.state import BelatroState
 from belote.belatro.engine.event_bus import TrickWonEvent
 from belote.belatro.items.jokers.hand_comp import LaSentinelle
 from belote.belatro.items.vouchers import LaBalance, LaSurcoinche, forge_tierce
 from belote.belatro.run.boss import BetrayalArc, LeDivorce, LeFantomePartenaire
 from belote.deck import Card, Rank, Suit
 from belote.game import (
-    BossModifiers,
     GameState,
     Phase,
     Seat,
@@ -24,11 +24,12 @@ from belote.game import (
     legal_cards,
 )
 from belote.scoring import score_round
+from belote.variants import RuleVariants
 
 # ── Le Marseillais: announce_x2 ────────────────────────────────────────────
 
 
-def _build_state_with_carre(joker_state: dict[str, object]) -> GameState:
+def _build_state_with_carre(variants: RuleVariants) -> GameState:
     """South holds a Carré of Aces in initial_hands; score_round detects it."""
     south_hand = (
         Card(Suit.SPADES, Rank.ACE),
@@ -40,19 +41,19 @@ def _build_state_with_carre(joker_state: dict[str, object]) -> GameState:
         Card(Suit.SPADES, Rank.NINE),
         Card(Suit.SPADES, Rank.TEN),
     )
-    return GameState(
+    return BelatroState(
         hands=((), (), (), ()),
         initial_hands=(south_hand, (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        _joker_state=joker_state,
+        variants=variants,
     )
 
 
 def test_announce_x2_doubles_declarations_when_flag_set() -> None:
-    base = score_round(_build_state_with_carre({}))
-    boosted = score_round(_build_state_with_carre({"announce_x2": True}))
+    base = score_round(_build_state_with_carre(RuleVariants()))
+    boosted = score_round(_build_state_with_carre(RuleVariants(double_declarations=True)))
     assert base.taker_declarations > 0  # sanity: carré detected
     assert boosted.taker_declarations == base.taker_declarations * 2
 
@@ -61,14 +62,14 @@ def test_announce_x2_doubles_declarations_when_flag_set() -> None:
 
 
 def test_no_belote_rebelote_deck_mod_suppresses_belote_points() -> None:
-    state_with = GameState(
+    state_with = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
         belote_holders={Suit.HEARTS: Seat.SOUTH},
         belote_tracker=(True, True),
-        _joker_state={"no_belote_rebelote": True},
+        variants=RuleVariants(no_belote_rebelote=True),
     )
     breakdown = score_round(state_with)
     assert breakdown.taker_belote == 0
@@ -78,12 +79,12 @@ def test_no_belote_rebelote_deck_mod_suppresses_belote_points() -> None:
 
 
 def test_la_balance_voucher_avoids_litige_on_tie() -> None:
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        _joker_state={"tie_breaks_for_taker": True},
+        variants=RuleVariants(tie_breaks_for_taker=True),
     )
     # taker_card_pts == defender_card_pts == 0 → tie → would normally be litige
     breakdown = score_round(state)
@@ -106,13 +107,13 @@ def test_republicain_wild_seven_legal_off_suit() -> None:
         Card(Suit.SPADES, Rank.SEVEN),
         Card(Suit.HEARTS, Rank.NINE),  # would normally be only legal play
     )
-    state = GameState(
+    state = BelatroState(
         hands=(south_hand, (), (), ()),
         trump=Suit.SPADES,
         phase=Phase.PLAYING,
         turn=Seat.SOUTH,
         current_trick=(TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.ACE)),),
-        _joker_state={"republicain_wild": True},
+        variants=RuleVariants(wild_seven_eight=True),
     )
     legals = legal_cards(state, Seat.SOUTH)
     assert Card(Suit.SPADES, Rank.SEVEN) in legals
@@ -125,7 +126,7 @@ def test_republicain_wild_off_unsets_seven_when_must_follow() -> None:
         Card(Suit.SPADES, Rank.SEVEN),
         Card(Suit.HEARTS, Rank.NINE),
     )
-    state = GameState(
+    state = BelatroState(
         hands=(south_hand, (), (), ()),
         trump=Suit.SPADES,
         phase=Phase.PLAYING,
@@ -257,18 +258,18 @@ def test_ai_memory_respects_hide_partner_hand() -> None:
         Card(Suit.SPADES, Rank.ACE),
         Card(Suit.HEARTS, Rank.KING),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), north_hand, ()),
         phase=Phase.PLAYING,
         trump=Suit.HEARTS,
-        boss_modifiers=BossModifiers(hide_partner_hand=True),
+        variants=RuleVariants(hide_partner_hand=True),
     )
     ai = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     ai.update_memory(state)
     assert ai.memory.partner_hand == set()
 
     # Sanity: without the flag the same call DOES populate partner_hand.
-    state_no_flag = replace(state, boss_modifiers=BossModifiers())
+    state_no_flag = replace(state, variants=RuleVariants())
     ai2 = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     ai2.update_memory(state_no_flag)
     assert ai2.memory.partner_hand == set(north_hand)
@@ -338,12 +339,12 @@ def test_coinche_deck_start_coinched_flag_present() -> None:
 
 def test_existing_kings_zero_unaffected() -> None:
     """Ensure the new _joker_state plumbing didn't break boss flag reads."""
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(kings_zero=True),
+        variants=RuleVariants(kings_zero=True),
     )
     breakdown = score_round(state)
     # No tricks → 0 card pts, but the call must not crash.
@@ -358,7 +359,7 @@ def test_the_sun_adds_mult_after_fourth_trick() -> None:
     from belote.belatro.core.scoring import ScoreAccumulator
 
     acc = ScoreAccumulator(contract_levels={"tout_atout": {"bonus_mult_per_trick": 1.0}})
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.TOUT_ATOUT,
         taker=Seat.SOUTH,
@@ -397,7 +398,7 @@ def test_the_sun_inactive_outside_tout_atout() -> None:
     from belote.belatro.core.scoring import ScoreAccumulator
 
     acc = ScoreAccumulator(contract_levels={"tout_atout": {"bonus_mult_per_trick": 1.0}})
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -427,7 +428,7 @@ def test_libra_adds_mult_on_coinche_win() -> None:
     from belote.belatro.engine.event_bus import RoundEndEvent
 
     acc = ScoreAccumulator(contract_levels={"coinche": {"coinche_multiplier": 1.0}})
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -458,7 +459,7 @@ def test_libra_skips_failed_coinche() -> None:
     from belote.belatro.engine.event_bus import RoundEndEvent
 
     acc = ScoreAccumulator(contract_levels={"coinche": {"coinche_multiplier": 1.0}})
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -510,7 +511,7 @@ def test_foil_edition_adds_50_chips_per_trigger() -> None:
     acc = ScoreAccumulator()
     acc.attach_jokers([j])
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -553,7 +554,7 @@ def test_holo_edition_adds_10_mult_per_trigger() -> None:
     acc = ScoreAccumulator()
     acc.attach_jokers([j])
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -596,7 +597,7 @@ def test_polychrome_edition_multiplies_mult_by_1_5() -> None:
     acc = ScoreAccumulator()
     acc.attach_jokers([j])
 
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -659,7 +660,7 @@ def test_aces_zero_boss_zeros_ace_card_points() -> None:
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.EIGHT)),
         TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.NINE)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         initial_hands=(south_hand, (), (), ()),
         trump=Suit.SPADES,
@@ -667,13 +668,13 @@ def test_aces_zero_boss_zeros_ace_card_points() -> None:
         phase=Phase.SCORING,
         completed_tricks=(trick,),
         last_trick_winner=Seat.SOUTH,
-        boss_modifiers=BossModifiers(aces_zero=True),
+        variants=RuleVariants(aces_zero=True),
     )
     breakdown = score_round(state)
     # Card-pts only: A=0 (zeroed), 7/8/9 of non-trump = 0 → 0.
     # table_taker_pts also folds in the +10 dix-de-der bonus, so total = 10.
     # Compare to a no-flag baseline to prove the ace was actually zeroed:
-    no_flag_state = replace(state, boss_modifiers=BossModifiers())
+    no_flag_state = replace(state, variants=RuleVariants())
     baseline = score_round(no_flag_state)
     assert breakdown.table_taker_pts < baseline.table_taker_pts
 
@@ -686,20 +687,20 @@ def test_jacks_zero_boss_zeros_jack_card_points() -> None:
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.EIGHT)),
         TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.NINE)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
         completed_tricks=(trick,),
         last_trick_winner=Seat.SOUTH,
-        boss_modifiers=BossModifiers(jacks_zero=True),
+        variants=RuleVariants(jacks_zero=True),
     )
     breakdown = score_round(state)
     # Trump-9 = 14; J zeroed = 0; 7,8 = 0. Trick = 14, plus +10 dix-de-der = 24.
     assert breakdown.table_taker_pts == 24
     # Without the flag the trump Jack would add 20 → 14+20+10 = 44.
-    no_flag = score_round(replace(state, boss_modifiers=BossModifiers()))
+    no_flag = score_round(replace(state, variants=RuleVariants()))
     assert no_flag.table_taker_pts == 44
 
 
@@ -715,13 +716,13 @@ def test_declarations_zero_boss_zeros_carre() -> None:
         Card(Suit.SPADES, Rank.NINE),
         Card(Suit.SPADES, Rank.TEN),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         initial_hands=(south_hand, (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
-        boss_modifiers=BossModifiers(declarations_zero=True),
+        variants=RuleVariants(declarations_zero=True),
     )
     breakdown = score_round(state)
     assert breakdown.taker_declarations == 0
@@ -757,7 +758,7 @@ def test_separate_scoring_with_aces_zero_zeroes_aces_in_per_seat_path() -> None:
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
         TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -765,10 +766,10 @@ def test_separate_scoring_with_aces_zero_zeroes_aces_in_per_seat_path() -> None:
         completed_tricks=(trick,),
         last_trick_winner=Seat.SOUTH,
         contract="hearts",
-        boss_modifiers=BossModifiers(separate_scoring=True, aces_zero=True),
+        variants=RuleVariants(separate_scoring=True, aces_zero=True),
     )
     breakdown = score_round(state)
-    no_flag = score_round(replace(state, boss_modifiers=BossModifiers(separate_scoring=True)))
+    no_flag = score_round(replace(state, variants=RuleVariants(separate_scoring=True)))
     # With aces_zero, the per-seat path must produce a strictly smaller pts total.
     assert breakdown.table_taker_pts < no_flag.table_taker_pts
 
@@ -780,7 +781,7 @@ def test_separate_scoring_with_jacks_zero_zeroes_jacks_in_per_seat_path() -> Non
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.EIGHT)),
         TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.NINE)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
@@ -788,10 +789,10 @@ def test_separate_scoring_with_jacks_zero_zeroes_jacks_in_per_seat_path() -> Non
         completed_tricks=(trick,),
         last_trick_winner=Seat.SOUTH,
         contract="hearts",
-        boss_modifiers=BossModifiers(separate_scoring=True, jacks_zero=True),
+        variants=RuleVariants(separate_scoring=True, jacks_zero=True),
     )
     breakdown = score_round(state)
-    no_flag = score_round(replace(state, boss_modifiers=BossModifiers(separate_scoring=True)))
+    no_flag = score_round(replace(state, variants=RuleVariants(separate_scoring=True)))
     assert breakdown.table_taker_pts < no_flag.table_taker_pts
 
 
@@ -803,14 +804,14 @@ def test_aces_zero_plus_kings_zero_plus_jacks_zero_compose() -> None:
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.JACK)),
         TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.NINE)),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
         completed_tricks=(trick,),
         last_trick_winner=Seat.SOUTH,
-        boss_modifiers=BossModifiers(aces_zero=True, kings_zero=True, jacks_zero=True),
+        variants=RuleVariants(aces_zero=True, kings_zero=True, jacks_zero=True),
     )
     breakdown = score_round(state)
     # Trump-9 = 14; A/K/J zeroed; +10 dix-de-der = 24 total.
@@ -831,14 +832,83 @@ def test_declarations_zero_with_separate_scoring_no_double_count() -> None:
         Card(Suit.SPADES, Rank.NINE),
         Card(Suit.SPADES, Rank.TEN),
     )
-    state = GameState(
+    state = BelatroState(
         hands=((), (), (), ()),
         initial_hands=(south_hand, (), (), ()),
         trump=Suit.HEARTS,
         taker=Seat.SOUTH,
         phase=Phase.SCORING,
         contract="hearts",
-        boss_modifiers=BossModifiers(separate_scoring=True, declarations_zero=True),
+        variants=RuleVariants(separate_scoring=True, declarations_zero=True),
     )
     breakdown = score_round(state)
     assert breakdown.taker_declarations == 0
+
+
+# ── L'Aristocrate ace counting honors Rupture / L'Anarchie ─────────────────
+
+
+def _south_leads(rank: Rank) -> tuple[TrickCard, ...]:
+    return (
+        TrickCard(Seat.SOUTH, Card(Suit.SPADES, rank)),
+        TrickCard(Seat.WEST, Card(Suit.SPADES, Rank.SEVEN)),
+        TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
+        TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
+    )
+
+
+def test_aristocrate_aces_plain_round() -> None:
+    from belote.belatro.main import _aces_won_by_team
+
+    state = BelatroState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        completed_tricks=(_south_leads(Rank.ACE), _south_leads(Rank.ACE)),
+    )
+    assert _aces_won_by_team(state, team=0) == 2
+    assert _aces_won_by_team(state, team=1) == 0
+
+
+def test_aristocrate_aces_respect_rupture() -> None:
+    """Under La Rupture the 2nd consecutive NS win flips to EW, so the ace
+    in that trick must not be credited to NS (raw trick_winner_seat did)."""
+    from belote.belatro.main import _aces_won_by_team
+
+    state = BelatroState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        variants=RuleVariants(no_consecutive_team_wins=True),
+        completed_tricks=(_south_leads(Rank.ACE), _south_leads(Rank.ACE)),
+    )
+    assert _aces_won_by_team(state, team=0) == 1
+    assert _aces_won_by_team(state, team=1) == 1
+
+
+def test_aristocrate_aces_respect_anarchie_trick_trumps() -> None:
+    """Under L'Anarchie the trick is resolved with the trump in force for that
+    trick, not the round's final trump."""
+    from belote.belatro.main import _aces_won_by_team
+
+    # Trick: South leads A♠, West ruffs with 7♣. Clubs was trump for this
+    # trick, so West wins; with the final trump (hearts) South would win.
+    trick = (
+        TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),
+        TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.SEVEN)),
+        TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.EIGHT)),
+        TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
+    )
+    state = BelatroState(
+        hands=((), (), (), ()),
+        trump=Suit.HEARTS,
+        taker=Seat.SOUTH,
+        phase=Phase.SCORING,
+        variants=RuleVariants(dynamic_trump=True),
+        trick_trumps=(Suit.CLUBS,),
+        completed_tricks=(trick,),
+    )
+    assert _aces_won_by_team(state, team=0) == 0
+    assert _aces_won_by_team(state, team=1) == 1

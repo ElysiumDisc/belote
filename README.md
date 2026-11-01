@@ -70,14 +70,14 @@ belatro
        .-'``'|-._             )         _.-|
       /  .--.|   `''---...........---''`   |
      /  /    |           BelAtro           |
-     |  |    |       > Start Game <        |
-     |  |    |      AI:     < Hard >       |
-     |  |    |      Target: < 1000 >       |
-     |  |    |     Speed:  < Normal >      |
-     |  |    |  Theme:  < Classic Green >  |
+     |  |    |       Daily Challenge       |
+     |  |    |        > Start Game <       |
+     |  |    |           Settings          |
      |  |    |       Rules & History       |
-      \  \   |         Statistics          |
-       `\ `\ |            Quit             |
+     |  |    |          Statistics         |
+     |  |    |             Quit            |
+      \  \   |                             |
+       `\ `\ |                             |
          `\ `|                             |
          _/ /\                             /
         (__/  \                           /
@@ -123,9 +123,25 @@ belote
 # Play the new Roguelite expansion
 belatro
 
-# Custom settings
+# One-off overrides of the saved settings (not persisted)
 belote --difficulty hard --target 500 --seed 123 --speed fast
 ```
+
+**Settings** live in the main menu's *Settings* screen and are saved to
+`settings.json` in your config directory (`$XDG_CONFIG_HOME/belote`, else
+`~/.config/belote`; `%APPDATA%\belote` on Windows): AI difficulty (per seat
+via Enter), target score, speed, theme, animations, fast redraw,
+screen-reader hints, post-round replay analysis and BelAtro ghost-run
+recording. The old `BELOTE_*` environment variables still work and override
+the saved value while set.
+
+**Daily Challenge** (main menu): one seeded BelAtro run per day, the same for
+everyone (fixed deck, date-derived seed, starter shop pool, no endless).
+The intro shows the day's number and a share code; your best result per day
+is kept locally.
+
+**Achievements** pop a toast the moment you unlock one and are listed on the
+Statistics screen.
 
 
 ## Controls
@@ -176,7 +192,7 @@ belote --difficulty hard --target 500 --seed 123 --speed fast
 - **Polished Felt Mat (3.9.4):** The trick mat now has a subtle vignette at its edges, a faint deterministic braille pip-dot texture (fabric-weave feel without intrusive glyphs), and — at standard/spacious terminal sizes — a decorative `╔═══◆═══...═══◆═══╗` outer frame with corner ornaments.
 - **Selection HUD (3.9.4):** Selecting a card in hand now paints a highlighted bar under it AND a centered `► A♠ — Trump ◄` readout below, color-coded by suit / trump / legality.
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
-- **Main Menu:** Simple single-player entry point with configurable AI difficulty, Target Score, and Speed.
+- **Main Menu:** Simple single-player entry point; AI difficulty, Target Score, Speed and Theme live in the Settings screen.
 - **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
 - **Statistics:** unified global tracking of games played, win rates, best rounds, and BelAtro expansion milestones.
 - **Responsive Layout (3 tiers):** Three preset layouts — **compact** (80×32, fits 1366×768), **standard** (96×38), **spacious** (120×48+). The game picks the largest preset that fits your terminal on every render, so resizing mid-game adapts automatically; cards, side columns, and HUD verbosity all scale with the preset. Vertical centering pads tall terminals so the game never clings to the top.
@@ -237,7 +253,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1228 tests** passing with 100% coverage on game-logic modules (4.9.7).
+Currently **1286 tests** passing with 100% coverage on game-logic modules (4.10.0).
 
 ## Technical Integrity
 

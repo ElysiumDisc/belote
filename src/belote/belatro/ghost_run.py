@@ -9,19 +9,15 @@ the run later. The save path lives next to the regular profile file.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
 
+from ..paths import data_dir
+
 
 def _ghost_dir() -> Path:
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", "."))
-    else:
-        xdg = os.environ.get("XDG_DATA_HOME", "")
-        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-    path = base / "belote" / "ghosts"
+    path = data_dir() / "ghosts"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
