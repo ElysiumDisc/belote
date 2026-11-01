@@ -180,6 +180,5 @@ class TestBossSelectionDeterminism:
 
         source = inspect.getsource(BelAtroGame)
         assert "random.choice(ALL_BOSS_MODIFIERS)" not in source, (
-            "Boss selection must go through self.run._get_rng().choice() — "
-            "see 3.3.3 F2."
+            "Boss selection must go through self.run._get_rng().choice() — see 3.3.3 F2."
         )

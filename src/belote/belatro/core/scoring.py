@@ -47,19 +47,29 @@ class ContractReward(TypedDict, total=False):
     """
 
     # Per-suit (Saturn / Venus / Mercury / Jupiter): trick-level bonuses
-    add_chips: int          # +chips per trick won on this contract
-    add_mult: float         # +mult per trick won on this contract (Venus: 0.3)
-    jack_9_bonus: int       # +chips per Jack/Nine in a won trick
+    add_chips: int  # +chips per trick won on this contract
+    add_mult: float  # +mult per trick won on this contract (Venus: 0.3)
+    jack_9_bonus: int  # +chips per Jack/Nine in a won trick
     # The Moon (Sans Atout)
-    honor_bonus: int        # +chips per honor card in a won trick
+    honor_bonus: int  # +chips per honor card in a won trick
     # The Sun (Tout Atout)
     bonus_mult_per_trick: float  # +mult per trick past the 4th (Sun: 1.0)
     # Mercury planet round-end
-    add_money: int          # money awarded at round-end on success
+    add_money: int  # money awarded at round-end on success
     # Pluto (Capot)
-    capot_bonus: int        # +chips on capot success
+    capot_bonus: int  # +chips on capot success
     # Libra (Coinche)
     coinche_multiplier: float  # +mult per coinche level on NS success (Libra: 1.0)
+    # Neptune (Dix de Der, 4.11.0)
+    last_trick_chips: int  # +chips when NS wins the last trick
+
+
+# 4.11.0 boss flags (joker_state keys set by the boss's apply(), read here).
+CONTRE_ATTAQUE_FLAG = "boss_contre_attaque"  # Le Contre-Attaquant
+SEIZE_JOKER_FLAG = "boss_seize_joker"  # L'Huissier
+# Le Contre-Attaquant: what each opponent Belote / Rebelote steals.
+CONTRE_ATTAQUE_CHIPS = 20
+CONTRE_ATTAQUE_MONEY = 2
 
 
 @dataclass(slots=True)
@@ -110,6 +120,9 @@ class ScoreAccumulator:
     # trigger_round_start (legacy unit tests for joker handlers) still work
     # via the backward-compat `update_state` wrapper.
     _ledger: RoundLedger | None = None
+    # 4.11.0 L'Huissier: id() of the joker seized (silenced) this round, or
+    # None. Resolved at trigger_round_start from the boss flag.
+    _seized_joker_id: int | None = field(default=None, compare=False, repr=False)
 
     _HANDLER_METHODS: tuple[str, ...] = (
         "on_trick_won",
@@ -147,6 +160,7 @@ class ScoreAccumulator:
 
     def _make_ledger(self, state: BelatroState) -> RoundLedger:
         from .round_ledger import RoundLedger
+
         return RoundLedger(joker_state=dict(state._joker_state))
 
     def trigger_round_start(self, state: GameState) -> BelatroState:
@@ -184,6 +198,12 @@ class ScoreAccumulator:
         joker_state["heist_ns_trick_chips"] = 0
         joker_state["heist_outcome"] = None
 
+        # 4.11.0 L'Huissier: the leftmost joker is seized for the round.
+        seized = self._jokers[0] if joker_state.get(SEIZE_JOKER_FLAG) and self._jokers else None
+        self._seized_joker_id = id(seized) if seized is not None else None
+        if seized is not None:
+            self._log.append(f"L'Huissier: {seized.name} seized")
+
         # Apply permanent bonuses from Tarot cards
         ledger.chips = state._chips + self.permanent_chips
         if self.permanent_mult != 1.0:
@@ -196,6 +216,8 @@ class ScoreAccumulator:
         # adjusts chips/mult/money at round-start. LePrêteur is the first
         # consumer.
         for joker in self._jokers:
+            if joker is seized:
+                continue
             result = joker.on_round_start(joker_state)
             if result is None:
                 continue
@@ -274,7 +296,7 @@ class ScoreAccumulator:
         if isinstance(event, TrickWonEvent):
             self._on_trick_won(ledger, state, event)
         elif isinstance(event, BeloteAnnouncedEvent):
-            self._fire_jokers(ledger, "on_belote", event)
+            self._on_belote(ledger, event)
         elif isinstance(event, DeclarationScoredEvent):
             self._on_declaration(ledger, state, event)
         elif isinstance(event, RoundEndEvent):
@@ -318,9 +340,7 @@ class ScoreAccumulator:
         elif ed == Edition.HOLO:
             self._apply(ledger, JokerResult(add_mult=10.0), source=f"{joker.name} (Holo)")
         elif ed == Edition.POLYCHROME:
-            self._apply(
-                ledger, JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)"
-            )
+            self._apply(ledger, JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)")
 
     def _fire_jokers(self, ledger: RoundLedger, method_name: str, event_obj: Any) -> None:
         # 4.6.2: read pre-resolved (joker, method) pairs from the registry so
@@ -337,7 +357,10 @@ class ScoreAccumulator:
         elif self._attached_joker_ids != {id(j) for j in self._jokers}:
             self.attach_jokers(self._jokers)
         joker_state = ledger.joker_state
+        seized = self._seized_joker_id
         for joker, method in self._handler_index.get(method_name, ()):
+            if seized is not None and id(joker) == seized:
+                continue  # L'Huissier: seized for the round
             # 4.6.4: per-joker transactional + EventBus-style isolation. A
             # joker raising mid-dispatch must not leave chips/mult/money/
             # joker_state half-applied nor skip its siblings. self._log is
@@ -370,8 +393,25 @@ class ScoreAccumulator:
                 del self._log[snap_log_len:]
                 _log.exception(
                     "Joker %s raised on %s; ledger restored, continuing with siblings.",
-                    joker.name, method_name,
+                    joker.name,
+                    method_name,
                 )
+
+    # ── BeloteAnnouncedEvent ────────────────────────────────────────────
+
+    def _on_belote(self, ledger: RoundLedger, event: BeloteAnnouncedEvent) -> None:
+        # 4.11.0 Le Contre-Attaquant: each opponent Belote / Rebelote steals
+        # chips and money. The money debit rides on ledger.money (signed) and
+        # is reconciled — capped at the wallet — after the round.
+        if ledger.joker_state.get(CONTRE_ATTAQUE_FLAG) and event.seat not in _NS_TEAM:
+            ledger.chips -= CONTRE_ATTAQUE_CHIPS
+            ledger.money -= CONTRE_ATTAQUE_MONEY
+            what = "Rebelote" if event.is_rebelote else "Belote"
+            self._log.append(
+                f"Le Contre-Attaquant: -{CONTRE_ATTAQUE_CHIPS} chips, "
+                f"-${CONTRE_ATTAQUE_MONEY} ({what})"
+            )
+        self._fire_jokers(ledger, "on_belote", event)
 
     # ── TrickWonEvent ───────────────────────────────────────────────────
 
@@ -432,6 +472,13 @@ class ScoreAccumulator:
                     bonus_int = int(honors * honor_bonus)
                     ledger.chips += bonus_int
                     self._log.append(f"La Lune: +{bonus_int} chips (honors)")
+        # Neptune (Dix de Der): +chips when NS takes the last trick, unless a
+        # boss negated Dix de Der (Le Zéro Final).
+        if event.is_last and not ledger.joker_state.get("no_dix_de_der"):
+            last_chips = self.contract_levels.get("dix_de_der", {}).get("last_trick_chips", 0)
+            if last_chips:
+                ledger.chips += last_chips
+                self._log.append(f"Neptune: +{last_chips} chips (Dix de Der)")
         # The Sun (Tout Atout): +X Mult per trick beyond the 4th.
         if event.trump == Suit.TOUT_ATOUT and event.trick_number > 4:
             sun_reward = self.contract_levels.get("tout_atout", {})
@@ -440,7 +487,9 @@ class ScoreAccumulator:
                 ledger.mult += sun_mult
                 self._log.append(f"Le Soleil: +{sun_mult} Mult (trick #{event.trick_number})")
 
-    def _trick_infiltre(self, ledger: RoundLedger, state: BelatroState, event: TrickWonEvent) -> None:
+    def _trick_infiltre(
+        self, ledger: RoundLedger, state: BelatroState, event: TrickWonEvent
+    ) -> None:
         """L'Infiltré (Ghost Lead): NS wins by trumping a non-trump lead (the
         winner must have been void of the lead suit) → +2 Mult, +$1.
 
@@ -506,9 +555,7 @@ class ScoreAccumulator:
             if forfeit:
                 ledger.chips -= forfeit
             joker_state["heist_outcome"] = "lost"
-            self._log.append(
-                f"Dix de Der HEIST BUSTED: -{forfeit} chips (tricks 1-7 forfeited)"
-            )
+            self._log.append(f"Dix de Der HEIST BUSTED: -{forfeit} chips (tricks 1-7 forfeited)")
 
     # ── DeclarationScoredEvent ──────────────────────────────────────────
 
@@ -632,5 +679,7 @@ class ScoreAccumulator:
         # = 0" which looks like a UI bug rather than the intended clamp.
         chips_display = max(0, self._live_chips(state))
         mult_display = self._live_mult(state)
-        return [*self._log, f"Chips {chips_display} × Mult {mult_display:.1f} = {self.get_total(state)}"]
-
+        return [
+            *self._log,
+            f"Chips {chips_display} × Mult {mult_display:.1f} = {self.get_total(state)}",
+        ]

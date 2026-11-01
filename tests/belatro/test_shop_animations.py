@@ -4,6 +4,7 @@ These tests verify the helpers exist, run cleanly under BELOTE_NO_ANIM=1,
 and don't perturb shop state. Visual correctness is verified by manual
 walkthrough (the helpers' only side-effect is ANSI escapes on stdout).
 """
+
 from __future__ import annotations
 
 import io

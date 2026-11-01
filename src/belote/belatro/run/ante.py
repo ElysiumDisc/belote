@@ -23,7 +23,7 @@ def calculate_target(ante: int, blind_index: int, endless_offset: int = 0) -> in
     base = 100
     ante_multiplier = 1.5 ** (ante - 1)
     blind_multiplier = [1.0, 1.5, 2.0][blind_index]
-    endless_multiplier = 2.2 ** endless_offset
+    endless_multiplier = 2.2**endless_offset
     return int(base * ante_multiplier * blind_multiplier * endless_multiplier)
 
 

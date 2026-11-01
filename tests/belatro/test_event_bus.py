@@ -77,6 +77,7 @@ def test_raising_subscriber_does_not_skip_siblings(caplog) -> None:
     bus.subscribe(good_after)
 
     import logging
+
     with caplog.at_level(logging.ERROR, logger="belote.belatro.engine.event_bus"):
         bus.emit(_evt())
 

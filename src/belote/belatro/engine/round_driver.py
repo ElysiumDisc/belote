@@ -260,7 +260,6 @@ def drive_round(
     ui_callbacks: RoundUICallbacks,
     acc: ScoreAccumulator | None = None,
     boss: BossModifier | None = None,
-    target_score: int = 0,
     seed: int | None = None,
     card_enhancements: dict[str, object] | None = None,
     recorder: GhostRecorder | None = None,
@@ -515,11 +514,7 @@ def _offer_heist(ctx: _RoundContext, state: BelatroState) -> None:
     4.8.2 (B4): single in-place write — `state._joker_state` IS the ledger's
     joker_state after trigger_round_start, so no dual-write is needed.
     """
-    if (
-        state.phase == Phase.PLAYING
-        and state.taker == Seat.SOUTH
-        and ctx.ui.prompt_heist(state)
-    ):
+    if state.phase == Phase.PLAYING and state.taker == Seat.SOUTH and ctx.ui.prompt_heist(state):
         state._joker_state["heist_declared"] = True
 
 
@@ -628,13 +623,15 @@ def _run_scoring(ctx: _RoundContext, state: BelatroState) -> BelatroState:
         state,
     )
     if ctx.recorder is not None:
-        ctx.recorder.note_round_end({
-            "taker_team": breakdown.taker_team,
-            "taker_total": breakdown.taker_total,
-            "defender_total": breakdown.defender_total,
-            "is_capot": breakdown.is_capot,
-            "is_failed": breakdown.is_failed,
-        })
+        ctx.recorder.note_round_end(
+            {
+                "taker_team": breakdown.taker_team,
+                "taker_total": breakdown.taker_total,
+                "defender_total": breakdown.defender_total,
+                "is_capot": breakdown.is_capot,
+                "is_failed": breakdown.is_failed,
+            }
+        )
     ctx.ui.on_round_end(breakdown)
     return state
 

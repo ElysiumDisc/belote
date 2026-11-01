@@ -28,4 +28,3 @@ def test_round_two_excludes_up_suit_and_adds_specials() -> None:
         SANS_ATOUT_BID,
         None,
     ]
-

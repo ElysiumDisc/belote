@@ -54,9 +54,11 @@ def test_dix_de_der_bonus() -> None:
 
 def test_trump_jack_and_nine_are_top_trumps() -> None:
     # Trump ranking J(20) > 9(14) > A(11) > 10(10) > K(4) > Q(3) > 8/7(0).
-    j = card_points(next(c for c in make_deck()
-                         if c.suit == Suit.SPADES and c.rank == Rank.JACK), Suit.SPADES)
-    nine = card_points(next(c for c in make_deck()
-                            if c.suit == Suit.SPADES and c.rank == Rank.NINE), Suit.SPADES)
+    j = card_points(
+        next(c for c in make_deck() if c.suit == Suit.SPADES and c.rank == Rank.JACK), Suit.SPADES
+    )
+    nine = card_points(
+        next(c for c in make_deck() if c.suit == Suit.SPADES and c.rank == Rank.NINE), Suit.SPADES
+    )
     assert j == 20
     assert nine == 14

@@ -22,3 +22,7 @@ os.environ["HOME"] = str(_SANDBOX)
 os.environ["XDG_CONFIG_HOME"] = str(_SANDBOX / ".config")
 os.environ["XDG_DATA_HOME"] = str(_SANDBOX / ".local" / "share")
 os.environ.pop("NO_COLOR", None)
+
+# Interaction-layer harness fixture (`tui`). Imported after the sandbox env is
+# in place so `belote` (and its theme singleton) load under the redirected HOME.
+from tests.harness import tui  # noqa: E402, F401

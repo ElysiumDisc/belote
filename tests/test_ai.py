@@ -160,10 +160,14 @@ def test_ai_round1_never_bids_tout_atout() -> None:
     player = AIPlayer(Seat.EAST, Difficulty.HARD)
     # Strong TA-shaped hand: lots of Jacks
     hand = (
-        Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.JACK),
-        Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK),
-        Card(Suit.HEARTS, Rank.NINE), Card(Suit.SPADES, Rank.NINE),
-        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.CLUBS, Rank.ACE),
+        Card(Suit.HEARTS, Rank.JACK),
+        Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.DIAMONDS, Rank.JACK),
+        Card(Suit.CLUBS, Rank.JACK),
+        Card(Suit.HEARTS, Rank.NINE),
+        Card(Suit.SPADES, Rank.NINE),
+        Card(Suit.DIAMONDS, Rank.ACE),
+        Card(Suit.CLUBS, Rank.ACE),
     )
     state = _bid_state(hand, up_card=Card(Suit.HEARTS, Rank.TEN), bidding_round=1)
     # Round 1: even if AI loves TA, the up-card is HEARTS, so it can only take HEARTS.
@@ -174,12 +178,17 @@ def test_ai_round1_never_bids_tout_atout() -> None:
 def test_ai_hard_bids_tout_atout_on_jack_heavy_hand() -> None:
     """All four Jacks plus Aces should trigger Tout Atout in round 2."""
     from belote.game import SANS_ATOUT_BID  # noqa: F401 (used elsewhere)
+
     player = AIPlayer(Seat.EAST, Difficulty.HARD)
     hand = (
-        Card(Suit.HEARTS, Rank.JACK), Card(Suit.SPADES, Rank.JACK),
-        Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.CLUBS, Rank.JACK),
-        Card(Suit.HEARTS, Rank.NINE), Card(Suit.SPADES, Rank.NINE),
-        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.CLUBS, Rank.ACE),
+        Card(Suit.HEARTS, Rank.JACK),
+        Card(Suit.SPADES, Rank.JACK),
+        Card(Suit.DIAMONDS, Rank.JACK),
+        Card(Suit.CLUBS, Rank.JACK),
+        Card(Suit.HEARTS, Rank.NINE),
+        Card(Suit.SPADES, Rank.NINE),
+        Card(Suit.DIAMONDS, Rank.ACE),
+        Card(Suit.CLUBS, Rank.ACE),
     )
     state = _bid_state(hand, bidder_index=3)  # last to bid → aggression bonus
     bid = player.decide_bid(state)
@@ -189,12 +198,17 @@ def test_ai_hard_bids_tout_atout_on_jack_heavy_hand() -> None:
 def test_ai_easy_bids_sans_atout_on_flat_ace_hand() -> None:
     """Three Aces across three suits with no long suit → Sans Atout."""
     from belote.game import SANS_ATOUT_BID
+
     player = AIPlayer(Seat.EAST, Difficulty.EASY)
     hand = (
-        Card(Suit.HEARTS, Rank.ACE), Card(Suit.HEARTS, Rank.SEVEN),
-        Card(Suit.SPADES, Rank.ACE), Card(Suit.SPADES, Rank.EIGHT),
-        Card(Suit.DIAMONDS, Rank.ACE), Card(Suit.DIAMONDS, Rank.NINE),
-        Card(Suit.CLUBS, Rank.SEVEN), Card(Suit.CLUBS, Rank.EIGHT),
+        Card(Suit.HEARTS, Rank.ACE),
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.SPADES, Rank.ACE),
+        Card(Suit.SPADES, Rank.EIGHT),
+        Card(Suit.DIAMONDS, Rank.ACE),
+        Card(Suit.DIAMONDS, Rank.NINE),
+        Card(Suit.CLUBS, Rank.SEVEN),
+        Card(Suit.CLUBS, Rank.EIGHT),
     )
     state = _bid_state(hand)
     bid = player.decide_bid(state)
@@ -205,10 +219,14 @@ def test_ai_pass_on_weak_hand() -> None:
     """A weak hand should not bid TA, SA, or any suit."""
     player = AIPlayer(Seat.EAST, Difficulty.MEDIUM)
     hand = (
-        Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.HEARTS, Rank.EIGHT),
-        Card(Suit.SPADES, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT),
-        Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.DIAMONDS, Rank.EIGHT),
-        Card(Suit.CLUBS, Rank.SEVEN), Card(Suit.CLUBS, Rank.EIGHT),
+        Card(Suit.HEARTS, Rank.SEVEN),
+        Card(Suit.HEARTS, Rank.EIGHT),
+        Card(Suit.SPADES, Rank.SEVEN),
+        Card(Suit.SPADES, Rank.EIGHT),
+        Card(Suit.DIAMONDS, Rank.SEVEN),
+        Card(Suit.DIAMONDS, Rank.EIGHT),
+        Card(Suit.CLUBS, Rank.SEVEN),
+        Card(Suit.CLUBS, Rank.EIGHT),
     )
     state = _bid_state(hand)
     # Force personality jitter to its extreme negative so the test isn't flaky.
@@ -418,7 +436,7 @@ def test_ai_legal_cards_empty_raises() -> None:
         trump=Suit.HEARTS,
     )
     with (
-        unittest.mock.patch("belote.ai.legal_cards", return_value=()),
+        unittest.mock.patch("belote.ai.player.legal_cards", return_value=()),
         pytest.raises(AssertionError, match="legal_cards empty"),
     ):
         player.decide_card(state)
@@ -432,11 +450,17 @@ def test_ai_no_raw_card_points_import() -> None:
     lead heuristics. Pre-4.1.1 the bid path migrated to the boss-aware
     helper but the play path still called raw `card_points_fn`.
     """
+    import importlib
     import inspect
+    import pkgutil
 
-    import belote.ai as ai_mod
+    import belote.ai as ai_pkg
 
-    src = inspect.getsource(ai_mod)
+    # 4.11.0: ai is a package (one module per difficulty tier) — scan them all.
+    src = "".join(
+        inspect.getsource(importlib.import_module(f"belote.ai.{m.name}"))
+        for m in pkgutil.iter_modules(ai_pkg.__path__)
+    )
     assert "card_points as card_points_fn" not in src, (
         "ai.py must not re-import raw card_points — play heuristics must "
         "route through card_points_with_modifiers"
@@ -576,7 +600,7 @@ def test_medium_ai_discard_consults_boss_modifier_helper() -> None:
     )
     player = AIPlayer(Seat.WEST, Difficulty.MEDIUM)
 
-    import belote.ai as ai_mod
+    import belote.ai.medium as ai_mod  # 4.11.0: Medium tier's own module
 
     real_helper = ai_mod.card_points_with_modifiers
     calls: list[tuple] = []
@@ -631,13 +655,23 @@ def test_winning_strategy_penalises_when_partner_has_stronger_same_suit() -> Non
     # Partner visibly holds the stronger card.
     player.memory.partner_hand = {partner_stronger}
     score_strong = player._score_winning_strategy(
-        my_card, state, trump, trick, partner_winning=False, points=4,
+        my_card,
+        state,
+        trump,
+        trick,
+        partner_winning=False,
+        points=4,
     )
 
     # Partner visibly holds only a weaker card → no penalty.
     player.memory.partner_hand = {partner_weaker}
     score_weak = player._score_winning_strategy(
-        my_card, state, trump, trick, partner_winning=False, points=4,
+        my_card,
+        state,
+        trump,
+        trick,
+        partner_winning=False,
+        points=4,
     )
 
     delta = score_weak - score_strong
@@ -659,7 +693,7 @@ def test_winning_strategy_partner_hand_uses_nontrump_order_under_sa() -> None:
     penalty still fires correctly (proving the SA branch took the
     `_NONTRUMP_ORDER` path and never touched `trick_rank`).
     """
-    from belote import ai as ai_module
+    from belote.ai import hard as ai_module  # 4.11.0: Hard tier's own module
     from belote.deck import Contract
 
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
@@ -692,11 +726,23 @@ def test_winning_strategy_partner_hand_uses_nontrump_order_under_sa() -> None:
 
     with unittest.mock.patch.object(ai_module, "trick_rank", _poisoned_trick_rank):
         score_with_partner = player._score_winning_strategy(
-            my_card, state, None, trick, partner_winning=False, points=4, is_sa=True,
+            my_card,
+            state,
+            None,
+            trick,
+            partner_winning=False,
+            points=4,
+            is_sa=True,
         )
         player.memory.partner_hand = set()  # baseline: no penalty
         score_no_partner = player._score_winning_strategy(
-            my_card, state, None, trick, partner_winning=False, points=4, is_sa=True,
+            my_card,
+            state,
+            None,
+            trick,
+            partner_winning=False,
+            points=4,
+            is_sa=True,
         )
 
     # Penalty fired (-5) only when partner-hand had the stronger card.

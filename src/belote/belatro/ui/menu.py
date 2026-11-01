@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from belote.ansi import (
     BOLD,
+    DIM,
     RESET,
     REVERSE,
     ansi_center,
@@ -52,7 +53,15 @@ class BelAtroMainMenu:
 
     def run(self) -> BelAtroRun | None:
         """Main loop for the menu."""
-        self.options = ["Start Run", "Select Deck", "Collection", "Rules", "Quit"]
+        self.options = [
+            "Start Run",
+            "Select Deck",
+            "Boss Rush",
+            "Watch Ghost Run",
+            "Collection",
+            "Rules",
+            "Back",
+        ]
         sys.stdout.write(hide_cursor())
         while True:
             self._render()
@@ -66,7 +75,17 @@ class BelAtroMainMenu:
                 choice = self.options[self.selected]
                 if choice == "Start Run":
                     return BelAtroRun(deck_id=self.selected_deck_id, profile=self.profile)
-                if choice == "Select Deck":
+                if choice == "Boss Rush":
+                    from .boss_rush import show_boss_rush
+
+                    run = show_boss_rush(self.reader, self.profile)
+                    if run is not None:
+                        return run
+                elif choice == "Watch Ghost Run":
+                    from .ghost_viewer import show_ghost_picker
+
+                    show_ghost_picker(self.reader)
+                elif choice == "Select Deck":
                     self._select_deck()
                 elif choice == "Collection":
                     from .collection import show_collection
@@ -76,7 +95,7 @@ class BelAtroMainMenu:
                     from .rules import show_belatro_rules
 
                     show_belatro_rules(self.reader)
-                elif choice == "Quit":
+                elif choice == "Back":
                     return None
 
             elif key in (Key.ESC, Key.QUIT, Key.EOF):
@@ -94,7 +113,6 @@ class BelAtroMainMenu:
             lines.append(ansi_center(menu_art_fg() + BOLD + line + RESET, term_w))
         lines.append("")
         lines.append(ansi_center(menu_border_fg() + SUIT_ROW + RESET, term_w))
-        lines.append(ansi_center(white_fg() + "A Belote Roguelite Adventure" + RESET, term_w))
         lines.append("")
 
         for i, opt in enumerate(self.options):
@@ -108,9 +126,7 @@ class BelAtroMainMenu:
         deck = next((d for d in STARTING_DECKS if d.id == self.selected_deck_id), None)
         if deck:
             lines.append("")
-            lines.append(
-                ansi_center(light_gray_fg() + f"Deck: {deck.name}" + RESET, term_w)
-            )
+            lines.append(ansi_center(light_gray_fg() + f"Deck: {deck.name}" + RESET, term_w))
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
@@ -138,7 +154,8 @@ class BelAtroMainMenu:
             top = max(1, (term_h - content_h) // 2)
 
             out.append(
-                move(top, 1) + ansi_center(gold_fg() + BOLD + "Select Starting Deck" + RESET, term_w)
+                move(top, 1)
+                + ansi_center(gold_fg() + BOLD + "Select Starting Deck" + RESET, term_w)
             )
             line_char = "─" * min(term_w - 4, 76)
             out.append(move(top + 1, 1) + ansi_center(menu_border_fg() + line_char + RESET, term_w))
@@ -146,8 +163,9 @@ class BelAtroMainMenu:
             list_start_col = max(1, (term_w - 70) // 2)
             for i, d in enumerate(STARTING_DECKS):
                 row = top + 2 + i
-                color = gold_fg() + REVERSE if i == sel else white_fg()
-                text = f"  {d.name}"
+                locked = not d.is_unlocked(self.profile)
+                color = gold_fg() + REVERSE if i == sel else (DIM if locked else white_fg())
+                text = f"  {d.name}" + ("  (locked)" if locked else "")
                 out.append(move(row, list_start_col) + color + text + RESET)
 
             # Right panel: selected deck info. info_col is clamped so the
@@ -160,7 +178,12 @@ class BelAtroMainMenu:
                 out.append(move(top + 4 + i, info_col) + menu_art_fg() + art_line + RESET)
 
             desc_start = top + 4 + len(deck.ascii_art) + 1
-            words = deck.description.split()
+            deck_locked = not deck.is_unlocked(self.profile)
+            if deck_locked:
+                # Locked decks show their art and how to earn them.
+                out.append(move(desc_start, info_col) + gold_fg() + "LOCKED" + RESET)
+                desc_start += 1
+            words = (deck.unlock_hint if deck_locked else deck.description).split()
             line = ""
             r = desc_start
             wrap_w = max(20, panel_w - 2)
@@ -193,6 +216,8 @@ class BelAtroMainMenu:
             elif key == Key.DOWN:
                 sel = (sel + 1) % len(STARTING_DECKS)
             elif key == Key.ENTER:
+                if not STARTING_DECKS[sel].is_unlocked(self.profile):
+                    continue  # locked: stay on the picker
                 self.selected_deck_id = STARTING_DECKS[sel].id
                 break
             elif key in (Key.ESC, Key.QUIT, Key.EOF):

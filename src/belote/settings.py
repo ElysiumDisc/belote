@@ -45,6 +45,12 @@ class Settings:
     replay_analysis: bool = False  # BELOTE_REPLAY forces on
     # On/off settings contributed by expansions (see `register_toggle`).
     extras: dict[str, bool] = field(default_factory=dict)
+    # 4.11.0 cosmetics (ids in `cosmetics.CARD_BACKS` / `TABLE_FRAMES`).
+    card_back: str = "classique"
+    table_frame: str = "art_nouveau"
+    # 4.11.0 rebound keys: action → key, only the actions the player changed
+    # (see `input.BINDINGS`); validated as a whole on load.
+    keys: dict[str, str] = field(default_factory=dict)
 
     # ── effective values (env override applied) ────────────────────────
 
@@ -114,7 +120,29 @@ def load() -> Settings:
     extras = raw.get("extras")
     if isinstance(extras, dict):
         s.extras = {k: v for k, v in extras.items() if isinstance(k, str) and isinstance(v, bool)}
+    _load_customisation(raw, s)
     return s
+
+
+def _load_customisation(raw: dict[str, object], s: Settings) -> None:
+    """4.11.0 keys; files written before them simply keep the defaults. An
+    unknown back/frame id, or a key map with any conflict, is ignored."""
+    from .cosmetics import CARD_BACKS, TABLE_FRAMES
+    from .input import DEFAULT_BINDINGS, validate_bindings
+
+    back, frame, keys = raw.get("card_back"), raw.get("table_frame"), raw.get("keys")
+    if isinstance(back, str) and back in CARD_BACKS:
+        s.card_back = back
+    if isinstance(frame, str) and frame in TABLE_FRAMES:
+        s.table_frame = frame
+    if isinstance(keys, dict):
+        cand = {
+            a: k.lower()
+            for a, k in keys.items()
+            if isinstance(a, str) and a in DEFAULT_BINDINGS and isinstance(k, str)
+        }
+        if validate_bindings(cand) is None:
+            s.keys = cand
 
 
 def save(s: Settings) -> None:
@@ -149,10 +177,16 @@ def apply(s: Settings) -> None:
     modules that cache them."""
     global _current
     _current = s
-    from . import a11y
+    from . import a11y, cosmetics
+    from . import input as input_mod
     from .ui.anim import set_animations_enabled
     from .ui.render import set_diff_enabled
 
     set_animations_enabled(s.animations_on())
     set_diff_enabled(s.fast_redraw_on())
     a11y.set_enabled(s.screen_reader_on())
+    cosmetics.set_active(back=s.card_back, frame=s.table_frame)
+    try:
+        input_mod.set_bindings(s.keys)
+    except ValueError:
+        input_mod.set_bindings({})

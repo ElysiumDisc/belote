@@ -96,6 +96,20 @@ def _conform(template: object, value: object) -> object:
     return template
 
 
+def _cosmetic_unlocks(stats: Statistics) -> list[Achievement]:
+    """Card backs / table frames whose milestone was just met, shaped as
+    achievements so the callers' existing toast loop announces them (4.11.0).
+    Evaluated after the achievements, which the Gilded frame counts. Never
+    lets a cosmetics problem break the stats update."""
+    from .cosmetics import unlock_toasts
+
+    try:
+        return unlock_toasts(stats)
+    except Exception as e:
+        _log.info("cosmetic unlock check failed: %s", e)
+        return []
+
+
 @dataclass(slots=True)
 class SessionStats:
     games_played: int = 0
@@ -147,8 +161,7 @@ class StatisticsManager:
             # stderr and would scribble over the raw-mode game screen.
             _log.info("Corrupt stats file moved to %s", backup)
         except OSError as e:
-            _log.warning("Corrupt stats file %s could not be moved aside: %s",
-                         self.stats_file, e)
+            _log.warning("Corrupt stats file %s could not be moved aside: %s", self.stats_file, e)
 
     def save_stats(self, stats: Statistics) -> None:
         # Atomic write (sibling tmp file + fsync + os.replace): writing in
@@ -159,7 +172,10 @@ class StatisticsManager:
             directory = self.stats_file.parent
             directory.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
-                mode="w", dir=str(directory), prefix=".stats-", suffix=".json.tmp",
+                mode="w",
+                dir=str(directory),
+                prefix=".stats-",
+                suffix=".json.tmp",
                 delete=False,
             ) as tf:
                 tmp_path = Path(tf.name)
@@ -208,12 +224,14 @@ class StatisticsManager:
         # depend on the UI). Callers can read stats.achievements to detect
         # the new entries.
         from .achievements import evaluate_round
+
         unlocked = evaluate_round(
             stats,
             points_scored=points_scored,
             was_capot=is_capot,
             session_capots=self._session_stats.capots,
         )
+        unlocked += _cosmetic_unlocks(stats)
 
         # Persist after every round so a mid-game crash doesn't lose
         # round-level stats or freshly-unlocked achievements.
@@ -237,7 +255,9 @@ class StatisticsManager:
                 stats.difficulty_stats[difficulty]["won"] += 1
 
         from .achievements import evaluate_game
+
         unlocked = evaluate_game(stats, won=won, difficulty=difficulty)
+        unlocked += _cosmetic_unlocks(stats)
 
         self.flush_stats()
         return unlocked

@@ -75,7 +75,7 @@ def _classify_callout(entry: str) -> tuple[str, str]:
     caller still gets some visual feedback even if the log format drifts.
     """
     lower = entry.lower()
-    if "×" in entry or "x mult" in lower or " mult" in lower and ":" in entry and "×" in entry:
+    if "×" in entry or "x mult" in lower or (" mult" in lower and ":" in entry and "×" in entry):
         return ("✦", gold_fg() + BOLD)
     if "mult" in lower:
         # "+N Mult" branch (additive multiplier, not multiplicative).
@@ -217,9 +217,7 @@ class BelAtroAnnounce:
         invalidate_diff()
 
     @staticmethod
-    def buy_contract_picker(
-        reader: KeyReader, allowed: Collection[object] | None = None
-    ) -> object:
+    def buy_contract_picker(reader: KeyReader, allowed: Collection[object] | None = None) -> object:
         """L'Architecte buy-contract picker.
 
         Returns a contract value compatible with `process_bid`:
@@ -353,11 +351,7 @@ class BelAtroAnnounce:
         #   - term_h < 6: rows would collide with HUD row 1 (audit finding).
         new_total = acc.get_total(state)
         term_w, term_h = get_term_size()
-        if (
-            state.variants.hide_hud
-            or state.variants.separate_scoring
-            or term_h < 6
-        ):
+        if state.variants.hide_hud or state.variants.separate_scoring or term_h < 6:
             _last_tally_total = new_total
             _last_log_count = len(acc._log)
             return
@@ -411,8 +405,11 @@ class BelAtroAnnounce:
             # Bucket fills during the first third of the animation.
             bucket_fill = int(min(bucket_cells, bucket_cells * (t * 3)))
             bucket_bar = (
-                "[" + "█" * bucket_fill + "_" * (bucket_cells - bucket_fill)
-                + " " * max(0, 10 - bucket_cells) + "]"
+                "["
+                + "█" * bucket_fill
+                + "_" * (bucket_cells - bucket_fill)
+                + " " * max(0, 10 - bucket_cells)
+                + "]"
             )
 
             # Color resolution based on displayed total.
@@ -425,13 +422,19 @@ class BelAtroAnnounce:
 
             mult_pulse = BOLD if frame % 2 == 0 else DIM
             bucket_line = (
-                white_fg() + f"+{points} chips " + RESET
-                + tint + bucket_bar + RESET
-                + "   " + mult_pulse + f"× {mult:.1f} Mult" + RESET
+                white_fg()
+                + f"+{points} chips "
+                + RESET
+                + tint
+                + bucket_bar
+                + RESET
+                + "   "
+                + mult_pulse
+                + f"× {mult:.1f} Mult"
+                + RESET
             )
             odometer_line = (
-                tint + f"►  {displayed}  ◄" + RESET
-                + DIM + f"   ({chips} × {mult:.1f})" + RESET
+                tint + f"►  {displayed}  ◄" + RESET + DIM + f"   ({chips} × {mult:.1f})" + RESET
             )
             # Only paint the flame row when it has content. ansi_center("")
             # would paint a `term_w`-wide row of spaces, wasting a screen
@@ -442,8 +445,7 @@ class BelAtroAnnounce:
                 print(move(row_flame, 1) + ansi_center(flame_line, term_w), end="")
             print(move(row_bucket, 1) + ansi_center(bucket_line, term_w), end="")
             print(
-                move(row_odometer, 1)
-                + ansi_center(odometer_line, term_w),
+                move(row_odometer, 1) + ansi_center(odometer_line, term_w),
                 end="",
                 flush=True,
             )
@@ -455,9 +457,16 @@ class BelAtroAnnounce:
             # accent, not a steady-state readout.
             if frame == frames:
                 steady_bucket = (
-                    white_fg() + f"+{points} chips " + RESET
-                    + tint + bucket_bar + RESET
-                    + "   " + BOLD + f"× {mult:.1f} Mult" + RESET
+                    white_fg()
+                    + f"+{points} chips "
+                    + RESET
+                    + tint
+                    + bucket_bar
+                    + RESET
+                    + "   "
+                    + BOLD
+                    + f"× {mult:.1f} Mult"
+                    + RESET
                 )
                 final_lines.clear()
                 final_lines.append(steady_bucket)

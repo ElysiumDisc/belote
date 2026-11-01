@@ -52,7 +52,7 @@ class RoundPolicy(ABC, Generic[S]):
         """The card `seat` plays now, plus the (possibly re-sorted) state.
         May raise RoundInterrupted."""
 
-    def before_bid(self, state: S, seat: Seat, bid: BidValue) -> None:  # noqa: B027
+    def before_bid(self, state: S, seat: Seat, bid: BidValue) -> None:
         """The bid is decided but not yet applied."""
 
     def after_bid(self, state: S, seat: Seat) -> S:
@@ -72,7 +72,7 @@ class RoundPolicy(ABC, Generic[S]):
         Resolve coinche / surcoinche here (set `coinche_level`)."""
         return state
 
-    def before_card(self, state: S, seat: Seat, card: Card) -> None:  # noqa: B027
+    def before_card(self, state: S, seat: Seat, card: Card) -> None:
         """The card is chosen but not yet applied (trick still open)."""
 
     def after_card(self, before: S, state: S, seat: Seat, card: Card) -> S:

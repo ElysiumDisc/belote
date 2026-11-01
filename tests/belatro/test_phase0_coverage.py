@@ -179,8 +179,12 @@ def test_h1_team_aware_jokers_fire_on_north_partner_win() -> None:
     assert ps.on_trick_won(evt, ps_state) is not None
     # And keeps firing on subsequent NS-won tricks.
     evt2 = TrickWonEvent(
-        winner=Seat.NORTH, cards=cards, trick_number=2, is_last=False,
-        card_points=0, trump=Suit.HEARTS,
+        winner=Seat.NORTH,
+        cards=cards,
+        trick_number=2,
+        is_last=False,
+        card_points=0,
+        trump=Suit.HEARTS,
     )
     assert ps.on_trick_won(evt2, ps_state) is not None
 
@@ -192,8 +196,12 @@ def test_h1_team_aware_jokers_fire_on_north_partner_win() -> None:
 
     # LExecuteur: last trick.
     last_evt = TrickWonEvent(
-        winner=Seat.NORTH, cards=cards, trick_number=8, is_last=True,
-        card_points=0, trump=Suit.HEARTS,
+        winner=Seat.NORTH,
+        cards=cards,
+        trick_number=8,
+        is_last=True,
+        card_points=0,
+        trump=Suit.HEARTS,
     )
     assert LExecuteur().on_trick_won(last_evt, {}) is not None
 
@@ -255,7 +263,9 @@ def test_le_flambeur_uses_random_so_seeded_is_deterministic() -> None:
 # ── Boss modifiers ──────────────────────────────────────────────────────────
 
 
-def _trick(s_card: Card, others_suit: Suit, others_rank: Rank = Rank.SEVEN) -> tuple[TrickCard, ...]:
+def _trick(
+    s_card: Card, others_suit: Suit, others_rank: Rank = Rank.SEVEN
+) -> tuple[TrickCard, ...]:
     return (
         TrickCard(Seat.SOUTH, s_card),
         TrickCard(Seat.WEST, Card(others_suit, others_rank)),
@@ -410,6 +420,9 @@ def test_every_boss_modifier_actually_patches_a_flag() -> None:
     default = RuleVariants()
     for boss_cls in ALL_BOSS_MODIFIERS:
         flags = boss_cls().flags()
+        # 4.11.0: expansion-only bosses switch a joker_state flag instead.
+        if boss_cls().joker_flags():
+            continue
         assert flags != default, (
             f"{boss_cls.__name__}.apply() did not change RuleVariants — "
             f"check that every state.patch(...) key is in the boss_fields "

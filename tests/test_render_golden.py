@@ -27,6 +27,8 @@ import hashlib
 import random
 import sys as _sys
 
+import pytest
+
 import belote.ui.render  # noqa: F401 — ensures the module object is importable
 from belote.ansi import visible_len
 from belote.deck import Suit
@@ -40,14 +42,52 @@ render_mod = _sys.modules["belote.ui.render"]
 _TERM = (120, 40)
 
 # Per-row visible cell widths for the seeded PLAYING frame at 120x40.
+# 4.11.0: re-pinned on purpose — the old frame was 47 rows clipped to 40 (the
+# bottom of the hand was cut off); the table is now fitted to the height.
 _GOLDEN_WIDTHS = (
-    121, 121, 121, 1, 121, 121, 121, 121, 121, 121,
-    121, 121, 121, 121, 121, 121, 121, 121, 121, 121,
-    121, 121, 121, 121, 121, 121, 121, 121, 121, 121,
-    121, 121, 121, 121, 121, 121, 121, 121, 121, 120,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    82,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    121,
+    120,
 )
-_GOLDEN_SHA_SEL0 = "f7871cf595f03198c7a7b2348eb05b3ffb5b01cf344b2d1014c4a3d81837ac75"
-_GOLDEN_SHA_SEL3 = "e902cffe06b8ced4e5b3a2fef76e6436be6d044b5c07143ee6c7824496b0c825"
+_GOLDEN_SHA_SEL0 = "8317217d154d8ca5456a911a4050745ae0f7352655ac209db030c90960e090cb"
+_GOLDEN_SHA_SEL3 = "a434766655587d606ab00b5da362b444cb74b740ad700944eb84f36c96050da2"
 
 
 def _seeded_play_state() -> object:
@@ -56,8 +96,14 @@ def _seeded_play_state() -> object:
     return replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH)
 
 
+@pytest.fixture(autouse=True)
+def _golden_term_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Scoped: a bare module-attribute assignment leaked the 120x40 size into
+    # every render test that ran after this file.
+    monkeypatch.setattr(render_mod, "get_term_size", lambda: _TERM)
+
+
 def _render(selection: int) -> str:
-    render_mod.get_term_size = lambda: _TERM
     return render_mod.render(_seeded_play_state(), selection=selection)
 
 

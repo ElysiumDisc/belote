@@ -117,7 +117,10 @@ def test_show_round_summary_no_crlf_and_invalidates_diff(capsys) -> None:
 
     render_mod._last_emitted_lines = ["sentinel"]
     skipped = show_round_summary(
-        state, _StubBreakdown(), _FakeReader(), timeout=0  # type: ignore[arg-type]
+        state,
+        _StubBreakdown(),
+        _FakeReader(),
+        timeout=0,  # type: ignore[arg-type]
     )
     out = capsys.readouterr().out
 
@@ -343,7 +346,6 @@ def test_gameflow_no_crlf_writes() -> None:
             continue
         if "sys.stdout.write" in line and "\\r\\n" in line:
             offenders.append(f"  line {lineno}: {stripped}")
-    assert not offenders, (
-        "gameflow.py contains scroll-inducing \\r\\n writes:\n"
-        + "\n".join(offenders)
+    assert not offenders, "gameflow.py contains scroll-inducing \\r\\n writes:\n" + "\n".join(
+        offenders
     )

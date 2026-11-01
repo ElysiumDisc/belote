@@ -39,6 +39,25 @@ class TrickWonEvent:
     trump: Suit | None
     leader_seat: Seat = Seat.SOUTH  # who led this trick
 
+    def card_of(self, seat: Seat) -> Card | None:
+        """The card `seat` played in this trick (cards run clockwise from the
+        leader), or None when the trick is incomplete / the seat is absent."""
+        index = (seat.value - self.leader_seat.value) % 4
+        return self.cards[index] if index < len(self.cards) else None
+
+    @property
+    def winning_card(self) -> Card | None:
+        """The card the trick winner played."""
+        return self.card_of(self.winner)
+
+    def cards_by(self, team: int) -> tuple[Card, ...]:
+        """Cards played by `team` (0 = NS, 1 = EW) in this trick."""
+        return tuple(
+            card
+            for i, card in enumerate(self.cards)
+            if Seat((self.leader_seat.value + i) % 4).value % 2 == team
+        )
+
 
 @dataclass(frozen=True)
 class BeloteAnnouncedEvent:

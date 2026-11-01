@@ -5,6 +5,7 @@ Covers:
   - BELOTE_NO_ANIM short-circuits each painted helper
   - Painted helpers always invalidate the render-diff baseline
 """
+
 from __future__ import annotations
 
 import io

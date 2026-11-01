@@ -1,4 +1,5 @@
 """Tests for the 4.8.0 / B1 joker-callout layer on slot_machine_tally."""
+
 from __future__ import annotations
 
 from belote.belatro.ui.announce import _classify_callout

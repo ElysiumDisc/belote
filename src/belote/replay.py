@@ -52,7 +52,7 @@ def analyze_round(
         ai.update_memory(state)
         try:
             suggested = ai.decide_card(state)
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Replay covers historical states — older serialisations or
             # boss-modifier combos can crash the current AI evaluator. Skip
             # the report rather than abort the whole replay.
@@ -77,5 +77,5 @@ def summarize(reports: list[DecisionReport]) -> str:
     if not reports:
         return "No decisions to analyze."
     matched = sum(1 for r in reports if r.matched)
-    pct = int(round(100 * matched / len(reports)))
+    pct = round(100 * matched / len(reports))
     return f"Optimal plays: {matched}/{len(reports)} ({pct}%)"

@@ -31,6 +31,7 @@ def _state_with_completed_trick(
     seven_eight_trump: bool = False,
 ) -> GameState:
     from belote.variants import RuleVariants
+
     bm = RuleVariants(seven_eight_trump=seven_eight_trump, wild_seven_eight=republicain_wild)
     return GameState(
         hands=((), (), (), ()),
@@ -56,9 +57,7 @@ def test_deluge_off_lead_seven_infers_void_without_republicain() -> None:
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.KING)),
         TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.SEVEN)),
     )
-    state = _state_with_completed_trick(
-        (trick,), republicain_wild=False, seven_eight_trump=True
-    )
+    state = _state_with_completed_trick((trick,), republicain_wild=False, seven_eight_trump=True)
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     player.update_memory(state)
     # `_update_voids` is what populates `known_voids` — it runs inside
@@ -80,9 +79,7 @@ def test_republicain_wild_seven_does_not_infer_void() -> None:
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.KING)),
         TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.SEVEN)),  # wild!
     )
-    state = _state_with_completed_trick(
-        (trick,), republicain_wild=True, seven_eight_trump=False
-    )
+    state = _state_with_completed_trick((trick,), republicain_wild=True, seven_eight_trump=False)
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     player.update_memory(state)
     # `_update_voids` is what populates `known_voids` — it runs inside
@@ -105,9 +102,7 @@ def test_republicain_plus_deluge_combined_does_not_infer_void() -> None:
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.KING)),
         TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.EIGHT)),
     )
-    state = _state_with_completed_trick(
-        (trick,), republicain_wild=True, seven_eight_trump=True
-    )
+    state = _state_with_completed_trick((trick,), republicain_wild=True, seven_eight_trump=True)
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     player.update_memory(state)
     # `_update_voids` is what populates `known_voids` — it runs inside
@@ -127,9 +122,7 @@ def test_republicain_does_not_block_void_inference_from_non_wild_card() -> None:
         TrickCard(Seat.NORTH, Card(Suit.SPADES, Rank.KING)),
         TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.NINE)),  # 9 is NOT wild
     )
-    state = _state_with_completed_trick(
-        (trick,), republicain_wild=True, seven_eight_trump=False
-    )
+    state = _state_with_completed_trick((trick,), republicain_wild=True, seven_eight_trump=False)
     player = AIPlayer(Seat.SOUTH, Difficulty.HARD)
     player.update_memory(state)
     # `_update_voids` is what populates `known_voids` — it runs inside

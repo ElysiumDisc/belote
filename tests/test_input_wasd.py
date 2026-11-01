@@ -55,8 +55,10 @@ def test_arrow_keys_still_work() -> None:
     """Sanity — arrow keys still produce the same Key enum values."""
     reader = _make_reader()
     # ESC [ A → UP
-    with patch("belote.input.os.read", side_effect=[b"\x1b", b"[", b"A"]), \
-         patch("belote.input.select.select", return_value=([0], [], [])):
+    with (
+        patch("belote.input.os.read", side_effect=[b"\x1b", b"[", b"A"]),
+        patch("belote.input.select.select", return_value=([0], [], [])),
+    ):
         assert reader.read().key is Key.UP
 
 
@@ -68,8 +70,9 @@ def test_a_no_longer_returns_char() -> None:
     with patch("belote.input.os.read", return_value=b"a"):
         ev = event_a.read()
     assert ev.key is Key.LEFT
-    # No char payload — Key.LEFT events don't carry one.
-    assert ev.char is None
+    # 4.11.0: the typed letter rides along so letter hotkeys that collide
+    # with an alias (A = activate) can still be told apart from ←.
+    assert ev.char == "a"
 
 
 def test_s_no_longer_returns_char() -> None:
@@ -79,7 +82,7 @@ def test_s_no_longer_returns_char() -> None:
     with patch("belote.input.os.read", return_value=b"s"):
         ev = reader.read()
     assert ev.key is Key.DOWN
-    assert ev.char is None
+    assert ev.char == "s"  # 4.11.0: see test_a_no_longer_returns_char
 
 
 def test_x_still_returns_char_for_bid() -> None:

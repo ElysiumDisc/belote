@@ -75,8 +75,16 @@ def _architecte_ui(
     run = BelAtroRun(deck_id="architecte", seed=1)
     run.card_enhancements["buy_contract"] = True
     run.economy.money = 50
-    ui = UICallbacks(MagicMock(), run, MagicMock(), MagicMock(), ScoreAccumulator(),
-                     MagicMock(), MagicMock(), False)
+    ui = UICallbacks(
+        MagicMock(),
+        run,
+        MagicMock(),
+        MagicMock(),
+        ScoreAccumulator(),
+        MagicMock(),
+        MagicMock(),
+        False,
+    )
     return ui, run
 
 
@@ -119,16 +127,15 @@ def test_architecte_round1_drive_round_does_not_crash(monkeypatch: pytest.Monkey
     from belote.game import legal_cards as _legal
 
     ui, run = _architecte_ui(monkeypatch, Suit.TOUT_ATOUT, [])
-    monkeypatch.setattr(
-        type(ui), "prompt_card", lambda self, s: (_legal(s, Seat.SOUTH)[0], s)
-    )
+    monkeypatch.setattr(type(ui), "prompt_card", lambda self, s: (_legal(s, Seat.SOUTH)[0], s))
     for name in ("on_card_played", "on_trick_end"):
         monkeypatch.setattr(type(ui), name, lambda self, *a: None)
     monkeypatch.setattr(type(ui), "on_redeal", lambda self, s: None)
     monkeypatch.setattr(type(ui), "prompt_heist", lambda self, s: False)
     acc = ScoreAccumulator()
-    drive_round(EventBus(), run.partner, ui, acc=acc, seed=0,
-                card_enhancements=dict(run.card_enhancements))
+    drive_round(
+        EventBus(), run.partner, ui, acc=acc, seed=0, card_enhancements=dict(run.card_enhancements)
+    )
     assert run.economy.money == 50
 
 
@@ -169,11 +176,20 @@ def test_all_pass_redeals_and_plays_the_new_deal() -> None:
         starts.append(1)
         return real_start(self, state)
 
-    with patch("belote.ai.AIPlayer.decide_bid", return_value=None), \
-         patch.object(ScoreAccumulator, "trigger_round_start", _spy), \
-         patch.object(type(partner.personality), "should_bid", return_value=False):
-        state = drive_round(bus, partner, ui, acc=acc, boss=LeRoiMort(), seed=5,
-                            card_enhancements={"traitre_active": True})
+    with (
+        patch("belote.ai.AIPlayer.decide_bid", return_value=None),
+        patch.object(ScoreAccumulator, "trigger_round_start", _spy),
+        patch.object(type(partner.personality), "should_bid", return_value=False),
+    ):
+        state = drive_round(
+            bus,
+            partner,
+            ui,
+            acc=acc,
+            boss=LeRoiMort(),
+            seed=5,
+            card_enhancements={"traitre_active": True},
+        )
 
     assert len(ui.redeals) == 1
     assert ui.redeals[0].phase == Phase.BIDDING
@@ -193,8 +209,13 @@ def test_all_pass_never_ends_round_in_natural_play() -> None:
     from belote.belatro.partner.personality import LeSacrifie
 
     for seed in range(60):
-        state = drive_round(EventBus(), PartnerState(personality=LeSacrifie()), _BaseUI(),
-                            acc=ScoreAccumulator(), seed=seed)
+        state = drive_round(
+            EventBus(),
+            PartnerState(personality=LeSacrifie()),
+            _BaseUI(),
+            acc=ScoreAccumulator(),
+            seed=seed,
+        )
         assert state.phase != Phase.DEAL, seed
         assert len(state.completed_tricks) == 8
 
@@ -236,10 +257,13 @@ def test_ew_capot_does_not_unlock_or_count() -> None:
     assert profile.is_unlocked("l_executeur")
 
 
-@pytest.mark.parametrize(("taker", "capot_team", "paid"), [
-    (Seat.SOUTH, 0, True),
-    (Seat.EAST, 1, False),
-])
+@pytest.mark.parametrize(
+    ("taker", "capot_team", "paid"),
+    [
+        (Seat.SOUTH, 0, True),
+        (Seat.EAST, 1, False),
+    ],
+)
 def test_pluto_and_mercury_only_pay_ns(taker: Seat, capot_team: int, paid: bool) -> None:
     acc = ScoreAccumulator()
     acc.contract_levels = {  # type: ignore[assignment]
@@ -248,8 +272,16 @@ def test_pluto_and_mercury_only_pay_ns(taker: Seat, capot_team: int, paid: bool)
     }
     bd = SimpleNamespace(is_failed=False, taker_total=0, taker_team=capot_team)
     state = BelatroState(hands=((), (), (), ()))
-    acc.update_state(state, RoundEndEvent(bd, taker, Suit.DIAMONDS, capot=True,  # type: ignore[arg-type]
-                                          capot_team=capot_team))
+    acc.update_state(
+        state,
+        RoundEndEvent(
+            bd,
+            taker,
+            Suit.DIAMONDS,
+            capot=True,  # type: ignore[arg-type]
+            capot_team=capot_team,
+        ),
+    )
     logged = " ".join(acc._log)
     assert ("Pluton" in logged) is paid
     assert ("Planet (diamonds)" in logged) is paid
@@ -301,8 +333,15 @@ class _CaptureUI(_BaseUI):
 def _sabotage_tricks(boss: Any, flags: dict[str, object]) -> frozenset[int]:
     ui = _CaptureUI()
     with contextlib.suppress(_AbortError):
-        drive_round(EventBus(), PartnerState(), ui, acc=ScoreAccumulator(), boss=boss,
-                    seed=1, card_enhancements=dict(flags))
+        drive_round(
+            EventBus(),
+            PartnerState(),
+            ui,
+            acc=ScoreAccumulator(),
+            boss=boss,
+            seed=1,
+            card_enhancements=dict(flags),
+        )
     assert ui.captured is not None
     tricks = ui.captured.variants.sabotage_tricks
     assert isinstance(tricks, frozenset)
@@ -353,10 +392,8 @@ def _play_blind_harness(
         return final_state
 
     monkeypatch.setattr(bmain, "drive_round", _fake_drive)
-    monkeypatch.setattr(ScoreAccumulator, "get_total",
-                        lambda self, s: 2 * base_target + total_over)
-    bd = SimpleNamespace(is_failed=False, is_capot=False, taker_team=0,
-                         tricks_ns=8, tricks_ew=0)
+    monkeypatch.setattr(ScoreAccumulator, "get_total", lambda self, s: 2 * base_target + total_over)
+    bd = SimpleNamespace(is_failed=False, is_capot=False, taker_team=0, tricks_ns=8, tricks_ew=0)
     monkeypatch.setattr("belote.scoring.score_round", lambda s: bd)
 
     real_pre = run.economy.process_round_end
@@ -419,11 +456,21 @@ def test_ghost_files_do_not_overwrite(tmp_path: Path, monkeypatch: pytest.Monkey
 # ── 7. Corrupt / foreign profile loading ───────────────────────────────────
 
 
-@pytest.mark.parametrize("payload", [
-    b"[]", b"null", b'{"stats": null}', b'{"unlocked_ids": "abc"}',
-    b"\xff\xfe\x00garbage", b'{"schema_version": "x"}', b"", b"{",
-    b'{"stats": {"runs_won": "lots"}}', b'{"discovered_items": [1, 2]}',
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"[]",
+        b"null",
+        b'{"stats": null}',
+        b'{"unlocked_ids": "abc"}',
+        b"\xff\xfe\x00garbage",
+        b'{"schema_version": "x"}',
+        b"",
+        b"{",
+        b'{"stats": {"runs_won": "lots"}}',
+        b'{"discovered_items": [1, 2]}',
+    ],
+)
 def test_corrupt_profile_falls_back_and_is_backed_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: bytes
 ) -> None:
@@ -572,8 +619,16 @@ def test_belatro_prompt_bid_keeps_special_contracts(
 
     monkeypatch.setattr("belote.ui.prompts.prompt_bid", lambda state, reader: pick)
     run = BelAtroRun(seed=1)
-    ui = UICallbacks(MagicMock(), run, MagicMock(), MagicMock(), ScoreAccumulator(),
-                     MagicMock(), MagicMock(), False)
+    ui = UICallbacks(
+        MagicMock(),
+        run,
+        MagicMock(),
+        MagicMock(),
+        ScoreAccumulator(),
+        MagicMock(),
+        MagicMock(),
+        False,
+    )
     assert ui.prompt_bid(_round_state(2)) == pick
 
 
@@ -581,6 +636,14 @@ def test_belatro_prompt_bid_undo_sentinel_is_a_pass(monkeypatch: pytest.MonkeyPa
     from belote.belatro.main import UICallbacks
 
     monkeypatch.setattr("belote.ui.prompts.prompt_bid", lambda state, reader: "UNDO")
-    ui = UICallbacks(MagicMock(), BelAtroRun(seed=1), MagicMock(), MagicMock(),
-                     ScoreAccumulator(), MagicMock(), MagicMock(), False)
+    ui = UICallbacks(
+        MagicMock(),
+        BelAtroRun(seed=1),
+        MagicMock(),
+        MagicMock(),
+        ScoreAccumulator(),
+        MagicMock(),
+        MagicMock(),
+        False,
+    )
     assert ui.prompt_bid(_round_state(2)) is None

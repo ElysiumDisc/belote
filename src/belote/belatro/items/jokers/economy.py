@@ -65,9 +65,7 @@ class LeNotaire(Joker):
     description = "Belote/Rebelote is worth $5 cash instead of 20 flat points."
     cost = 6
 
-    def on_belote(
-        self, event: BeloteAnnouncedEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         # Belote/Rebelote points (20) are only awarded if both cards are played.
         # Gate on the second event (rebelote) so we only subtract points that
         # the player actually earned.

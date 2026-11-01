@@ -21,7 +21,7 @@ from ..ansi import (
     white_fg,
 )
 from ..game import GameState, Seat
-from ..input import Key, KeyReader
+from ..input import Key, KeyReader, key_label
 from ..themes import THEMES, theme_manager
 from .prompts import show_help
 from .render import get_term_size, invalidate_diff
@@ -89,8 +89,25 @@ STEAMS = [
 ]
 
 
+def _compact_menu(sel: int, options: list[str]) -> list[str]:
+    """4.11.0: the menu for short terminals (e.g. 80×24), where the 27-row cup
+    used to be clipped at the top: a one-line title and the entries."""
+    title = f"{BOLD}{gold_fg()}♠ ♥   B E L O T E   ♦ ♣{RESET}"
+    width = max(len(o) for o in options) + 4
+    rows = [title, "", *(f"{menu_border_fg()}{'─' * width}{RESET}",)]
+    for i, label in enumerate(options):
+        text = f"> {label} <" if i == sel else f"  {label}  "
+        cell = text.center(width)
+        rows.append(f"{REVERSE}{cell}{RESET}" if i == sel else cell)
+    rows.append(f"{menu_border_fg()}{'─' * width}{RESET}")
+    return rows
+
+
 def _render_main_menu_art(sel: int, options: list[str], frame: int, term_h: int) -> list[str]:
     """Render the full main menu art with cards logo and chalice container."""
+    # Cup + the 2 footer rows + a margin row; below that, the compact menu.
+    if term_h < len(CUP_TEMPLATE) + 3:
+        return _compact_menu(sel, options)
     f = frame % 4
     st = STEAMS[f]
 
@@ -135,7 +152,7 @@ def show_theme_selector(reader: KeyReader) -> None:
         sel = 0
 
     while True:
-        term_w, term_h = get_term_size()
+        term_w, _ = get_term_size()
         theme_name = themes_list[sel]
 
         # Temporarily apply theme for preview
@@ -177,7 +194,7 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
     diffs = ["easy", "medium", "hard"]
 
     while True:
-        term_w, term_h = get_term_size()
+        term_w, _ = get_term_size()
 
         lines = []
         lines.append(f"{BOLD}{gold_fg()}AI CONFIGURATION{RESET}")
@@ -222,7 +239,14 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
                 return current_diffs
 
 
-CORE_MENU_ENTRIES: tuple[str, ...] = ("Start Game", "Settings", "Rules & History", "Statistics", "Quit")
+CORE_MENU_ENTRIES: tuple[str, ...] = (
+    "Start Game",
+    "Hot-seat & Spectate",
+    "Settings",
+    "Rules & History",
+    "Statistics",
+    "Quit",
+)
 
 
 def show_main_menu(reader: KeyReader, modes: Sequence[str] = ()) -> str:
@@ -253,14 +277,13 @@ def show_main_menu(reader: KeyReader, modes: Sequence[str] = ()) -> str:
         lines.append("")
         lines.append(
             ansi_center(
-                f"{light_gray_fg()}↑/↓: Navigate  Enter: Select  T: Theme  ?: Help  Q: Quit{RESET}",
+                f"{light_gray_fg()}↑/↓: Navigate  Enter: Select  {key_label('theme')}: Theme  "
+                f"{key_label('help')}: Help  {key_label('quit')}: Quit{RESET}",
                 term_w,
             )
         )
 
-        sys.stdout.write(
-            out + "\r\n".join(line + clear_to_eol() for line in lines) + clear_below()
-        )
+        sys.stdout.write(out + "\r\n".join(line + clear_to_eol() for line in lines) + clear_below())
         sys.stdout.flush()
 
         event = reader.read_timeout(0.3)

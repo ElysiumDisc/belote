@@ -17,8 +17,9 @@ render_mod = _sys.modules["belote.ui.render"]
 
 def _state() -> GameState:
     import random
+
     deck = shuffle(make_deck(), random.Random(42))
-    hands = tuple(tuple(deck[i * 8:(i + 1) * 8]) for i in range(4))
+    hands = tuple(tuple(deck[i * 8 : (i + 1) * 8]) for i in range(4))
     return GameState(
         hands=hands,
         initial_hands=hands,
@@ -31,6 +32,7 @@ def _state() -> GameState:
 
 def _render(size: tuple[int, int], *, selection: int | None = None) -> str:
     from belote.context import TERMINAL
+
     TERMINAL._size_cache = size
     return render_mod.render(_state(), selection=selection)
 
@@ -63,6 +65,7 @@ def test_vignette_uses_felt_edge_bg() -> None:
     """The felt mat should contain at least one occurrence of felt_edge_bg
     (the darker vignette tone) — otherwise the vignette isn't being applied."""
     from belote.themes import THEMES, theme_manager
+
     edge = THEMES[theme_manager.current_name].felt_edge_bg
     out = _render((96, 38))
     expected = f"\x1b[48;2;{edge[0]};{edge[1]};{edge[2]}m"
@@ -92,8 +95,12 @@ def test_frame_suppressed_at_standard_minimum() -> None:
 
 
 def test_frame_appears_with_slack() -> None:
-    """At STANDARD with 2+ rows of headroom, the frame should appear."""
-    out = _render((96, 40))
+    """With room for every richer row, the frame appears (4.11.0: decided by
+    `layout.fit_table`, after the bar / mat labels / readout)."""
+    from belote.ui.layout import fit_table
+
+    assert fit_table(120, 47).framed
+    out = _render((120, 47))
     assert _has_decorative_frame(out)
 
 

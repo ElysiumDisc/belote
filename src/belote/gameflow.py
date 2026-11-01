@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import replace
 
 from . import a11y, settings
@@ -18,11 +19,12 @@ from .game import (
     clear_announced,
     clear_legal_cards_cache,
     compute_trick_winners,
+    rotate_view,
     start_round,
     team_of,
     trick_winner_seat,
 )
-from .input import KeyReader, interruptible_sleep
+from .input import KeyEvent, KeyReader, interruptible_sleep
 from .round_engine import RoundInterrupted, RoundPolicy, play_bidding, play_round, play_tricks
 from .scoring import (
     ScoringBreakdown,
@@ -36,6 +38,7 @@ from .scoring import (
     trick_card_points,
 )
 from .stats import update_stats_round
+from .table_modes import SOLO, TableMode, consumed, pass_device_screen
 from .ui import (
     animate_score_update,
     announce,
@@ -60,9 +63,12 @@ MIN_TRICK_DWELL: float = 0.5
 
 
 def create_ai_players(diffs_map: dict[Seat, str]) -> dict[Seat, AIPlayer]:
-    """Create AI players for seats not occupied by humans."""
-    ai_seats = {Seat.EAST, Seat.NORTH, Seat.WEST}
-    return {s: AIPlayer(s, Difficulty(diffs_map[s])) for s in ai_seats}
+    """One AI per seat in `diffs_map` (seat → difficulty), in its order.
+
+    4.11.0: built from the ordered map, not a set of seats — set order follows
+    the per-process hash salt, so `--seed` used to hand the seeded RNGs to
+    different seats from one run to the next."""
+    return {s: AIPlayer(s, Difficulty(d)) for s, d in diffs_map.items()}
 
 
 def _is_player_capot(breakdown: ScoringBreakdown) -> bool:
@@ -93,9 +99,7 @@ def _contract_word(state: GameState) -> str | None:
     return None
 
 
-def _undo_pop_to_south(
-    history_stack: list[GameState], stack_base: int
-) -> GameState | None:
+def _undo_pop_to_south(history_stack: list[GameState], stack_base: int) -> GameState | None:
     """Pop snapshots until the next state to act on is South's turn.
 
     `history_stack` is populated with the state captured BEFORE each
@@ -129,9 +133,14 @@ def _bid_label(bid: BidValue) -> str:
 
 
 class ClassicRound(RoundPolicy[GameState]):
-    """Classic Belote over the shared round engine: South is the human
-    (prompts), the other seats are AI, every move is animated/announced and
-    pushed onto the undo history."""
+    """Classic Belote over the shared round engine: the human seats prompt,
+    the other seats are AI, every move is animated/announced and pushed onto
+    the undo history.
+
+    4.11.0: `mode` (see `table_modes.py`) generalises "South is the human" —
+    Spectate (no humans, adjustable pace) and Hot-seat (2-4 humans, the table
+    drawn from the device holder's chair). `SOLO` keeps the classic paths.
+    """
 
     def __init__(
         self,
@@ -141,29 +150,81 @@ class ClassicRound(RoundPolicy[GameState]):
         trick_pause: float,
         history: list[GameState],
         replay_decisions: list[tuple[GameState, Card]] | None = None,
+        mode: TableMode = SOLO,
     ) -> None:
         self.reader = reader
         self.ai_players = ai_players
-        self.ai_delay = ai_delay
-        self.trick_pause = trick_pause
+        self._ai_delay = ai_delay
+        self._trick_pause = trick_pause
         self.history = history
         self.replay_decisions = replay_decisions
+        self.mode = mode
+        # Hot-seat: whose chair the table is drawn from (the device holder).
+        self.viewer: Seat | None = Seat.SOUTH if not mode.hotseat else None
         # Set when the player skips an animation; reset on the player's turn
         # (M6) and at each phase start.
         self.skip_anims = False
 
+    # ── table mode plumbing ─────────────────────────────────────────────
+
+    @property
+    def ai_delay(self) -> float:
+        pace = self.mode.pace
+        return self._ai_delay * pace.scale if pace is not None else self._ai_delay
+
+    @property
+    def trick_pause(self) -> float:
+        pace = self.mode.pace
+        return self._trick_pause * pace.scale if pace is not None else self._trick_pause
+
+    def _skips(self, event: KeyEvent | bool | None) -> bool:
+        """Did a key press during an animation ask to skip the rest? Keys the
+        spectator controls consumed (speed / pause) don't count."""
+        # Truthiness, as before 4.11.0 (a KeyEvent is truthy; None/False not).
+        return bool(event) and not consumed(event)
+
+    def _view(self, state: GameState) -> GameState:
+        if self.viewer is None or self.viewer == Seat.SOUTH:
+            return state
+        return rotate_view(state, self.viewer)
+
+    def _vseat(self, seat: Seat) -> Seat:
+        if self.viewer is None:
+            return seat
+        return Seat((seat.value - self.viewer.value) % 4)
+
+    def _show(self, state: GameState) -> None:
+        display(self._view(state), None)
+
+    def _check_spectator_quit(self) -> None:
+        if self.mode.pace is not None and self.mode.pace.quit:
+            raise RoundInterrupted("QUIT")
+
+    def _hand_to(self, seat: Seat) -> None:
+        """Hot-seat: make sure `seat` holds the device before they decide."""
+        if not self.mode.hotseat or self.viewer == seat:
+            return
+        if not pass_device_screen(self.reader, seat, len(self.mode.humans)):
+            raise RoundInterrupted("QUIT")
+        self.viewer = seat
+
     # ── bidding ─────────────────────────────────────────────────────────
 
     def choose_bid(self, state: GameState, seat: Seat) -> BidValue:
-        if seat != Seat.SOUTH:
+        if seat not in self.mode.humans:
+            self._check_spectator_quit()
             return self.ai_players[seat].decide_bid(state)
         self.skip_anims = False  # M6: reset the skip flag on the human's turn
+        self._hand_to(seat)
         while True:
-            display(state, None)
-            res = prompt_bid(state, self.reader)
+            view = self._view(state)
+            display(view, None)
+            res = prompt_bid(view, self.reader)
             if res == "QUIT":
                 raise RoundInterrupted("QUIT")
             if res == "UNDO":
+                if self.mode.hotseat:
+                    continue  # undo would replay another player's hidden move
                 raise RoundInterrupted("UNDO")
             if isinstance(res, ExtensionKey):
                 continue  # only expansions register extension keys
@@ -172,21 +233,28 @@ class ClassicRound(RoundPolicy[GameState]):
             return res
 
     def before_bid(self, state: GameState, seat: Seat, bid: BidValue) -> None:
-        if seat != Seat.SOUTH:
-            display(state, None)
+        # Announce everyone except the solo player (who just chose it).
+        if seat != Seat.SOUTH or not self.mode.is_solo:
+            self._show(state)
             if bid is not None:
                 message = f"{seat.name} takes it as {_bid_label(bid)}!"
                 duration = (self.ai_delay * 2 + 0.5) if not self.skip_anims else 0
             else:
                 message = f"{seat.name} passes"
                 duration = self.ai_delay if not self.skip_anims else 0
-            if announce(message, duration=duration, reader=self.reader) is not None:
+            if self._skips(announce(message, duration=duration, reader=self.reader)):
                 self.skip_anims = True
         self.history.append(state)
 
     def on_contract(self, state: GameState) -> GameState:
         # 4.9.0 / G1: post-bid coinche flow (defenders, then taker side).
-        state = _run_coinche_flow(state, self.reader, self.ai_players)
+        state = _run_coinche_flow(
+            state,
+            self.reader,
+            self.ai_players,
+            humans=self.mode.humans,
+            prepare=self._prepare_human if self.mode.hotseat else None,
+        )
         # 4.6.5 a11y: announce the locked contract at the bid→play transition.
         if state.taker is not None:
             a11y.announce_contract(state.taker, _contract_word(state) or "no trump")
@@ -196,11 +264,14 @@ class ClassicRound(RoundPolicy[GameState]):
     # ── play ────────────────────────────────────────────────────────────
 
     def choose_card(self, state: GameState, seat: Seat) -> tuple[Card, GameState]:
-        if seat != Seat.SOUTH:
+        if seat not in self.mode.humans:
+            self._check_spectator_quit()
             ai = self.ai_players[seat]
             ai.update_memory(state)
             return ai.decide_card(state), state
         self.skip_anims = False  # M6
+        if self.mode.hotseat:
+            return self._hotseat_card(state, seat), state
         while True:
             display(state, None)
             state_before_south = state
@@ -215,28 +286,58 @@ class ClassicRound(RoundPolicy[GameState]):
                 self.replay_decisions.append((state_before_south, card))
             return card, state
 
+    def _hotseat_card(self, state: GameState, seat: Seat) -> Card:
+        """A hot-seat human picks a card on their rotated view. Cards are
+        seat-independent, so the choice applies to the real state as is (the
+        view's re-sorted hand is display-only and discarded)."""
+        self._hand_to(seat)
+        while True:
+            view = self._view(state)
+            display(view, None)
+            card, _ = prompt_card(view, self.reader)
+            if card is None:
+                raise RoundInterrupted("QUIT")
+            if isinstance(card, Card):
+                return card
+            # Undo / extension keys: not available in hot-seat — re-prompt.
+
+    def _prepare_human(self, seat: Seat, state: GameState) -> GameState:
+        """Coinche-flow hook: hand the device over, draw and return their
+        view (the coinche prompts paint one line over the current screen)."""
+        self._hand_to(seat)
+        view = self._view(state)
+        display(view, None)
+        return view
+
+    def start_hotseat_round(self, state: GameState) -> None:
+        """Before anything is drawn: give the device to the first human in
+        turn order, so no hand is ever shown to the wrong player."""
+        for k in range(4):
+            seat = Seat((state.turn.value + k) % 4)
+            if seat in self.mode.humans:
+                self._hand_to(seat)
+                return
+
     def before_card(self, state: GameState, seat: Seat, card: Card) -> None:
         reader = self.reader
         # 1. Show the card on the mat IMMEDIATELY.
-        display_state = replace(
-            state, current_trick=state.current_trick + (TrickCard(seat, card),)
-        )
+        display_state = replace(state, current_trick=state.current_trick + (TrickCard(seat, card),))
         # 4.8.0 / C3: tactile launch trail when the player (SOUTH) plays a
         # card. AI seats skip — their plays feel different via the AI delay.
-        if seat == Seat.SOUTH and not self.skip_anims:
+        if seat == self.viewer and seat in self.mode.humans and not self.skip_anims:
             slide_card_to_table_hint(reader)
         if len(display_state.current_trick) == 1:
-            display(display_state, None)
+            self._show(display_state)
         else:
-            patch_trick_card(display_state, seat, card)
+            patch_trick_card(self._view(display_state), self._vseat(seat), card)
 
         # 2. Short delay for cards 1-3 (the card is already on the mat; the
         # a11y path announces the play for screen-reader users).
         if (
-            seat != Seat.SOUTH
+            seat not in self.mode.humans
             and len(display_state.current_trick) < 4
             and not self.skip_anims
-            and interruptible_sleep(self.ai_delay, reader)
+            and self._skips(interruptible_sleep(self.ai_delay, reader))
         ):
             self.skip_anims = True
 
@@ -265,7 +366,7 @@ class ClassicRound(RoundPolicy[GameState]):
                 display_state.current_trick, state.trump, state.variants.seven_eight_trump, is_sa
             )
             if w is not None:
-                pulse_winner_glow(w, reader)
+                pulse_winner_glow(self._vseat(w), reader)
         if len(state.completed_tricks) == 7:  # the 8th trick
             # Rupture-aware projection (the 8th trick isn't in completed_tricks
             # yet) so the announcement names the team scoring actually credits.
@@ -278,7 +379,7 @@ class ClassicRound(RoundPolicy[GameState]):
                     duration=trick_pause * 0.8 if not self.skip_anims else 0,
                     reader=reader,
                 )
-                display(display_state, None)
+                self._show(display_state)
             # Check for Capot while cards are still visible.
             if is_capot(state, tricks=projected) is not None:
                 announce(
@@ -286,8 +387,8 @@ class ClassicRound(RoundPolicy[GameState]):
                     duration=trick_pause * 1.2 if not self.skip_anims else 0,
                     reader=reader,
                 )
-                display(display_state, None)
-        if not self.skip_anims and interruptible_sleep(trick_pause, reader):
+                self._show(display_state)
+        if not self.skip_anims and self._skips(interruptible_sleep(trick_pause, reader)):
             self.skip_anims = True
 
     def _announce_declarations(self, state: GameState, display_state: GameState) -> None:
@@ -308,11 +409,9 @@ class ClassicRound(RoundPolicy[GameState]):
                 duration=self.trick_pause * 0.8 if not self.skip_anims else 0,
                 reader=self.reader,
             )
-            display(display_state, None)
+            self._show(display_state)
 
-    def after_card(
-        self, before: GameState, state: GameState, seat: Seat, card: Card
-    ) -> GameState:
+    def after_card(self, before: GameState, state: GameState, seat: Seat, card: Card) -> GameState:
         # A trick just closed: tell screen readers who won and for how much,
         # via the canonical scoring helper so zero-rank variants are honored.
         if (
@@ -331,7 +430,7 @@ class ClassicRound(RoundPolicy[GameState]):
             else:
                 announce(msg, duration=dur, reader=self.reader)
             state = clear_announced(state)
-            display(state, None)
+            self._show(state)
         return state
 
 
@@ -355,25 +454,37 @@ def _run_coinche_flow(
     state: GameState,
     reader: KeyReader,
     ai_players: dict[Seat, AIPlayer],
+    *,
+    humans: frozenset[Seat] = frozenset({Seat.SOUTH}),
+    prepare: Callable[[Seat, GameState], GameState] | None = None,
 ) -> GameState:
     """4.9.0 / G1: after a bid locks, ask the defending side about coinche
     and (if coinched) the taker side about surcoinche. Returns the state
-    with `coinche_level` updated."""
+    with `coinche_level` updated.
+
+    4.11.0: `humans` are prompted (others use `decide_coinche`); `prepare`
+    (hot-seat) hands the device to a human and returns the state as drawn
+    from their chair — the prompts read the taker's team off it."""
     from .game import team_of
 
     if state.taker is None:
         return state
     taker_team = team_of(state.taker)
-    defenders = [s for s in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST) if team_of(s) != taker_team]
+    defenders = [
+        s for s in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST) if team_of(s) != taker_team
+    ]
 
     # Defender-side coinche check. SOUTH gets the interactive prompt; AI
     # defenders use `decide_coinche`. First defender to choose to coinche
     # locks it in (no need to poll the second defender — it's the team's
     # call, not the individual's).
+    def view_for(seat: Seat) -> GameState:
+        return prepare(seat, state) if prepare is not None else state
+
     coincheur: Seat | None = None
     for seat in defenders:
-        if seat == Seat.SOUTH:
-            if prompt_coinche(state, reader):
+        if seat in humans:
+            if prompt_coinche(view_for(seat), reader):
                 coincheur = seat
                 break
         else:
@@ -391,8 +502,9 @@ def _run_coinche_flow(
     # Taker-side surcoinche check. Mirror logic: poll taker team in order.
     takers = [s for s in (Seat.NORTH, Seat.EAST, Seat.SOUTH, Seat.WEST) if team_of(s) == taker_team]
     for seat in takers:
-        if seat == Seat.SOUTH:
-            if prompt_surcoinche(state, reader, coincheur.name):
+        if seat in humans:
+            view_for(seat)  # hot-seat: hand the device over first
+            if prompt_surcoinche(reader, coincheur.name):
                 state = replace(state, coinche_level=2)
                 announce(f"{seat.name} surcoinches! (×4)", duration=0.6, reader=reader)
                 break
@@ -425,6 +537,18 @@ def run_play(
         return None if stop.reason == "QUIT" else "UNDO"
 
 
+def _record_round_stats(current: GameState, breakdown: ScoringBreakdown, reader: KeyReader) -> None:
+    """Update the player's global stats and toast any new achievements."""
+    trump_sym = current.trump.symbol if current.trump else None
+    unlocked = update_stats_round(
+        _is_player_capot(breakdown),
+        breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total,
+        trump_sym,
+    )
+    for achievement in unlocked:
+        achievement_toast(achievement, reader)
+
+
 def show_hand_preview(state: GameState, reader: KeyReader) -> None:
     """Show player's hand and estimated declaration points before bidding."""
     hand = state.hand_of(Seat.SOUTH)
@@ -450,6 +574,63 @@ def show_hand_preview(state: GameState, reader: KeyReader) -> None:
         announce("Bidding Phase Starts", duration=1.0, reader=reader)
 
 
+def _score_and_show(
+    current: GameState,
+    reader: KeyReader,
+    round_pause: float,
+    replay_decisions: list[tuple[GameState, Card]] | None,
+    mode: TableMode,
+    draw: Callable[[GameState], None],
+) -> GameState:
+    """Score a played-out round: summary screen, animated totals, a11y line,
+    the player's stats (solo only), then the new game state."""
+    breakdown = score_round(current)
+    draw(current)  # hot-seat: still from the device holder's chair
+    replay_str: str | None = None
+    if replay_decisions:
+        from .replay import analyze_round, summarize
+
+        reports = analyze_round(replay_decisions, rng=current._rng)
+        replay_str = summarize(reports)
+    skip_round_pause = show_round_summary(
+        current,
+        breakdown,
+        reader,
+        timeout=round_pause,
+        replay_summary=replay_str,
+    )
+
+    # Animate score update. Use the same coinche-adjusted credits that
+    # apply_round_score stores, so the counter lands on the real total
+    # (raw breakdown totals are pre-multiplier).
+    ns_old, ew_old = current.team_scores
+    taker_credit, defender_credit = coinche_adjusted_credits(breakdown, current.coinche_level)
+    if breakdown.taker_team == 0:
+        target_ns = ns_old + taker_credit
+        target_ew = ew_old + defender_credit
+    else:
+        target_ns = ns_old + defender_credit
+        target_ew = ew_old + taker_credit
+
+    if not skip_round_pause:
+        animate_score_update(current, target_ns, target_ew, reader=reader)
+
+    # 4.6.5 a11y: speak the round result. Helper existed since 3.0.0
+    # but had no caller; screen-reader users heard trick-by-trick
+    # results without a round-summary line.
+    a11y.announce_round_result(
+        breakdown.taker_total,
+        breakdown.defender_total,
+        "north-south" if breakdown.taker_team == 0 else "east-west",
+        contract=_contract_word(current),
+    )
+
+    if mode.records_stats:
+        _record_round_stats(current, breakdown, reader)
+
+    return apply_round_score(current, breakdown)
+
+
 def run_round(
     state: GameState,
     reader: KeyReader,
@@ -459,8 +640,13 @@ def run_round(
     round_pause: float,
     history_stack: list[GameState],
     rng: random.Random | None = None,
+    mode: TableMode = SOLO,
 ) -> GameState | None:
-    """Run a complete round: deal, bid, play, score. Returns None if user quits."""
+    """Run a complete round: deal, bid, play, score. Returns None if user quits.
+
+    4.11.0: `mode` selects Spectate / Hot-seat (see `table_modes.py`); only
+    the solo game shows the hand preview, records replay analysis and feeds
+    the player's statistics."""
     clear_legal_cards_cache()
     if rng is None:
         rng = random.Random()
@@ -470,15 +656,19 @@ def run_round(
     # — toggling mid-round has no effect, and we avoid touching os.environ in
     # the per-card hot path. None disables capture entirely.
     replay_decisions: list[tuple[GameState, Card]] | None = (
-        [] if settings.current().replay_analysis_on() else None
+        [] if mode.is_solo and settings.current().replay_analysis_on() else None
     )
-
-    # Pre-game hand preview
-    show_hand_preview(current, reader)
 
     policy = ClassicRound(
-        reader, ai_players, ai_delay, trick_pause, history_stack, replay_decisions
+        reader, ai_players, ai_delay, trick_pause, history_stack, replay_decisions, mode
     )
+    if mode.is_solo:
+        show_hand_preview(current, reader)  # pre-game hand preview
+    elif mode.hotseat:
+        try:
+            policy.start_hotseat_round(current)
+        except RoundInterrupted:
+            return None
     while True:
         policy.skip_anims = False
         try:
@@ -512,56 +702,6 @@ def run_round(
 
         # Scoring Phase
         if current.phase == Phase.SCORING:
-            breakdown = score_round(current)
-            display(current, None)
-            replay_str: str | None = None
-            if replay_decisions:
-                from .replay import analyze_round, summarize
-                reports = analyze_round(replay_decisions, rng=current._rng)
-                replay_str = summarize(reports)
-            skip_round_pause = show_round_summary(
-                current,
-                breakdown,
-                reader,
-                timeout=round_pause,
-                replay_summary=replay_str,
+            return _score_and_show(
+                current, reader, round_pause, replay_decisions, mode, policy._show
             )
-
-            # Animate score update. Use the same coinche-adjusted credits that
-            # apply_round_score stores, so the counter lands on the real total
-            # (raw breakdown totals are pre-multiplier).
-            ns_old, ew_old = current.team_scores
-            taker_credit, defender_credit = coinche_adjusted_credits(
-                breakdown, current.coinche_level
-            )
-            if breakdown.taker_team == 0:
-                target_ns = ns_old + taker_credit
-                target_ew = ew_old + defender_credit
-            else:
-                target_ns = ns_old + defender_credit
-                target_ew = ew_old + taker_credit
-
-            if not skip_round_pause:
-                animate_score_update(current, target_ns, target_ew, reader=reader)
-
-            # 4.6.5 a11y: speak the round result. Helper existed since 3.0.0
-            # but had no caller; screen-reader users heard trick-by-trick
-            # results without a round-summary line.
-            a11y.announce_round_result(
-                breakdown.taker_total,
-                breakdown.defender_total,
-                "north-south" if breakdown.taker_team == 0 else "east-west",
-                contract=_contract_word(current),
-            )
-
-            # Update global stats
-            trump_sym = current.trump.symbol if current.trump else None
-            unlocked = update_stats_round(
-                _is_player_capot(breakdown),
-                breakdown.taker_total if breakdown.taker_team == 0 else breakdown.defender_total,
-                trump_sym,
-            )
-            for achievement in unlocked:
-                achievement_toast(achievement, reader)
-
-            return apply_round_score(current, breakdown)

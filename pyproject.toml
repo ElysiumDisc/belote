@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "belote-cli"
-version = "4.10.0"
+version = "4.11.0"
 description = "A 4-player terminal card game"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,13 +30,29 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "RET", "SIM", "PTH"]
-ignore = ["E501"]
+select = [
+    "E", "F", "W", "I", "N", "UP", "B", "A", "C4", "RET", "SIM", "PTH",
+    "RUF", "ARG001", "ARG004", "C901",
+]
+ignore = [
+    "E501",
+    # French text and card glyphs (é, ’, ♥) are intentional, not ambiguous.
+    "RUF001", "RUF002", "RUF003",
+    # Tuple concatenation on immutable state is the house style (and hot path).
+    "RUF005",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures, fakes and monkeypatched callables routinely ignore arguments.
+"tests/**" = ["ARG"]
 
 [tool.mypy]
 python_version = "3.10"
 strict = true
-ignore_missing_imports = true
+ignore_missing_imports = false  # no third-party deps: a missing import is a real bug
 check_untyped_defs = true
 disallow_untyped_defs = true
 

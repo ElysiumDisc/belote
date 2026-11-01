@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.11.0] - 2026-11-01
+
+A big foundation-and-features release: the four largest modules split into
+packages (verified byte-identical with seeded fingerprints), CI, interaction-
+layer test coverage 83% → 95%, a table that finally fits the terminal
+at every size (now down to a plain 80×24), Hot-seat & Spectate, cosmetics
+with unlocks, rebindable keys, and a BelAtro content pack. Tests 1286 →
+1954.
+
+### Added
+- **Hot-seat (Pass & Play):** 2–4 people on one terminal (partners,
+  opponents, three or four players; empty seats are AI). The table is drawn
+  from the device holder's chair (`game.rotate_view`) and a blank "pass the
+  device" screen hides hands between players. Undo is off; stats untouched.
+- **Spectate:** watch four AIs; predict each round's winner for a saved best
+  streak; `+`/`-` speed, `Space` pause, `Q` stop.
+- **Cosmetics:** ten card backs and three table frames (Art Nouveau,
+  Minimal, Gilded), unlocked by Classic and BelAtro milestones, with live
+  previews in Settings, progress on the Statistics screen and unlock toasts.
+  BelAtro registers its unlocks through a new core hook
+  (`cosmetics.register_unlock_provider`) — the core still never imports it.
+- **Theme files:** export the current palette / import a shared one
+  (`<config>/themes/<name>.json`, strictly validated: schema, colours, size,
+  names, no symlinks or path escapes).
+- **Rebindable keys:** Settings → Controls; conflicts and reserved letters are
+  refused, with "Reset to defaults". The help screen shows your bindings.
+- **MINI layout (3-row cards):** Classic Belote now plays in a default 80×24
+  terminal; the main menu has a compact form for short terminals.
+- **BelAtro content pack:** 12 Jokers (42 → 54) — Le Contrebandier, Le
+  Maréchal, Le Métronome, La Commère, L'Horloger, Le Capitaine, Le Rempart,
+  Le Joaillier, Le Maître d'Atout, La Remontée, Le Rentier and a secret one;
+  3 Bosses (21 → 24) — Le Contre-Attaquant (opponents' Belote steals chips and
+  $), L'Huissier (your leftmost Joker is seized for the round) and Le Bal
+  Masqué (the opponents' first-trick cards are face-down until the trick is
+  won — a new display-only core rule variant, `masked_first_trick`); Tarots Le
+  Juge (reroll the ante's boss, once per ante) and L'Amoureux; Planet Neptune
+  (Dix de Der); Voucher Le Téléphone (extra Partner Joker in the shop); a 13th
+  deck, Le Complice (unlocked after 5 Boss Blind wins); a Bosses tab in the
+  Collection. Tuned with `scripts/balance.py` (no new joker is an outlier).
+- **Boss Rush / Challenge Seed** (BelAtro menu): any ante, boss, unlocked
+  deck and seed; challenge runs don't count toward wins or unlocks.
+- **Watch Ghost Run** (BelAtro menu): replays a recorded run round by round
+  through the real table renderer (speed, pause, step, skip). Ghost files are
+  now format v2 (`"format": "belatro-ghost"`, `"version": 2`, run outcome,
+  per-round boss / target / result, shop buys / sells / rerolls, item use);
+  v1 files still load. Losing runs are recorded too (same Settings toggle).
+- **Tooling:** GitHub Actions CI (ruff, format, mypy; tests on Python
+  3.10 → 3.14); `scripts/fingerprint.py` (seeded refactor guard),
+  `scripts/hotspots.py` (cProfile of render / classic / BelAtro),
+  `scripts/balance.py` (BelAtro joker balance); `tests/harness.py`, a
+  headless UI test kit (scripted keys, fake terminal, captured screen).
+
+### Fixed
+- **The table overflowed the terminal at every size** — the presets'
+  minimum heights under-counted the table by 2–8 rows, so the bottom of your
+  hand (and the bid selector, and your seat label) was cut off, e.g. 47 rows
+  drawn on a 120×40 terminal. The table is now fitted to the height
+  (`layout.fit_table`): essential rows first, optional rows while they fit.
+- **Played cards jumped a row** — `patch_trick_card` re-derived the mat
+  position and ignored the decorative frame, so each card landed one row too
+  high until the next redraw. render() now records the mat geometry.
+- **Bidding:** the up-card column was 20 cells wide, pulling the card and
+  EAST's column towards the left on wide terminals.
+- **Coinche prompt** always said "NS took the bid" (it compared `Seat.name`,
+  "East", against "EAST").
+- **S (surcoinche, shop sell) and A (activate in the inventory)** couldn't be
+  typed: they are also WASD aliases and arrived as arrow keys. Aliased events
+  now keep the typed letter (`input.typed`).
+- **`--seed` games weren't reproducible across runs:** the AIs' seeded RNGs
+  were handed out in set order, which follows the per-process hash salt. A
+  belote-holder map had the same set-order dependence.
+- A digit-like key such as `²` could crash the card prompt.
+- Help screen: title scrolled off at 80×24 and the key column zig-zagged;
+  it now uses aligned columns (two side by side when short). South's label
+  no longer reads "You >> (you)"; the hand's `[1]…[8]` sit over their cards.
+- Statistics scrolls with a pinned title; the Settings value column is
+  aligned.
+- **BelAtro HUD overlapped the table:** the top HUD painted over North and
+  the top of the mat, the score tally over your hand. Expansions now report
+  the rows their overlays cover (`render.set_overlay_provider`) and the
+  table is fitted between them. BelAtro menu: duplicated tagline removed,
+  "Quit" → "Back". Card backs / frames earned in BelAtro toast right away.
+- **BelAtro's joker strip let the classic HUD show through** (its first
+  letter and half its fields); the strip now clears its row.
+- **A first BelAtro win announced "New Starting Decks"** that had never been
+  locked; the dead unlocks and the banner are gone. The Statistics screen
+  shows the new lifetime "Boss Blinds Won" count.
+- **On-screen key hints** (HUD, game-over line, Collection / Inventory
+  footers) now show your rebound keys.
+
+### Changed
+- **Package splits** (old import paths still work): `game/` (state, legal,
+  bidding, play, sorting, view), `scoring/` (announcements, tricks,
+  round_score), `ai/` (base + easy / medium / hard tiers + player),
+  `ui/render.py` → `cards`, `table`, `hud_classic` + the diff-render core.
+  Verified byte-identical over 450 classic games and 800 BelAtro rounds.
+- **Faster rounds:** `Card` caches a small deterministic hash (the round
+  engines spent ~25% of their time hashing cards): classic rounds −21%.
+- **Code quality:** `ruff format` across the codebase; RUF / ARG / C901
+  rules with McCabe complexity ≤ 15 everywhere (the last 34 offenders were
+  split); mypy no longer ignores missing imports (it was hiding broken
+  relative imports). `tests/perf_baselines.json` re-captured for the current
+  dev host (the old baselines were 8–10× too loose to catch anything).
+- Main menu: new "Hot-seat & Spectate" entry.
+
 ## [4.10.0] - 2026-11-01
 
 Verification pass over two external audit reports (every claim checked

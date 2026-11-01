@@ -41,7 +41,9 @@ class ConsumablesOverlay:
     def open(self) -> bool:
         """Show the overlay and return True iff a consumable was activated.
 
-        Returns False when the tray is empty or the player cancels (Esc/Q).
+        Returns False when the tray is empty, the player cancels (Esc/Q), or
+        the chosen tarot refuses to be used right now (4.11.0: Le Juge's once-
+        per-ante limit — the reason is in `run.last_tarot_message`).
         """
         from belote.ui.fit_guard import require_minimum
         from belote.ui.layout import vcenter_lines
@@ -67,6 +69,7 @@ class ConsumablesOverlay:
             sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
             sys.stdout.flush()
             from belote.ui.render import invalidate_diff
+
             invalidate_diff()
             while True:
                 event = self.reader.read()
@@ -86,6 +89,7 @@ class ConsumablesOverlay:
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
         from belote.ui.render import invalidate_diff
+
         invalidate_diff()
 
         while True:
@@ -98,5 +102,4 @@ class ConsumablesOverlay:
                     item = consumables[idx]
                     # Pass the run as context so Tarots that need it (none do
                     # today) have access. Planet.use() ignores context.
-                    self.run.consume(item, context=self.run)
-                    return True
+                    return self.run.consume(item, context=self.run)

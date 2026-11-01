@@ -153,7 +153,9 @@ def test_coinche_stack_skips_failed_round() -> None:
 
 
 def test_coinche_stack_skips_ew_taker() -> None:
-    assert CoincheStack().on_round_end(_round_end(coinche_level=1, taker_seat=Seat.EAST), {}) is None
+    assert (
+        CoincheStack().on_round_end(_round_end(coinche_level=1, taker_seat=Seat.EAST), {}) is None
+    )
 
 
 def test_tout_streak_advances_only_on_tout_win() -> None:
@@ -712,9 +714,7 @@ def test_on_round_start_clears_state(joker: Joker) -> None:
     # Pick the canonical keys for this joker and check they got reset.
     # We don't assert *all* keys — just that something owned by the joker
     # was demonstrably reset.
-    reset_evidence = any(
-        state[k] in (False, 0) for k in state if k.startswith(f"{joker.id}_")
-    )
+    reset_evidence = any(state[k] in (False, 0) for k in state if k.startswith(f"{joker.id}_"))
     assert reset_evidence, f"{joker.id} on_round_start did not reset any state key"
 
 

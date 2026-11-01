@@ -62,6 +62,9 @@ class KeyEvent:
 # to keep separate if/elif chains that drifted). Case-insensitive. WASD nav
 # aliases (4.5.0) are mapped at the reader so every selection screen inherits
 # them; the bid prompt's quick keys moved to X/N to make room.
+#
+# 4.11.0: rebindable (Settings → Controls). `CHAR_ALIASES` is the *live*
+# table — `set_bindings` rewrites it in place, so importers see the change.
 CHAR_ALIASES: dict[str, Key] = {
     "w": Key.UP,
     "a": Key.LEFT,
@@ -77,10 +80,173 @@ CHAR_ALIASES: dict[str, Key] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class Binding:
+    """A rebindable single-character action.
+
+    `key` actions become that `Key` (typed char kept in `char`). Undo has no
+    `Key`: the prompts recognise the typed letter "z" (`canonical`), so a
+    rebound undo key is delivered as ``KeyEvent(Key.CHAR, "z")``.
+    """
+
+    action: str
+    label: str
+    default: str
+    key: Key | None = None
+    canonical: str | None = None
+
+
+BINDINGS: tuple[Binding, ...] = (
+    Binding("help", "Help", "?", Key.HELP),
+    Binding("quit", "Quit", "q", Key.QUIT),
+    Binding("history", "Round history", "h", Key.HIST),
+    Binding("theme", "Cycle theme", "t", Key.THEME),
+    Binding("sort", "Sort hand", "o", Key.SORT),
+    Binding("overlay", "HUD overlay (BelAtro)", "i", Key.OVERLAY),
+    Binding("inventory", "Inventory (BelAtro)", "v", Key.INVENTORY),
+    Binding("undo", "Undo", "z", canonical="z"),
+    Binding("up", "Move up", "w", Key.UP),
+    Binding("left", "Move left", "a", Key.LEFT),
+    Binding("down", "Move down", "s", Key.DOWN),
+    Binding("right", "Move right", "d", Key.RIGHT),
+)
+_BINDING_BY_ACTION: dict[str, Binding] = {b.action: b for b in BINDINGS}
+DEFAULT_BINDINGS: dict[str, str] = {b.action: b.default for b in BINDINGS}
+
+# Letters that prompts read as typed characters. Binding one to an action
+# would steal it from that prompt, so only its own default action may hold
+# it (S stays DOWN and A stays LEFT: those prompts check `typed()` first).
+RESERVED_KEYS: dict[str, str] = {
+    "a": "Activate (BelAtro inventory)",
+    "c": "Coinche / consumables",
+    "l": "Rules language",
+    "n": "Sans Atout bid / No",
+    "p": "Pass (bidding)",
+    "s": "Surcoinche / Sell",
+    "x": "Tout Atout bid",
+    "y": "Yes",
+    "z": "Undo",
+}
+
+# Undo remap: typed key → the letter the prompts expect. Empty by default.
+_CHAR_REMAP: dict[str, str] = {}
+# Default letters whose action moved away and that would otherwise still be
+# read as that action by the prompts (undo's "z"): delivered as UNKNOWN.
+_SILENCED: set[str] = set()
+# Settings → Controls captures a raw key while this is set.
+_raw_capture = False
+
+
+def check_binding(action: str, key: str, bindings: dict[str, str]) -> str | None:
+    """Why `action` can't be bound to `key` given the other `bindings`, or
+    None if it can. Keys are single printable ASCII characters; digits and
+    space are quick-select keys; arrows / Enter / Esc are never rebindable."""
+    binding = _BINDING_BY_ACTION.get(action)
+    if binding is None:
+        return f"Unknown action {action!r}"
+    k = key.lower()
+    if len(k) != 1 or not k.isascii() or not k.isprintable() or k == " ":
+        return "Use a single letter or symbol key"
+    if k.isdigit():
+        return f"{k.upper()} is reserved for quick select"
+    if k in RESERVED_KEYS and k != binding.default:
+        return f"{k.upper()} is reserved for {RESERVED_KEYS[k]}"
+    for other, other_key in bindings.items():
+        if other != action and other_key == k:
+            return f"{k.upper()} is already used by {_BINDING_BY_ACTION[other].label}"
+    return None
+
+
+def validate_bindings(overrides: dict[str, str]) -> str | None:
+    """Error for the first invalid entry of `overrides` (merged over the
+    defaults), or None when the whole map is usable."""
+    merged = {**DEFAULT_BINDINGS, **{a: k.lower() for a, k in overrides.items()}}
+    for action, key in merged.items():
+        err = check_binding(action, key, merged)
+        if err is not None:
+            return err
+    return None
+
+
+def set_bindings(overrides: dict[str, str]) -> None:
+    """Install `overrides` (action → key, merged over `DEFAULT_BINDINGS`) as
+    the live alias table. Raises ValueError (and changes nothing) if invalid."""
+    err = validate_bindings(overrides)
+    if err is not None:
+        raise ValueError(err)
+    merged = {**DEFAULT_BINDINGS, **{a: k.lower() for a, k in overrides.items()}}
+    CHAR_ALIASES.clear()
+    _CHAR_REMAP.clear()
+    _SILENCED.clear()
+    for b in BINDINGS:
+        k = merged[b.action]
+        if b.key is not None:
+            CHAR_ALIASES[k] = b.key
+        elif b.canonical is not None and k != b.canonical:
+            _CHAR_REMAP[k] = b.canonical
+            _SILENCED.add(b.canonical)
+
+
+def current_bindings() -> dict[str, str]:
+    """The live action → key map."""
+    out: dict[str, str] = {}
+    for b in BINDINGS:
+        if b.key is not None:
+            out[b.action] = next((c for c, k in CHAR_ALIASES.items() if k is b.key), "")
+        else:
+            out[b.action] = next(
+                (c for c, canon in _CHAR_REMAP.items() if canon == b.canonical), b.default
+            )
+    return out
+
+
+def key_label(action: str) -> str:
+    """Display label of the key bound to `action` ("Q", "?") — for help text."""
+    return current_bindings().get(action, "").upper()
+
+
+class raw_capture:  # noqa: N801 — used like a function: `with raw_capture():`
+    """While active, `char_event` skips every alias / remap (Settings →
+    Controls reads the literal key the player presses)."""
+
+    def __enter__(self) -> None:
+        global _raw_capture
+        _raw_capture = True
+
+    def __exit__(self, *_args: object) -> None:
+        global _raw_capture
+        _raw_capture = False
+
+
 def char_event(ch: str) -> KeyEvent:
-    """Map a decoded printable character to its event (alias or plain CHAR)."""
-    key = CHAR_ALIASES.get(ch.lower())
-    return KeyEvent(key) if key is not None else KeyEvent(Key.CHAR, ch)
+    """Map a decoded printable character to its event (alias or plain CHAR).
+
+    4.11.0: aliased events keep the typed character in `char`, so a screen
+    with a letter hotkey that is also an alias (S=surcoinche/sell vs S=DOWN,
+    A=activate vs A=LEFT) can tell the letter from the arrow key. Check
+    `typed(event, "s")` for those, before the navigation branches. A rebound
+    undo key arrives as CHAR "z" (what the prompts check); "z" itself is then
+    UNKNOWN.
+    """
+    if _raw_capture:
+        return KeyEvent(Key.CHAR, ch)
+    low = ch.lower()
+    key = CHAR_ALIASES.get(low)
+    if key is not None:
+        return KeyEvent(key, ch)
+    if _CHAR_REMAP:
+        canon = _CHAR_REMAP.get(low)
+        if canon is not None:
+            return KeyEvent(Key.CHAR, canon)
+        if low in _SILENCED:
+            return KeyEvent(Key.UNKNOWN, ch)
+    return KeyEvent(Key.CHAR, ch)
+
+
+def typed(event: KeyEvent, letter: str) -> bool:
+    """True if `event` came from typing `letter` (either case), whether or
+    not that letter is also a navigation alias. Arrow keys never match."""
+    return event.char is not None and event.char.lower() == letter
 
 
 # Final bytes shared by CSI (ESC [ X) and SS3 (ESC O X) cursor keys.
@@ -90,6 +256,28 @@ _ARROW_FINALS: dict[bytes, Key] = {
     b"C": Key.RIGHT,
     b"D": Key.LEFT,
 }
+
+
+# Single control bytes under raw mode. Ctrl-C arrives as a plain 0x03 (ISIG
+# is off), so it is "quit" rather than an unbound control character.
+_CONTROL_BYTES: dict[int, Key] = {
+    0x03: Key.QUIT,
+    0x0A: Key.ENTER,
+    0x0D: Key.ENTER,
+    0x09: Key.TAB,
+    0x20: Key.SPACE,
+}
+
+
+def _utf8_continuations(lead: int) -> int | None:
+    """Continuation bytes after a UTF-8 leading byte, or None if invalid."""
+    if (lead & 0xE0) == 0xC0:
+        return 1
+    if (lead & 0xF0) == 0xE0:
+        return 2
+    if (lead & 0xF8) == 0xF0:
+        return 3
+    return None
 
 
 class _UnixKeyReader:
@@ -125,7 +313,6 @@ class _UnixKeyReader:
 
     def read(self) -> KeyEvent:
         """Read a single key (handling escape sequences and multi-byte UTF-8)."""
-        # Read the first byte
         buf = os.read(self._stdin_fd, 1)
         if not buf:
             # EOF — stdin is closed (broken pipe, headless harness, Ctrl-D).
@@ -133,103 +320,79 @@ class _UnixKeyReader:
             return KeyEvent(Key.EOF)
 
         byte = buf[0]
-
-        # Escape sequence
         if byte == 0x1B:
-            # 50ms is the conventional ESC vs. arrow-key disambiguation
-            # window. 10ms (the previous value) was tight enough that arrow
-            # keys over SSH or in slow terminals could be mis-classified as
-            # bare ESC presses.
-            r, _, _ = select.select([sys.stdin], [], [], 0.05)
-            if not r:
-                return KeyEvent(Key.ESC)
-
-            next_byte = os.read(self._stdin_fd, 1)
-            if next_byte == b"[":
-                # CSI: ESC [ <params 0x30-0x3F>* <intermediates 0x20-0x2F>*
-                # <final 0x40-0x7E>. Consume the whole sequence so e.g.
-                # Ctrl+Right (ESC [ 1 ; 5 C) doesn't leak ';', '5', 'C' as
-                # keystrokes. Every byte read is bounded by the same window.
-                params = b""
-                while True:
-                    b = self._read_seq_byte()
-                    if b is None:
-                        return KeyEvent(Key.UNKNOWN)
-                    if 0x20 <= b[0] <= 0x3F:
-                        params += b
-                        continue
-                    if 0x40 <= b[0] <= 0x7E:
-                        if not params:
-                            arrow = _ARROW_FINALS.get(b)
-                            if arrow is not None:
-                                return KeyEvent(arrow)
-                        return KeyEvent(Key.UNKNOWN)
-                    # Not a valid CSI byte — give up on the sequence.
-                    return KeyEvent(Key.UNKNOWN)
-            if next_byte == b"O":
-                # SS3: ESC O <final>. Application-cursor-mode arrows (OA-OD)
-                # and xterm F1-F4 (OP-OS). F2 used to become ESC + QUIT ('Q').
-                b = self._read_seq_byte()
-                if b is not None:
-                    arrow = _ARROW_FINALS.get(b)
-                    if arrow is not None:
-                        return KeyEvent(arrow)
-                return KeyEvent(Key.UNKNOWN)
-            return KeyEvent(Key.ESC)
-
-        # Ctrl-C arrives as a plain 0x03 byte under raw mode (ISIG is off),
-        # so treat it as quit rather than an unbound control character.
-        if byte == 0x03:
-            return KeyEvent(Key.QUIT)
-
-        # Enter
-        if byte in (0x0A, 0x0D):
-            return KeyEvent(Key.ENTER)
-
-        # Tab
-        if byte == 0x09:
-            return KeyEvent(Key.TAB)
-
-        # Space
-        if byte == 0x20:
-            return KeyEvent(Key.SPACE)
-
-        # Multi-byte UTF-8 handling
+            return self._read_escape()
+        control = _CONTROL_BYTES.get(byte)
+        if control is not None:
+            return KeyEvent(control)
         if byte >= 0x80:
-            # Number of UTF-8 continuation bytes that follow the leading byte.
-            if (byte & 0xE0) == 0xC0:
-                continuation_bytes = 1
-            elif (byte & 0xF0) == 0xE0:
-                continuation_bytes = 2
-            elif (byte & 0xF8) == 0xF0:
-                continuation_bytes = 3
-            else:
-                return KeyEvent(Key.ESC)
-
-            total_bytes = continuation_bytes + 1
-            full_buf = bytes([byte])
-            while len(full_buf) < total_bytes:
-                # Bound the wait for the rest of a multi-byte UTF-8 sequence:
-                # an unterminated leading byte (paste of garbage, killed
-                # remote, etc.) used to block the reader forever.
-                r, _, _ = select.select([sys.stdin], [], [], 0.05)
-                if not r:
-                    break
-                chunk = os.read(self._stdin_fd, total_bytes - len(full_buf))
-                if not chunk:
-                    break
-                full_buf += chunk
-
-            try:
-                ch = full_buf.decode("utf-8")
-                return KeyEvent(Key.CHAR, ch)
-            except UnicodeDecodeError:
-                return KeyEvent(Key.ESC)
-
+            return self._read_utf8(byte)
         # Printable character
         try:
             return char_event(chr(byte))
         except (ValueError, UnicodeDecodeError):
+            return KeyEvent(Key.ESC)
+
+    def _read_escape(self) -> KeyEvent:
+        """After ESC: a bare ESC, a CSI / SS3 sequence, or ESC + junk."""
+        # 50ms is the conventional ESC vs. arrow-key disambiguation window.
+        # 10ms (the previous value) was tight enough that arrow keys over SSH
+        # or in slow terminals could be mis-classified as bare ESC presses.
+        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if not r:
+            return KeyEvent(Key.ESC)
+        next_byte = os.read(self._stdin_fd, 1)
+        if next_byte == b"[":
+            return self._read_csi()
+        if next_byte == b"O":
+            # SS3: ESC O <final>. Application-cursor-mode arrows (OA-OD)
+            # and xterm F1-F4 (OP-OS). F2 used to become ESC + QUIT ('Q').
+            b = self._read_seq_byte()
+            arrow = _ARROW_FINALS.get(b) if b is not None else None
+            return KeyEvent(arrow) if arrow is not None else KeyEvent(Key.UNKNOWN)
+        return KeyEvent(Key.ESC)
+
+    def _read_csi(self) -> KeyEvent:
+        """CSI: ESC [ <params 0x30-0x3F>* <intermediates 0x20-0x2F>* <final
+        0x40-0x7E>. Consumed whole so e.g. Ctrl+Right (ESC [ 1 ; 5 C) doesn't
+        leak ';', '5', 'C' as keystrokes. Every byte read is bounded by the
+        same window. Only parameterless arrows are bound."""
+        params = b""
+        while True:
+            b = self._read_seq_byte()
+            if b is None:
+                return KeyEvent(Key.UNKNOWN)
+            if 0x20 <= b[0] <= 0x3F:
+                params += b
+                continue
+            if 0x40 <= b[0] <= 0x7E and not params:
+                arrow = _ARROW_FINALS.get(b)
+                if arrow is not None:
+                    return KeyEvent(arrow)
+            # A non-arrow final, or not a valid CSI byte: give up on it.
+            return KeyEvent(Key.UNKNOWN)
+
+    def _read_utf8(self, byte: int) -> KeyEvent:
+        """A multi-byte UTF-8 character from its leading byte."""
+        continuation_bytes = _utf8_continuations(byte)
+        if continuation_bytes is None:
+            return KeyEvent(Key.ESC)
+        total_bytes = continuation_bytes + 1
+        full_buf = bytes([byte])
+        while len(full_buf) < total_bytes:
+            # Bound the wait for the rest of a multi-byte UTF-8 sequence: an
+            # unterminated leading byte (paste of garbage, killed remote, etc.)
+            # used to block the reader forever.
+            r, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if not r:
+                break
+            chunk = os.read(self._stdin_fd, total_bytes - len(full_buf))
+            if not chunk:
+                break
+            full_buf += chunk
+        try:
+            return KeyEvent(Key.CHAR, full_buf.decode("utf-8"))
+        except UnicodeDecodeError:
             return KeyEvent(Key.ESC)
 
     def _read_seq_byte(self) -> bytes | None:
@@ -246,6 +409,7 @@ class _UnixKeyReader:
         if r:
             return self.read()
         return None
+
 
 def interruptible_sleep(
     seconds: float,
@@ -287,7 +451,7 @@ class KeyReader:
 
     _restored: bool = False
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> KeyReader:
+    def __new__(cls, *args: Any, **kwargs: Any) -> KeyReader:  # noqa: ARG004 — ctor args
         if cls is KeyReader:
             # Construct the concrete reader fully (its own __new__ + __init__
             # run); cast for the caller's type narrowing.

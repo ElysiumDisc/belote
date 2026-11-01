@@ -116,9 +116,7 @@ def test_overlay_ignores_out_of_range_digit_then_picks_valid() -> None:
     run.consumables.append(LeChariot())
     money_before = run.economy.money
     # First press "9" (invalid index, ignored), then "1" (valid).
-    reader = _stub_reader(
-        iter([KeyEvent(Key.CHAR, "9"), KeyEvent(Key.CHAR, "1")])
-    )
+    reader = _stub_reader(iter([KeyEvent(Key.CHAR, "9"), KeyEvent(Key.CHAR, "1")]))
 
     overlay = ConsumablesOverlay(run, reader)
     assert overlay.open() is True

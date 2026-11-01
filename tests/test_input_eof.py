@@ -60,6 +60,7 @@ def test_windows_reader_returns_eof_on_empty_read() -> None:
 
     if os.name == "nt":
         from belote.input import _WindowsKeyReader  # type: ignore[attr-defined]
+
         reader = _WindowsKeyReader.__new__(_WindowsKeyReader)
         fake_msvcrt = types.SimpleNamespace(getch=lambda: b"")
         sys.modules["msvcrt"] = fake_msvcrt  # type: ignore[assignment]
@@ -98,9 +99,11 @@ def test_windows_reader_returns_eof_on_empty_read() -> None:
 def _state_in_playing_phase() -> object:
     """Minimal helper to drop a fresh game into PLAYING with South to act."""
     import random
+
     state = new_game()
     state = start_round(state, random.Random(0))
     from dataclasses import replace
+
     return replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH, turn=Seat.SOUTH)
 
 
@@ -120,6 +123,7 @@ def test_prompt_bid_exits_on_eof() -> None:
     """prompt_bid must return 'QUIT' on EOF — not spin re-reading."""
     state = new_game()
     import random
+
     state = start_round(state, random.Random(0))
     reader = MagicMock()
     reader.read.return_value = KeyEvent(Key.EOF)

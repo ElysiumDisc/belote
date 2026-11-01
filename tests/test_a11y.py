@@ -50,7 +50,7 @@ def test_trick_card_points_jacks_zero_zeroes_jack() -> None:
 def test_trick_card_points_kings_zero_zeroes_king() -> None:
     trick = (
         TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.KING)),  # trump K = 4
-        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.TEN)),    # trump 10 = 10
+        TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.TEN)),  # trump 10 = 10
         TrickCard(Seat.NORTH, Card(Suit.HEARTS, Rank.SEVEN)),
         TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.EIGHT)),
     )

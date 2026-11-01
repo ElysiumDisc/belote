@@ -82,7 +82,9 @@ def result_of(run: BelAtroRun) -> DailyResult:
 def new_daily_run(day: date, profile: Profile | None = None) -> BelAtroRun:
     from .core.run_state import BelAtroRun
 
-    return BelAtroRun(deck_id=DAILY_DECK, seed=daily_seed(day), profile=profile, daily=day.isoformat())
+    return BelAtroRun(
+        deck_id=DAILY_DECK, seed=daily_seed(day), profile=profile, daily=day.isoformat()
+    )
 
 
 # ── local best-result store ────────────────────────────────────────────────
@@ -196,7 +198,7 @@ def _show(lines: list[str], reader: KeyReader) -> bool:
 def play_daily(reader: KeyReader, day: date | None = None) -> None:
     """Main-menu launcher: intro → run → result."""
     from ..ansi import BOLD, RESET, gold_fg, green_fg
-    from .main import BelAtroGame
+    from .main import BelAtroGame, toast_cosmetic_unlocks
 
     day = day or date.today()
     if not _show(intro_lines(day), reader):
@@ -222,3 +224,5 @@ def play_daily(reader: KeyReader, day: date | None = None) -> None:
         ],
         reader,
     )
+    # daily.json was just written: the calendar card back may now be earned.
+    toast_cosmetic_unlocks(reader)

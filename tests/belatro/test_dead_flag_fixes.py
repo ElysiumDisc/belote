@@ -159,7 +159,7 @@ def test_la_sentinelle_arms_when_partner_plays_trump_jack() -> None:
             Card(Suit.HEARTS, Rank.JACK),  # played by NORTH (leader)
             Card(Suit.HEARTS, Rank.SEVEN),  # WEST
             Card(Suit.HEARTS, Rank.EIGHT),  # SOUTH
-            Card(Suit.HEARTS, Rank.NINE),   # EAST
+            Card(Suit.HEARTS, Rank.NINE),  # EAST
         ),
         trick_number=1,
         is_last=False,
@@ -187,7 +187,7 @@ def test_la_sentinelle_does_not_arm_for_opponent_jack() -> None:
             Card(Suit.HEARTS, Rank.JACK),  # EAST (leader)
             Card(Suit.HEARTS, Rank.SEVEN),  # NORTH
             Card(Suit.HEARTS, Rank.EIGHT),  # WEST
-            Card(Suit.HEARTS, Rank.NINE),   # SOUTH
+            Card(Suit.HEARTS, Rank.NINE),  # SOUTH
         ),
         trick_number=1,
         is_last=False,
@@ -735,6 +735,7 @@ def test_three_new_bosses_in_registry() -> None:
         LeSauvage,
         LIconoclaste,
     )
+
     assert LeSauvage in ALL_BOSS_MODIFIERS
     assert LIconoclaste in ALL_BOSS_MODIFIERS
     assert LeMime in ALL_BOSS_MODIFIERS
@@ -742,6 +743,7 @@ def test_three_new_bosses_in_registry() -> None:
 
 def test_le_mime_flags_declarations_zero() -> None:
     from belote.belatro.run.boss import LeMime
+
     flags = LeMime().flags()
     assert flags.declarations_zero is True
 

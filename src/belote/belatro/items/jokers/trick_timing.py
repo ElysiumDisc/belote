@@ -41,8 +41,7 @@ class LeSergent(Joker):
     id = "le_sergent"
     name = "Le Sergent"
     description = (
-        "Each consecutive trick win: +0.5 Mult more than the last (max +2). "
-        "Resets on losing."
+        "Each consecutive trick win: +0.5 Mult more than the last (max +2). Resets on losing."
     )
     cost = 7
 
@@ -77,9 +76,7 @@ class LeDernierMot(Joker):
         if event.is_last and team_of(event.winner) == 0:
             # Remove the flat Dix de Der bonus and replace with ×2 mult.
             # If no_dix_de_der boss is active the bonus was already 0, so don't subtract.
-            dix_de_der = (
-                0 if state.get("no_dix_de_der", False) else GLOBAL_CONFIG.LAST_TRICK_BONUS
-            )
+            dix_de_der = 0 if state.get("no_dix_de_der", False) else GLOBAL_CONFIG.LAST_TRICK_BONUS
             return JokerResult(add_chips=-dix_de_der, times_mult=2.0)
         return None
 
@@ -148,4 +145,3 @@ class LArcEnCiel(Joker):
         if winning is not None and winning.suit != lead_suit:
             return JokerResult(add_mult=2.0)
         return None
-

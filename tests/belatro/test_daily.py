@@ -94,10 +94,21 @@ def test_play_daily_records_result_and_skips_endless(monkeypatch: pytest.MonkeyP
         assert run is not None and run.daily == "2026-11-01"  # type: ignore[attr-defined]
         run.ante_number = 2  # type: ignore[attr-defined]
         run.history.append(  # type: ignore[attr-defined]
-            BelAtroHistoryEntry(ante=1, blind_label="Small", target=80, boss_name=None,
-                                taker_label="S (NS)", contract="♠", tricks_ns=5, tricks_ew=3,
-                                score=321, status="WON", money_delta=3,
-                                decl_summary_ns=(), decl_summary_ew=())
+            BelAtroHistoryEntry(
+                ante=1,
+                blind_label="Small",
+                target=80,
+                boss_name=None,
+                taker_label="S (NS)",
+                contract="♠",
+                tricks_ns=5,
+                tricks_ew=3,
+                score=321,
+                status="WON",
+                money_delta=3,
+                decl_summary_ns=(),
+                decl_summary_ew=(),
+            )
         )
         self.run = run  # type: ignore[assignment]
 

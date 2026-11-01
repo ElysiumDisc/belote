@@ -26,6 +26,16 @@ if TYPE_CHECKING:
     from ..core.scoring import ScoreAccumulator
 
 
+# 4.11.0: rows the in-round BelAtro overlays paint over the classic table, so
+# the core's vertical budget can keep table content out of them. They are
+# painted ON TOP of the classic frame (no rows are inserted above it):
+#   top    — rows 1..5: joker pip strip (1), chips×mult / ante line (2-3),
+#            trust bar (4), synergy tooltip (5; may spill to 7 when shown);
+#   bottom — rows term_h-5 .. term_h-1: slot-machine tally (flame / bucket /
+#            odometer at term_h-5..-3) plus its 2-row margin.
+TOP_OVERLAY_ROWS = 5
+BOTTOM_OVERLAY_ROWS = 5
+
 _MOOD_GLYPH = {
     "degraded": "✗",
     "sulking": "·",
@@ -252,8 +262,13 @@ class BelAtroHUD:
                 if contrib_str:
                     parts.append(
                         move(3, score_col)
-                        + red_fg() + BOLD + score_str + RESET
-                        + DIM + contrib_str + RESET
+                        + red_fg()
+                        + BOLD
+                        + score_str
+                        + RESET
+                        + DIM
+                        + contrib_str
+                        + RESET
                         + "\n"
                     )
                 else:
@@ -265,7 +280,10 @@ class BelAtroHUD:
             names = "  ".join(j.name for j in run.jokers)
             parts.append(
                 move(2, max(2, term_w // 2))
-                + gold_fg() + ansi_truncate(names, term_w // 2 - 2) + RESET + "\n"
+                + gold_fg()
+                + ansi_truncate(names, term_w // 2 - 2)
+                + RESET
+                + "\n"
             )
             # 3.0.0: synergy badge — render below the joker line if any pair
             # matches. Cheap O(N) per render; the table is short.
@@ -294,6 +312,7 @@ class BelAtroHUD:
         # This write bypasses display(); invalidate the render-diff baseline so
         # the next display() repaints rows the HUD overwrote (4.0.0 convention).
         from belote.ui.render import invalidate_diff
+
         invalidate_diff()
 
     def _render_compact(
@@ -334,10 +353,12 @@ class BelAtroHUD:
         parts: list[str] = []
         if pip_strip:
             parts.append(pip_strip)
-        parts.extend([
-            move(2, 2) + left + "\n",
-            move(2, right_col) + joker_label + "\n",
-        ])
+        parts.extend(
+            [
+                move(2, 2) + left + "\n",
+                move(2, right_col) + joker_label + "\n",
+            ]
+        )
 
         # Row 3: chips × mult on the right (hidden by Le Brouillard, also
         # suppressed under La Compétition since the running total diverges
@@ -361,6 +382,7 @@ class BelAtroHUD:
         # 4.7.0 follow-up: persistent slot-machine tally readout, matched to
         # the standard branch (see comment there).
         from belote.ui.render import get_term_size as _gt
+
         _, term_h = _gt()
         _emit_tally_readout(parts, state, term_w, term_h)
 
@@ -372,6 +394,7 @@ class BelAtroHUD:
         sys.stdout.flush()
         # Bypasses display(); invalidate the render-diff baseline (4.0.0 conv).
         from belote.ui.render import invalidate_diff
+
         invalidate_diff()
 
 
@@ -385,13 +408,13 @@ class BelAtroHUD:
 def _edition_color(ed_value: str) -> str:
     """ANSI prefix for an edition. Falls back to white for NONE."""
     if ed_value == "foil":
-        return "\x1b[38;5;51m"   # bright cyan
+        return "\x1b[38;5;51m"  # bright cyan
     if ed_value == "holo":
         return "\x1b[38;5;201m"  # magenta
     if ed_value == "poly":
         return "\x1b[38;5;213m"  # pink-violet (stand-in for rainbow)
     if ed_value == "neg":
-        return "\x1b[7m"         # reverse video
+        return "\x1b[7m"  # reverse video
     return str(white_fg())
 
 
@@ -430,15 +453,16 @@ def build_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> str:
             # Pip cell: `[Xx*]` with edition-coloured content (4 cells wide
             # excluding the gold brackets).
             parts.append(
-                f"{gold_fg()}[{RESET}"
-                f"{ed_color}{shortcode}{marker}{RESET}"
-                f"{gold_fg()}]{RESET}"
+                f"{gold_fg()}[{RESET}{ed_color}{shortcode}{marker}{RESET}{gold_fg()}]{RESET}"
             )
         else:
             parts.append(f"{DIM}[··]{RESET}")
     # Center is overkill; anchor at col 2 so it doesn't fight the score line
     # on the right of row 2.
-    strip: str = move(row, 2) + "".join(parts) + "\n"
+    # 4.11.0: erase the whole row first — the strip replaces the classic HUD
+    # row underneath, which used to show through (its "B" at column 1 and
+    # half its fields to the right of the strip).
+    strip: str = move(row, 1) + "\x1b[2K" + move(row, 2) + "".join(parts) + "\n"
     return strip
 
 
@@ -455,6 +479,7 @@ def render_joker_pip_strip(run: BelAtroRun, term_w: int, row: int = 1) -> None:
     sys.stdout.write(strip)
     sys.stdout.flush()
     from belote.ui.render import invalidate_diff
+
     invalidate_diff()
 
 
@@ -498,4 +523,5 @@ def render_synergy_tooltip(jokers: Sequence[object], term_w: int, row: int = 5) 
     sys.stdout.write(out)
     sys.stdout.flush()
     from belote.ui.render import invalidate_diff
+
     invalidate_diff()

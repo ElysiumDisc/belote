@@ -5,6 +5,10 @@ standalone `belatro` command call `install()` once; it registers the pieces
 of the core UI that BelAtro contributes to. Imports stay lazy so classic play
 doesn't load the expansion until it is used.
 
+It also supplies the progress of the BelAtro-earned cosmetic unlocks (the
+"Néon Joker" and "Calendrier" card backs) through
+`cosmetics.register_unlock_provider`.
+
 Run-scoped hooks (history override, bid hint, extension keys) are installed
 by `BelAtroGame.start` for the duration of a run.
 """
@@ -37,12 +41,37 @@ def stats_lines() -> list[str]:
         "-" * 17,
         f"  Runs Won (Ante 8): {b_stats.get('runs_won', 0)}",
         f"  Total Capots:      {b_stats.get('total_capots', 0)}",
+        f"  Boss Blinds Won:   {b_stats.get('bosses_defeated', 0)}",
         f"  Special Wins:      Sans Atout: {b_stats.get('sans_atout_wins', 0)}  "
         f"Tout Atout: {b_stats.get('tout_atout_wins', 0)}",
         f"  Discovered:        {len(profile.discovered_items)} items seen",
         f"  Unlocked:          {len(profile.unlocked_ids)} items earned",
         "",
     ]
+
+
+def insider_progress() -> tuple[int, int]:
+    """Cosmetic milestone "L'Insider": win a BelAtro run."""
+    from .progression.save import SaveManager
+
+    won = SaveManager().load_profile().stats.get("runs_won", 0)
+    return (won if isinstance(won, int) else 0), 1
+
+
+DAILY_DAYS_GOAL = 5
+
+
+def daily_days_progress() -> tuple[int, int]:
+    """Cosmetic milestone "Habitué du Jour": Daily Challenge played on
+    `DAILY_DAYS_GOAL` different days (days with an attempt in daily.json)."""
+    from .daily import _load_store
+
+    days = 0
+    for entry in _load_store().values():
+        attempts = entry.get("attempts") if isinstance(entry, dict) else None
+        if isinstance(attempts, int) and attempts > 0:
+            days += 1
+    return days, DAILY_DAYS_GOAL
 
 
 def _launch_belatro(reader: KeyReader) -> None:
@@ -67,9 +96,13 @@ def install() -> None:
     global _installed
     if _installed:
         return
+    from ..cosmetics import register_unlock_provider
     from ..settings import register_toggle
     from ..ui.announce import register_stats_section
 
     register_stats_section(stats_lines)
     register_toggle(GHOST_TOGGLE)
+    # Progress of the core cosmetics that BelAtro play unlocks.
+    register_unlock_provider("l_insider", insider_progress)
+    register_unlock_provider("habitue_du_jour", daily_days_progress)
     _installed = True

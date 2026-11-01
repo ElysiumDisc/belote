@@ -66,7 +66,7 @@ def test_first_capot_unlocks_when_count_already_above_one() -> None:
 
 
 def test_capot_x3_uses_session_count_not_lifetime() -> None:
-    """"Triple Coup — 3 Capots in a single session": lifetime capots from
+    """ "Triple Coup — 3 Capots in a single session": lifetime capots from
     earlier sessions must not unlock it."""
     stats = Statistics(capots_achieved=10, current_capot_streak=1)
     new = evaluate_round(stats, points_scored=252, was_capot=True, session_capots=1)

@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     )
 
 
-
 def is_trump_card(card: Card, trump: Suit | None) -> bool:
     """Does `card` count as trump under `trump`?
 
@@ -27,6 +26,7 @@ def is_trump_card(card: Card, trump: Suit | None) -> bool:
     False there. Sans Atout (`trump=None`) has no trump at all.
     """
     return trump is not None and (trump == Suit.TOUT_ATOUT or card.suit == trump)
+
 
 class Rarity(str, Enum):
     """Item rarity for shop weighting and unlock-gating."""
@@ -46,10 +46,10 @@ class Edition(str, Enum):
     """
 
     NONE = "none"
-    FOIL = "foil"          # +50 chips per trigger
-    HOLO = "holo"          # +10 mult per trigger
-    POLYCHROME = "poly"    # ×1.5 mult per trigger
-    NEGATIVE = "neg"       # +1 joker slot, doesn't consume one
+    FOIL = "foil"  # +50 chips per trigger
+    HOLO = "holo"  # +10 mult per trigger
+    POLYCHROME = "poly"  # ×1.5 mult per trigger
+    NEGATIVE = "neg"  # +1 joker slot, doesn't consume one
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,15 @@ class Joker(ABC):
     fusable: bool = True
     is_partner_joker: bool = False
     is_corrupted: bool = False
+    # 4.11.0: unlockable jokers flagged secret stay out of the Collection
+    # gallery (not even a "???" row) until the profile unlocks them; the
+    # gallery shows a riddle hint instead (`secret_hint`).
+    is_secret: bool = False
+    secret_hint: str = ""
+    # 4.11.0: Le Téléphone voucher — a shop offer stamped `for_partner=True`
+    # equips onto the partner's own joker slots (PartnerState.jokers) instead
+    # of the player's. Per-instance flag set by the shop; False everywhere else.
+    for_partner: bool = False
     # 3.0.0: edition is mutable per-instance and stamped by the shop. Default
     # NONE for backward compatibility with existing tests that instantiate
     # jokers directly.
@@ -102,7 +111,9 @@ class Joker(ABC):
     def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         return None
 
-    def on_declaration(self, event: DeclarationScoredEvent, state: dict[str, Any]) -> JokerResult | None:
+    def on_declaration(
+        self, event: DeclarationScoredEvent, state: dict[str, Any]
+    ) -> JokerResult | None:
         return None
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
@@ -158,6 +169,15 @@ class Tarot(ABC):
     cost: int = 4
     rarity: Rarity = Rarity.COMMON
 
+    def refusal(self, run: BelAtroRun) -> str | None:
+        """4.11.0: why this tarot can't be used right now, or None if it can.
+
+        `BelAtroRun.consume` checks this BEFORE removing the card, so a tarot
+        whose effect is momentarily impossible (Le Juge after its once-per-
+        ante reroll) stays in the tray instead of being wasted.
+        """
+        return None
+
     @abstractmethod
     def use(self, run: BelAtroRun, context: object) -> None:
         """Apply the one-shot effect."""
@@ -178,6 +198,7 @@ class Voucher(ABC):
     caller of `voucher.apply()` (replays, deck-builder previews, etc.)
     inherits the same protection.
     """
+
     id: str
     name: str
     description: str

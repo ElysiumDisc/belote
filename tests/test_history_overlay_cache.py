@@ -56,8 +56,13 @@ def test_build_history_lines_empty() -> None:
 def test_build_history_lines_wide_layout() -> None:
     """At term_w ≥ 78 the helper uses the single-row wide layout."""
     state = new_game()
-    state = state.__class__(**{**state.__dict__, "score_history": tuple(_round_score(i) for i in range(3))}) \
-        if hasattr(state, "__dict__") else state
+    state = (
+        state.__class__(
+            **{**state.__dict__, "score_history": tuple(_round_score(i) for i in range(3))}
+        )
+        if hasattr(state, "__dict__")
+        else state
+    )
     # GameState is frozen+slotted, so build via dataclasses.replace
     import dataclasses
 
@@ -113,11 +118,13 @@ def test_show_history_caches_lines_across_scroll(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(prompts_mod, "_build_history_lines", _counting_build)
 
     # Simulate user pressing ↓, ↓, then any-key-dismiss.
-    keys = iter([
-        KeyEvent(Key.DOWN),
-        KeyEvent(Key.DOWN),
-        KeyEvent(Key.QUIT),
-    ])
+    keys = iter(
+        [
+            KeyEvent(Key.DOWN),
+            KeyEvent(Key.DOWN),
+            KeyEvent(Key.QUIT),
+        ]
+    )
 
     class _Reader:
         def read(self) -> KeyEvent:

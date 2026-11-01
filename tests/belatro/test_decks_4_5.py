@@ -58,10 +58,10 @@ def test_ghost_lead_pays_when_ns_trumps_void() -> None:
     event = TrickWonEvent(
         winner=Seat.NORTH,
         cards=(
-            Card(Suit.HEARTS, Rank.SEVEN),    # SOUTH (lead)
-            Card(Suit.HEARTS, Rank.TEN),      # EAST
-            Card(Suit.SPADES, Rank.JACK),     # NORTH — trump on heart lead = void
-            Card(Suit.HEARTS, Rank.KING),     # WEST
+            Card(Suit.HEARTS, Rank.SEVEN),  # SOUTH (lead)
+            Card(Suit.HEARTS, Rank.TEN),  # EAST
+            Card(Suit.SPADES, Rank.JACK),  # NORTH — trump on heart lead = void
+            Card(Suit.HEARTS, Rank.KING),  # WEST
         ),
         trick_number=3,
         is_last=False,
@@ -128,10 +128,10 @@ def test_ghost_lead_silent_when_ew_wins_void_play() -> None:
     event = TrickWonEvent(
         winner=Seat.EAST,
         cards=(
-            Card(Suit.HEARTS, Rank.SEVEN),    # SOUTH (lead)
-            Card(Suit.SPADES, Rank.JACK),     # EAST — void trump, EW team
-            Card(Suit.HEARTS, Rank.TEN),      # NORTH
-            Card(Suit.HEARTS, Rank.KING),     # WEST
+            Card(Suit.HEARTS, Rank.SEVEN),  # SOUTH (lead)
+            Card(Suit.SPADES, Rank.JACK),  # EAST — void trump, EW team
+            Card(Suit.HEARTS, Rank.TEN),  # NORTH
+            Card(Suit.HEARTS, Rank.KING),  # WEST
         ),
         trick_number=3,
         is_last=False,
@@ -153,10 +153,10 @@ def test_ghost_lead_silent_when_winner_didnt_trump_void() -> None:
     event = TrickWonEvent(
         winner=Seat.SOUTH,
         cards=(
-            Card(Suit.HEARTS, Rank.ACE),      # SOUTH (lead, wins with Ace)
-            Card(Suit.HEARTS, Rank.SEVEN),    # EAST
-            Card(Suit.HEARTS, Rank.EIGHT),    # NORTH
-            Card(Suit.HEARTS, Rank.NINE),     # WEST
+            Card(Suit.HEARTS, Rank.ACE),  # SOUTH (lead, wins with Ace)
+            Card(Suit.HEARTS, Rank.SEVEN),  # EAST
+            Card(Suit.HEARTS, Rank.EIGHT),  # NORTH
+            Card(Suit.HEARTS, Rank.NINE),  # WEST
         ),
         trick_number=2,
         is_last=False,
@@ -187,10 +187,10 @@ def test_ghost_lead_silent_when_lead_is_seven_under_deluge() -> None:
     event = TrickWonEvent(
         winner=Seat.NORTH,
         cards=(
-            Card(Suit.HEARTS, Rank.SEVEN),    # SOUTH — leads a 7 = trump under Déluge
-            Card(Suit.HEARTS, Rank.TEN),      # EAST
-            Card(Suit.SPADES, Rank.JACK),     # NORTH — plays trump
-            Card(Suit.HEARTS, Rank.KING),     # WEST
+            Card(Suit.HEARTS, Rank.SEVEN),  # SOUTH — leads a 7 = trump under Déluge
+            Card(Suit.HEARTS, Rank.TEN),  # EAST
+            Card(Suit.SPADES, Rank.JACK),  # NORTH — plays trump
+            Card(Suit.HEARTS, Rank.KING),  # WEST
         ),
         trick_number=3,
         is_last=False,
@@ -234,14 +234,12 @@ def test_annonce_cash_x2_pays_on_qualifying_trick() -> None:
     state = _state_with_ns_tierce_in_hearts()
     acc = ScoreAccumulator()
     # First the declaration scores — populates the joker_state card set.
-    state = acc.update_state(
-        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20)
-    )
+    state = acc.update_state(state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20))
     # Then a trick with the J♥ (which is in the Tierce).
     event = TrickWonEvent(
         winner=Seat.SOUTH,
         cards=(
-            Card(Suit.HEARTS, Rank.JACK),     # in the annonce
+            Card(Suit.HEARTS, Rank.JACK),  # in the annonce
             Card(Suit.HEARTS, Rank.SEVEN),
             Card(Suit.HEARTS, Rank.EIGHT),
             Card(Suit.HEARTS, Rank.QUEEN),
@@ -260,9 +258,7 @@ def test_annonce_cash_x2_pays_on_qualifying_trick() -> None:
 def test_annonce_cash_x2_silent_on_non_annonce_trick() -> None:
     state = _state_with_ns_tierce_in_hearts()
     acc = ScoreAccumulator()
-    state = acc.update_state(
-        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20)
-    )
+    state = acc.update_state(state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20))
     # A trick with none of {9♥, 10♥, J♥}.
     event = TrickWonEvent(
         winner=Seat.SOUTH,
@@ -287,9 +283,7 @@ def test_annonce_cache_cleared_between_rounds() -> None:
     previous-round annonce doesn't double-pay in a round without declarations."""
     state = _state_with_ns_tierce_in_hearts()
     acc = ScoreAccumulator()
-    state = acc.update_state(
-        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20)
-    )
+    state = acc.update_state(state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20))
     assert "_architecte_ns_annonce_cards" in state._joker_state
 
     next_round = acc.trigger_round_start(state)
@@ -312,15 +306,11 @@ def test_le_mime_suppresses_architecte_annonce_cash() -> None:
 
     state = _state_with_ns_tierce_in_hearts()
     # Activate Le Mime on the state.
-    state = replace(
-        state, variants=RuleVariants(declarations_zero=True)
-    )
+    state = replace(state, variants=RuleVariants(declarations_zero=True))
     acc = ScoreAccumulator()
     # Declaration scores 0 chips under Le Mime — the round_driver passes
     # points=0 in that case; the handler must also skip the harvest.
-    state = acc.update_state(
-        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 0)
-    )
+    state = acc.update_state(state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 0))
     # The annonce-cards key must NOT have been stamped.
     assert "_architecte_ns_annonce_cards" not in state._joker_state
     assert "_ns_annonce_cards" not in state._joker_state
@@ -342,8 +332,7 @@ def test_le_mime_suppresses_architecte_annonce_cash() -> None:
     )
     out = acc.update_state(state, event)
     assert out._bonus_money == 0, (
-        f"Le Mime should suppress the L'Architecte $2 bonus; got "
-        f"_bonus_money={out._bonus_money}."
+        f"Le Mime should suppress the L'Architecte $2 bonus; got _bonus_money={out._bonus_money}."
     )
 
 

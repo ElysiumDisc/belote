@@ -46,7 +46,9 @@ def _skip_if_env() -> None:
 
 
 def _baselines() -> dict[str, float]:
-    return {k: v for k, v in json.loads(_BASELINES_PATH.read_text()).items() if not k.startswith("_")}
+    return {
+        k: v for k, v in json.loads(_BASELINES_PATH.read_text()).items() if not k.startswith("_")
+    }
 
 
 def _median_ms(fn, iterations: int) -> float:

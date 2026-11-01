@@ -93,9 +93,7 @@ class LeRebelle(Joker):
     description = "The Belote/Rebelote declaration gives ×3 Mult instead of a flat 20 points."
     cost = 8
 
-    def on_belote(
-        self, event: BeloteAnnouncedEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         # Belote/Rebelote points (20) are only awarded if both cards are played.
         # Gate on the second event (rebelote) so we only subtract points that
         # the player actually earned.
@@ -132,9 +130,7 @@ class LIllusionniste(Joker):
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) == 0 and event.trump:
             extra_pts = sum(
-                18
-                for c in event.cards
-                if c.rank == Rank.JACK and not is_trump_card(c, event.trump)
+                18 for c in event.cards if c.rank == Rank.JACK and not is_trump_card(c, event.trump)
             )
             if extra_pts > 0:
                 return JokerResult(add_chips=extra_pts)

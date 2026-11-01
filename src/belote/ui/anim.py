@@ -18,6 +18,7 @@ Environment kill switch: `BELOTE_NO_ANIM=1` short-circuits every helper to
 its end-state with no perceptible delay. Independent from `BELOTE_NO_DIFF`
 so each lever can be flipped separately during debugging.
 """
+
 from __future__ import annotations
 
 import os
@@ -55,6 +56,7 @@ def _refresh_animations_enabled_from_env() -> None:
 
 # ── Easing helpers ────────────────────────────────────────────────────────
 # Pure numeric, no I/O. All take `t ∈ [0, 1]` and return `[0, 1]`.
+
 
 def ease_out_quad(t: float) -> float:
     """Decelerating ease — fast start, slow finish."""

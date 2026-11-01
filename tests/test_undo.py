@@ -135,9 +135,7 @@ def test_undo_pop_to_south_respects_stack_base() -> None:
     from belote.game import Phase
     from belote.gameflow import _undo_pop_to_south
 
-    prior_round_state = GameState(
-        hands=((), (), (), ()), turn=Seat.SOUTH, phase=Phase.SCORING
-    )
+    prior_round_state = GameState(hands=((), (), (), ()), turn=Seat.SOUTH, phase=Phase.SCORING)
     history: list[GameState] = [prior_round_state]
     # stack_base = 1 marks "this round starts above index 0"; popping must
     # return None even though index 0 is a South-turn state.

@@ -20,7 +20,7 @@ def test_boss_no_belote():
         phase=Phase.SCORING,
         variants=RuleVariants(no_belote=True),
         belote_holders={Suit.HEARTS: Seat.SOUTH},
-        belote_tracker=(True, True)
+        belote_tracker=(True, True),
     )
     breakdown = score_round(state)
     assert not any("Belote" in m for m in breakdown.messages)
@@ -47,9 +47,7 @@ def test_boss_kings_zero():
     # South captures four Kings of Spades across four tricks (one per suit-rank
     # combo would normally be impossible; we just need the kings_zero rule to
     # zero out card points for tricks containing kings).
-    king_tricks = tuple(
-        _trick_won_by_south(Card(Suit.SPADES, Rank.KING)) for _ in range(4)
-    )
+    king_tricks = tuple(_trick_won_by_south(Card(Suit.SPADES, Rank.KING)) for _ in range(4))
     state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
@@ -65,9 +63,7 @@ def test_boss_kings_zero():
 
 def test_boss_tens_zero():
     """3. Boss: Tens Zero - Verify Tens score 0 points."""
-    ten_tricks = tuple(
-        _trick_won_by_south(Card(Suit.SPADES, Rank.TEN)) for _ in range(4)
-    )
+    ten_tricks = tuple(_trick_won_by_south(Card(Suit.SPADES, Rank.TEN)) for _ in range(4))
     state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.HEARTS,
@@ -90,16 +86,25 @@ def test_boss_queen_spades_penalty():
         phase=Phase.SCORING,
         variants=RuleVariants(queen_spades_penalty=True),
         completed_tricks=tuple(
-            [(TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.QUEEN)),
-              TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.SEVEN)),
-              TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.EIGHT)),
-              TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.NINE)))] +
-            [(TrickCard(Seat.EAST, Card(Suit.DIAMONDS, Rank.ACE)),
-              TrickCard(Seat.WEST, Card(Suit.DIAMONDS, Rank.TEN)),
-              TrickCard(Seat.SOUTH, Card(Suit.DIAMONDS, Rank.KING)),
-              TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.QUEEN)))] * 7
+            [
+                (
+                    TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.QUEEN)),
+                    TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.SEVEN)),
+                    TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.EIGHT)),
+                    TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.NINE)),
+                )
+            ]
+            + [
+                (
+                    TrickCard(Seat.EAST, Card(Suit.DIAMONDS, Rank.ACE)),
+                    TrickCard(Seat.WEST, Card(Suit.DIAMONDS, Rank.TEN)),
+                    TrickCard(Seat.SOUTH, Card(Suit.DIAMONDS, Rank.KING)),
+                    TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.QUEEN)),
+                )
+            ]
+            * 7
         ),
-        last_trick_winner=Seat.EAST
+        last_trick_winner=Seat.EAST,
     )
     breakdown = score_round(state)
     assert any("Reine Noire" in m for m in breakdown.messages)
@@ -166,8 +171,7 @@ def test_boss_invert_scoring_4_4_tie_zeros_taker():
     )
     breakdown = score_round(state)
     assert breakdown.taker_total == 0, (
-        "Malédiction 4-4 tie should zero the taker (the cursed side that "
-        "failed to break the tie)."
+        "Malédiction 4-4 tie should zero the taker (the cursed side that failed to break the tie)."
     )
     assert any("Malédiction" in m for m in breakdown.messages)
 
@@ -183,6 +187,7 @@ def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
     correctly resolved as non-capot via `compute_trick_winners`. Lock the
     fix: both branches of `is_capot` must agree under La Rupture.
     """
+
     # Eight tricks where the raw winner is SOUTH every time. South leads
     # Spades (non-trump under trump=HEARTS); others follow with lower
     # Spades. Cross-trick rank uniqueness doesn't matter for winner
@@ -195,8 +200,7 @@ def test_is_capot_honors_rupture_in_explicit_tricks_branch() -> None:
             TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.NINE)),
         )
 
-    high = [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
-            Rank.JACK, Rank.ACE, Rank.TEN, Rank.KING]
+    high = [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN, Rank.JACK, Rank.ACE, Rank.TEN, Rank.KING]
     tricks = tuple(south_wins(r) for r in high)
 
     rupture_state = BelatroState(
@@ -247,8 +251,7 @@ def test_dix_de_der_announcement_honors_rupture() -> None:
 
     completed = tuple(
         south_wins(r)
-        for r in [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN,
-                  Rank.JACK, Rank.ACE, Rank.TEN]
+        for r in [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN, Rank.JACK, Rank.ACE, Rank.TEN]
     )
     eighth = south_wins(Rank.KING)
 
@@ -273,10 +276,10 @@ def test_dix_de_der_announcement_honors_rupture() -> None:
     # (because trick 7 already resolved to team NS). The announcement
     # should name team EW.
     from belote.game import team_of
+
     assert winners[-1] is not None
     assert team_of(winners[-1]) == 1, (
-        f"Expected Rupture to flip the 8th-trick winner to team EW, "
-        f"got {winners[-1]!r}"
+        f"Expected Rupture to flip the 8th-trick winner to team EW, got {winners[-1]!r}"
     )
 
 
@@ -329,6 +332,7 @@ def test_patched_state_rejects_only_underscore_boss_attrs() -> None:
 
     # The genuine anti-pattern must still raise.
     import pytest
+
     with pytest.raises(ValueError, match="leading-underscore"):
         proxy.patch("_kings_zero", True)
     with pytest.raises(ValueError, match="leading-underscore"):
@@ -402,10 +406,10 @@ def test_rupture_play_card_resolves_consistently_with_scoring() -> None:
 
     # Simulate trick 3: SOUTH leads ♠K, the rest follow with lower ♠.
     # Order is S → E → N → W.
-    state = play_card(state, Card(Suit.SPADES, Rank.KING))   # SOUTH
-    state = play_card(state, Card(Suit.SPADES, Rank.NINE))   # EAST
+    state = play_card(state, Card(Suit.SPADES, Rank.KING))  # SOUTH
+    state = play_card(state, Card(Suit.SPADES, Rank.NINE))  # EAST
     state = play_card(state, Card(Suit.SPADES, Rank.QUEEN))  # NORTH
-    state = play_card(state, Card(Suit.SPADES, Rank.JACK))   # WEST
+    state = play_card(state, Card(Suit.SPADES, Rank.JACK))  # WEST
 
     winners = compute_trick_winners(state, state.trump, False)
     assert len(winners) == 3

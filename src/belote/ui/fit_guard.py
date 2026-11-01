@@ -86,9 +86,7 @@ def require_minimum(
             event = reader.read_timeout(0.25)
             if event is None:
                 continue
-            if event.key in (Key.QUIT, Key.EOF):
-                raise FitAbortedError
-            if event.key == Key.CHAR and event.char and event.char.lower() == "q":
+            if event.key in (Key.QUIT, Key.EOF):  # Q arrives as Key.QUIT
                 raise FitAbortedError
     finally:
         if painted:

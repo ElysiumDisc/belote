@@ -21,9 +21,9 @@ from ..ansi import (
     white_fg,
 )
 from ..game import GameState, team_of
-from ..input import KeyEvent, KeyReader, interruptible_sleep
+from ..input import Key, KeyEvent, KeyReader, interruptible_sleep
 from ..scoring import ScoringBreakdown
-from ..stats import get_session_stats, load_stats
+from ..stats import Statistics, get_session_stats, load_stats
 from .render import display_hud, get_term_size, invalidate_diff
 
 if TYPE_CHECKING:
@@ -96,9 +96,7 @@ def announce(
     ignored the return.
     """
     term_w, term_h = get_term_size()
-    banner = ansi_center(
-        f"{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}", term_w
-    )
+    banner = ansi_center(f"{banner_bg()}{banner_fg()}  {BOLD} {message} {RESET}", term_w)
     sys.stdout.write(move(max(1, term_h - 1), 1) + clear_line() + banner)
     sys.stdout.flush()
     # The banner is painted with absolute positioning, bypassing display()'s
@@ -115,9 +113,11 @@ def announce(
         invalidate_diff()
 
 
-def achievement_toast_lines(title: str, description: str) -> list[str]:
-    """Pure builder for the achievement-unlocked toast (plain text, no SGR)."""
-    head = "★ ACHIEVEMENT UNLOCKED ★"
+def achievement_toast_lines(
+    title: str, description: str, head: str = "★ ACHIEVEMENT UNLOCKED ★"
+) -> list[str]:
+    """Pure builder for the achievement-unlocked toast (plain text, no SGR).
+    4.11.0: `head` lets cosmetic unlocks reuse it ("★ CARD BACK UNLOCKED ★")."""
     body = f"{title} — {description}"
     inner = max(len(head), len(body)) + 2
     return [
@@ -136,9 +136,12 @@ def achievement_toast(
     for screen-reader users."""
     from .. import a11y
 
-    a11y.speak(f"achievement unlocked: {achievement.title}. {achievement.description}")
+    heading = achievement.headline.strip("★ ").lower()
+    a11y.speak(f"{heading}: {achievement.title}. {achievement.description}")
     term_w, _ = get_term_size()
-    lines = achievement_toast_lines(achievement.title, achievement.description)
+    lines = achievement_toast_lines(
+        achievement.title, achievement.description, achievement.headline
+    )
     out = [hide_cursor()]
     for i, line in enumerate(lines):
         styled = f"{BOLD}{gold_fg()}{line}{RESET}"
@@ -174,9 +177,7 @@ def show_round_summary(
     term_w, term_h = get_term_size()
 
     taker_name = state.taker.name if state.taker else "?"
-    taker_team_label = (
-        "NS" if state.taker is not None and team_of(state.taker) == 0 else "EW"
-    )
+    taker_team_label = "NS" if state.taker is not None and team_of(state.taker) == 0 else "EW"
     if breakdown.taker_team == 0:
         ns_pts = breakdown.taker_total
         ew_pts = breakdown.defender_total
@@ -292,6 +293,7 @@ def show_stats(reader: KeyReader) -> None:
         dwr = (dw / dp * 100) if dp > 0 else 0
         lines.append(f"    {diff.capitalize():<8}: {dw}/{dp} ({dwr:.1f}%)")
     lines.extend(_achievement_lines(stats.achievements))
+    lines.extend(_unlock_section(stats))
 
     # Session Panel
     lines.append("")
@@ -302,25 +304,77 @@ def show_stats(reader: KeyReader) -> None:
     lines.append(f"  Points: {session.total_points}  Capots: {session.capots}")
 
     lines.append("")
-    lines.append(f"{DIM}Press [Any Key] to Return{RESET}")
+    _run_stats_modal(lines, reader)
 
-    # Cache the centered rendering per terminal width so a SIGWINCH mid-modal
-    # rebuilds the frame, but repeated reads at the same width reuse it.
-    last_w = -1
+
+def _unlock_section(stats: Statistics) -> list[str]:
+    """4.11.0: card backs / table frames with their unlock progress. Newly
+    met milestones are recorded here too (marked NEW) — e.g. a BelAtro run
+    won since the last classic round."""
+    from .. import cosmetics
+    from .customize import unlock_lines
+
+    fresh = {u.item.key for u in cosmetics.check_unlocks(stats)}
+    return ["", *unlock_lines(stats, fresh)]
+
+
+_STATS_HEADER_ROWS = 3  # title, rule, blank — pinned while scrolling
+
+
+def _stats_view_h(n_lines: int, term_h: int) -> int:
+    """Body rows visible at `term_h`: everything when it fits (+ footer),
+    else the space between the pinned header and the footer hint."""
+    if n_lines + 1 <= term_h:
+        return n_lines - _STATS_HEADER_ROWS
+    return max(1, term_h - _STATS_HEADER_ROWS - 1)
+
+
+def _stats_frame(lines: list[str], term_w: int, term_h: int, scroll: int) -> str:
+    """One paint of the Statistics modal. Taller than the terminal → the
+    title stays pinned, the body scrolls, and the footer says how."""
+    if len(lines) + 1 <= term_h:
+        view = [*lines, f"{DIM}Press [Any Key] to Return{RESET}"]
+    else:
+        body = lines[_STATS_HEADER_ROWS:]
+        view_h = _stats_view_h(len(lines), term_h)
+        last = min(len(body), scroll + view_h)
+        hint = (
+            f"{DIM}↑/↓ scroll  ←/→ page  ({scroll + 1}-{last} of {len(body)})"
+            f"  ·  any other key returns{RESET}"
+        )
+        view = [*lines[:_STATS_HEADER_ROWS], *body[scroll:last], hint]
+    return "\r\n".join(ansi_center(line, term_w) for line in view)
+
+
+_SCROLL_KEYS: dict[Key, int] = {Key.UP: -1, Key.DOWN: 1, Key.LEFT: -1, Key.RIGHT: 1}
+
+
+def _run_stats_modal(lines: list[str], reader: KeyReader) -> None:
+    # Cache the centered rendering per terminal size / scroll position so a
+    # SIGWINCH mid-modal rebuilds the frame, but repeated reads reuse it.
+    last: tuple[int, int, int] | None = None
     rendered = ""
+    scroll = 0
     try:
         while True:
-            term_w, _ = get_term_size()
-            if term_w != last_w:
-                rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
-                last_w = term_w
-            out = clear_screen() + hide_cursor()
-            sys.stdout.write("".join([out, rendered]))
+            term_w, term_h = get_term_size()
+            view_h = _stats_view_h(len(lines), term_h)
+            max_scroll = max(0, len(lines) - _STATS_HEADER_ROWS - view_h)
+            scroll = min(scroll, max_scroll)
+            if last != (term_w, term_h, scroll):
+                rendered = _stats_frame(lines, term_w, term_h, scroll)
+                last = (term_w, term_h, scroll)
+            sys.stdout.write("".join([clear_screen() + hide_cursor(), rendered]))
             sys.stdout.flush()
 
             event = reader.read()
-            if event:
-                break
+            step = _SCROLL_KEYS.get(event.key)
+            if max_scroll and step is not None:
+                if event.key in (Key.LEFT, Key.RIGHT):
+                    step *= view_h
+                scroll = max(0, min(max_scroll, scroll + step))
+                continue
+            break
     finally:
         # 4.1.1: paint a stats screen → must invalidate the diff baseline so
         # the next display() emits a full frame. Same architectural rule as

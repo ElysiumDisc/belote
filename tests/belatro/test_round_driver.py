@@ -1,4 +1,3 @@
-
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,14 +15,19 @@ from belote.game import GameState, Phase, Seat
 class MockUICallbacks(RoundUICallbacks):
     def prompt_bid(self, state: GameState):
         return None  # Pass
+
     def prompt_card(self, state: GameState):
         return state.hand_of(Seat.SOUTH)[0], state
+
     def on_card_played(self, state: GameState, seat: Seat, card: Card):
         pass
+
     def on_trick_end(self, state: GameState, winner: Seat, points: int):
         pass
+
     def on_round_end(self, breakdown: object):
         pass
+
 
 def test_score_accumulator_chip_overflow():
     # 28. ScoreAccumulator chip overflow - Verify total handles large chip counts without float precision issues.
@@ -39,11 +43,13 @@ def test_score_accumulator_chip_overflow():
     expected = large_chips * large_mult
     assert total == expected
 
+
 def test_score_accumulator_mult_zero():
     # 29. ScoreAccumulator mult ×0 edge case - If mult somehow becomes 0, verify total is 0.
     acc = ScoreAccumulator()
     state = BelatroState(hands=((), (), (), ()), _chips=1000, _mult=0.0)
     assert acc.get_total(state) == 0
+
 
 def test_multiple_jokers_same_event():
     # 30. Multiple jokers same event - Verify all jokers fire on same TrickWonEvent and results compound correctly.
@@ -51,6 +57,7 @@ def test_multiple_jokers_same_event():
         def __init__(self, amount, name):
             self.amount = amount
             self.name = name
+
         def on_trick_won(self, event, state):
             return JokerResult(add_chips=self.amount)
 
@@ -61,12 +68,15 @@ def test_multiple_jokers_same_event():
     acc.attach_jokers([joker1, joker2])
 
     state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
-    event = TrickWonEvent(winner=Seat.SOUTH, cards=(), trick_number=1, is_last=False, card_points=10, trump=None)
+    event = TrickWonEvent(
+        winner=Seat.SOUTH, cards=(), trick_number=1, is_last=False, card_points=10, trump=None
+    )
 
     state = acc.update_state(state, event)
 
     # Base 10 + Joker1 100 + Joker2 200 = 310
     assert state._chips == 310
+
 
 def test_drive_round_all_pass():
     # 43. Round driver with no bid - Verify drive_round handles all-pass gracefully and returns early.
@@ -84,13 +94,16 @@ def test_drive_round_all_pass():
 
     events: list[object] = []
     bus.subscribe(events.append)
-    with patch('belote.ai.AIPlayer.decide_bid', return_value=None), \
-         patch.object(type(partner.personality), 'should_bid', return_value=False):
+    with (
+        patch("belote.ai.AIPlayer.decide_bid", return_value=None),
+        patch.object(type(partner.personality), "should_bid", return_value=False),
+    ):
         state = drive_round(bus=bus, partner=partner, boss=None, ui_callbacks=ui, seed=42)
     assert state.phase == Phase.DEAL
     assert not any(isinstance(e, RoundEndEvent) for e in events)
     # South bids once per bidding round, two rounds per deal.
     assert ui.prompt_bid.call_count == 2 * (_MAX_REDEALS + 1)
+
 
 def test_event_bus_unsubscribe_during_emit():
     # 44. EventBus unsubscribe during emit - Verify handler can unsubscribe itself during event processing without crash.
@@ -99,10 +112,12 @@ def test_event_bus_unsubscribe_during_emit():
     def handler1(event):
         bus.unsubscribe(handler1)
         handler1.called = True
+
     handler1.called = False
 
     def handler2(event):
         handler2.called = True
+
     handler2.called = False
 
     bus.subscribe(handler1)
@@ -114,7 +129,9 @@ def test_event_bus_unsubscribe_during_emit():
     # Let's see if it's robust. If not, this test will fail and I might need to suggest a fix.
     # Actually, the requirement is to VERIFY it handles it.
 
-    event = TrickWonEvent(winner=Seat.SOUTH, cards=(), trick_number=1, is_last=False, card_points=0, trump=None)
+    event = TrickWonEvent(
+        winner=Seat.SOUTH, cards=(), trick_number=1, is_last=False, card_points=0, trump=None
+    )
 
     try:
         bus.emit(event)
@@ -125,6 +142,7 @@ def test_event_bus_unsubscribe_during_emit():
     assert handler2.called
     assert len(bus._handlers) == 1
     assert handler1 not in bus._handlers
+
 
 def test_boss_modifier_patch_persistence():
     # 45. Boss modifier patch persistence - Verify PatchedGameState patches survive across getattr/setattr calls.
@@ -138,6 +156,7 @@ def test_boss_modifier_patch_persistence():
         id = "test"
         name = "test"
         description = "test"
+
         def apply(self, state_proxy):
             # 3.1.0: unprefixed name only (the underscore-strip shim was
             # removed in modifier_patch.py).
@@ -387,12 +406,15 @@ def test_ew_ai_can_coinche_ns_taker_under_seed() -> None:
     bus = EventBus()
     partner = PartnerState()
 
-    with patch(
-        "belote.belatro.engine.round_driver._ew_should_coinche",
-        return_value=True,
-    ), patch(
-        "belote.ai.AIPlayer.decide_bid",
-        return_value=None,
+    with (
+        patch(
+            "belote.belatro.engine.round_driver._ew_should_coinche",
+            return_value=True,
+        ),
+        patch(
+            "belote.ai.AIPlayer.decide_bid",
+            return_value=None,
+        ),
     ):
         drive_round(
             bus=bus,
@@ -410,8 +432,7 @@ def test_ew_ai_can_coinche_ns_taker_under_seed() -> None:
         f"test setup: expected NS taker, got {evt.taker_seat}"
     )
     assert evt.coinche_level >= 1, (
-        f"EW AI should have coinched (heuristic forced True) but "
-        f"coinche_level={evt.coinche_level}"
+        f"EW AI should have coinched (heuristic forced True) but coinche_level={evt.coinche_level}"
     )
 
 
@@ -474,12 +495,15 @@ def _drive_ns_taker_round_with_surcoinche(
     # via `card_enhancements`.
     enhancements = {"surcoinche_unlocked": True}
 
-    with patch(
-        "belote.belatro.engine.round_driver._ew_should_coinche",
-        return_value=True,
-    ), patch(
-        "belote.ai.AIPlayer.decide_bid",
-        return_value=None,
+    with (
+        patch(
+            "belote.belatro.engine.round_driver._ew_should_coinche",
+            return_value=True,
+        ),
+        patch(
+            "belote.ai.AIPlayer.decide_bid",
+            return_value=None,
+        ),
     ):
         # Patch rng.random so the AI-surcoinche-fallback (30%) is deterministic.
         # `rng.random` is called only after the player prompt declines.
@@ -502,9 +526,7 @@ def _drive_ns_taker_round_with_surcoinche(
             )
 
     assert ui.surcoinche_prompted, "prompt_surcoinche was never called"
-    contract_events = [
-        e for e in sniffer.events if getattr(e, "taker_seat", None) is not None
-    ]
+    contract_events = [e for e in sniffer.events if getattr(e, "taker_seat", None) is not None]
     assert contract_events, "expected a RoundEndEvent with a taker"
     return contract_events[-1].coinche_level
 
@@ -541,7 +563,6 @@ def test_d3_default_callback_returns_false() -> None:
     assert cb.prompt_surcoinche(state, Seat.EAST) is False
 
 
-
 # ── 3.8.1: boss flags must be applied before acc.trigger_round_start ──
 
 
@@ -572,12 +593,16 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
     class _NoopUI(RoundUICallbacks):
         def prompt_bid(self, state):  # type: ignore[no-untyped-def, override]
             return None  # Pass — round will exhaust bids and short-circuit.
+
         def prompt_card(self, state):  # type: ignore[no-untyped-def, override]
             return state.hands[state.turn.value][0], state
+
         def on_card_played(self, state, seat, card) -> None:  # type: ignore[no-untyped-def, override]
             pass
+
         def on_trick_end(self, state, winner, points) -> None:  # type: ignore[no-untyped-def, override]
             pass
+
         def on_round_end(self, breakdown) -> None:  # type: ignore[no-untyped-def, override]
             pass
 
@@ -593,6 +618,7 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
     acc = _SpyAcc(target_score=80)
 
     import contextlib
+
     # Drive may error out without a fleshed-out UI; we only care that
     # trigger_round_start was called once and observed the patched boss flag.
     with contextlib.suppress(Exception):
@@ -602,7 +628,6 @@ def test_boss_flags_applied_before_trigger_round_start() -> None:
             ui_callbacks=_NoopUI(),
             acc=acc,
             boss=LeZeroFinal(),
-            target_score=80,
             seed=42,
         )
 
@@ -633,15 +658,20 @@ def test_drive_round_emits_to_event_bus():
     class _PassAllUI(RoundUICallbacks):
         def prompt_bid(self, state):  # type: ignore[no-untyped-def, override]
             return None
+
         def prompt_card(self, state):  # type: ignore[no-untyped-def, override]
             # Legal card: an all-pass deal now redeals, so the round may be
             # played out once the partner personality takes.
             from belote.game import legal_cards
+
             return legal_cards(state, state.turn)[0], state
+
         def on_card_played(self, state, seat, card) -> None:  # type: ignore[no-untyped-def, override]
             pass
+
         def on_trick_end(self, state, winner, points) -> None:  # type: ignore[no-untyped-def, override]
             pass
+
         def on_round_end(self, breakdown) -> None:  # type: ignore[no-untyped-def, override]
             pass
 
@@ -657,7 +687,6 @@ def test_drive_round_emits_to_event_bus():
             ui_callbacks=_PassAllUI(),
             acc=acc,
             boss=None,
-            target_score=80,
             seed=42,
         )
 
@@ -691,6 +720,7 @@ def test_raising_joker_isolated_via_transactional(caplog):
         id = "half_then_raise"
         name = "HalfThenRaise"
         description = "test fixture"
+
         def on_trick_won(self, event, state):
             # The joker's *handler* mutation comes back via JokerResult, so
             # raising before returning is the realistic shape. The accumulator
@@ -701,6 +731,7 @@ def test_raising_joker_isolated_via_transactional(caplog):
         id = "always_adds"
         name = "AlwaysAdds"
         description = "test fixture"
+
         def on_trick_won(self, event, state):
             return JokerResult(add_chips=42)
 
@@ -709,8 +740,12 @@ def test_raising_joker_isolated_via_transactional(caplog):
 
     state = BelatroState(hands=((), (), (), ()), _chips=0, _mult=1.0)
     event = TrickWonEvent(
-        winner=Seat.SOUTH, cards=(), trick_number=1,
-        is_last=False, card_points=10, trump=None,
+        winner=Seat.SOUTH,
+        cards=(),
+        trick_number=1,
+        is_last=False,
+        card_points=10,
+        trump=None,
     )
 
     with caplog.at_level(logging.ERROR, logger="belote.belatro.core.scoring"):
@@ -722,7 +757,7 @@ def test_raising_joker_isolated_via_transactional(caplog):
         f"chips={state._chips} (10 base + 42 sibling expected)."
     )
     assert any(
-        "HalfThenRaise" in rec.message or
-        (rec.exc_info and "simulated joker crash" in str(rec.exc_info[1]))
+        "HalfThenRaise" in rec.message
+        or (rec.exc_info and "simulated joker crash" in str(rec.exc_info[1]))
         for rec in caplog.records
     ), "Expected the raising joker to be logged via logger.exception."

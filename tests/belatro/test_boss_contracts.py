@@ -52,10 +52,10 @@ if TYPE_CHECKING:
 # ── Registry invariant ────────────────────────────────────────────────────
 
 
-def test_all_21_bosses_registered() -> None:
+def test_all_24_bosses_registered() -> None:
     """Audit invariant: ALL_BOSS_MODIFIERS must contain every concrete boss.
     Pinning the count surfaces accidental omissions when adding a new boss."""
-    assert len(ALL_BOSS_MODIFIERS) == 21
+    assert len(ALL_BOSS_MODIFIERS) == 24
 
 
 @pytest.mark.parametrize("boss_cls", ALL_BOSS_MODIFIERS)
@@ -99,9 +99,7 @@ def test_boss_sets_expected_flag(boss_cls: type[BossModifier], expected_flag: st
     while no unrelated field is accidentally flipped."""
     flags = boss_cls().flags()
     assert isinstance(flags, RuleVariants)
-    assert getattr(flags, expected_flag) is True, (
-        f"{boss_cls.__name__} did not set {expected_flag}"
-    )
+    assert getattr(flags, expected_flag) is True, f"{boss_cls.__name__} did not set {expected_flag}"
 
 
 def test_betrayal_arc_sets_three_flags() -> None:
@@ -151,7 +149,11 @@ def test_le_mime_zeros_event_points_in_belatro_path() -> None:
 
     rd = (
         Path(__file__).parent.parent.parent
-        / "src" / "belote" / "belatro" / "engine" / "round_driver.py"
+        / "src"
+        / "belote"
+        / "belatro"
+        / "engine"
+        / "round_driver.py"
     )
     text = rd.read_text()
     assert "declarations_zero" in text, (
@@ -239,19 +241,28 @@ def test_no_boss_id_string_branching_in_runtime() -> None:
 
     src_root = Path(__file__).parent.parent.parent / "src" / "belote"
     boss_ids = [boss_cls().id for boss_cls in ALL_BOSS_MODIFIERS]
-    pattern = re.compile(r'boss\.id\s*==')
+    pattern = re.compile(r"boss\.id\s*==")
 
-    runtime_files = [
+    # 4.11.0: scoring / game / ai became packages — scan every module in
+    # them. A missing path is a test bug (it used to be skipped silently).
+    runtime_roots = [
         src_root / "belatro" / "engine" / "round_driver.py",
         src_root / "belatro" / "core" / "scoring.py",
-        src_root / "scoring.py",
+        src_root / "scoring",
         src_root / "game.py",
-        src_root / "ai.py",
+        src_root / "ai",
     ]
+    runtime_files: list[Path] = []
+    for root in runtime_roots:
+        if root.is_dir():
+            runtime_files.extend(sorted(root.rglob("*.py")))
+        elif root.with_suffix("").is_dir():  # module later split into a package
+            runtime_files.extend(sorted(root.with_suffix("").rglob("*.py")))
+        else:
+            assert root.exists(), f"stale path in boss-contract scan: {root}"
+            runtime_files.append(root)
     offenders: list[tuple[Path, int, str]] = []
     for path in runtime_files:
-        if not path.exists():
-            continue
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             if pattern.search(line):
                 # Reject if the comparison RHS literally matches a known boss id.

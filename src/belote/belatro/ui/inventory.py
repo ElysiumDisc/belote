@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from belote.ansi import (
     BOLD,
@@ -35,7 +35,7 @@ from belote.ansi import (
     green_fg,
     white_fg,
 )
-from belote.input import Key
+from belote.input import Key, key_label, typed
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
@@ -65,6 +65,7 @@ class _InventoryEntry:
 
 _CATEGORY_ORDER: tuple[str, ...] = (
     "JOKERS",
+    "PARTNER JOKERS",
     "VOUCHERS",
     "CONSUMABLES",
     "PERMANENT BONUSES",
@@ -86,124 +87,123 @@ def _edition_tag(item: object) -> str:
     return f" [{name.capitalize()}]"
 
 
+# Edition → the detail-page line describing its per-trigger bonus.
+_EDITION_DETAIL: dict[str, str] = {
+    "foil": "Edition: Foil — +50 chips per trigger",
+    "holo": "Edition: Holo — +10 Mult per trigger",
+    "polychrome": "Edition: Polychrome — ×1.5 Mult per trigger",
+    "poly": "Edition: Polychrome — ×1.5 Mult per trigger",
+    "negative": "Edition: Negative — does not consume a joker slot",
+    "neg": "Edition: Negative — does not consume a joker slot",
+}
+
+# Contract-level reward keys, in display order, with their formats.
+_REWARD_FORMATS: tuple[tuple[str, str], ...] = (
+    ("add_chips", "+{} chips/trick"),
+    ("add_mult", "+{} Mult/trick"),
+    ("jack_9_bonus", "+{} chips per J/9"),
+    ("honor_bonus", "+{} chips per honor"),
+    ("bonus_mult_per_trick", "+{} Mult per trick >4"),
+    ("add_money", "+${} at round end"),
+    ("capot_bonus", "+{} chips on capot"),
+    ("coinche_multiplier", "+{} Mult per coinche"),
+    ("last_trick_chips", "+{} chips on Dix de Der"),
+)
+
+
+def _joker_entry(joker: object) -> _InventoryEntry:
+    """Name + edition tag; the detail page adds the edition's bonus."""
+    desc = getattr(joker, "description", "")
+    detail = [desc] if desc else []
+    edition = getattr(joker, "edition", None)
+    if edition is not None:
+        line = _EDITION_DETAIL.get(getattr(edition, "name", "").lower())
+        if line:
+            detail += ["", line]
+    return _InventoryEntry(
+        category="JOKERS",
+        title=f"{getattr(joker, 'name', '?')}{_edition_tag(joker)}",
+        detail_lines=tuple(detail),
+    )
+
+
+def _permanent_bonus_entry(run: BelAtroRun) -> _InventoryEntry | None:
+    """One composite row, only when the bonuses differ from the defaults."""
+    perm_chips = run.permanent_chips
+    perm_mult = run.permanent_mult
+    if perm_chips == 0 and perm_mult == 1.0:
+        return None
+    bits: list[str] = []
+    if perm_chips:
+        bits.append(f"+{perm_chips} chips")
+    if perm_mult != 1.0:
+        bits.append(f"×{perm_mult:.2f} Mult")
+    return _InventoryEntry(
+        category="PERMANENT BONUSES",
+        title=" · ".join(bits),
+        detail_lines=(
+            "These bonuses are seeded into the ledger at the start "
+            "of every round (see `ScoreAccumulator.trigger_round_start`).",
+            "Accrued from L'Étoile / Le Monde / planet level-ups.",
+        ),
+    )
+
+
+def _contract_level_entry(contract_id: str, reward: Any) -> _InventoryEntry:
+    reward_bits = [fmt.format(reward[key]) for key, fmt in _REWARD_FORMATS if reward.get(key)]
+    return _InventoryEntry(
+        category="CONTRACT LEVELS",
+        title=f"{contract_id}",
+        detail_lines=("; ".join(reward_bits) if reward_bits else "(no leveled effects)",),
+    )
+
+
 def _build_entries(run: BelAtroRun) -> list[_InventoryEntry]:
     """Flatten owned items into a list of `_InventoryEntry` rows.
 
     Snapshot-stable — taken once when the overlay opens so live mutations
     (a joker discarded mid-overlay) don't shift selection.
     """
-    entries: list[_InventoryEntry] = []
-
-    # Jokers — name + edition tag + description; detail page surfaces the
-    # description plus the edition's per-trigger bonus when present.
-    for joker in run.jokers:
-        name = getattr(joker, "name", "?")
-        desc = getattr(joker, "description", "")
-        title = f"{name}{_edition_tag(joker)}"
-        detail = [desc] if desc else []
-        edition = getattr(joker, "edition", None)
-        if edition is not None:
-            edition_name = getattr(edition, "name", "").lower()
-            if edition_name == "foil":
-                detail.append("")
-                detail.append("Edition: Foil — +50 chips per trigger")
-            elif edition_name == "holo":
-                detail.append("")
-                detail.append("Edition: Holo — +10 Mult per trigger")
-            elif edition_name in ("polychrome", "poly"):
-                detail.append("")
-                detail.append("Edition: Polychrome — ×1.5 Mult per trigger")
-            elif edition_name in ("negative", "neg"):
-                detail.append("")
-                detail.append("Edition: Negative — does not consume a joker slot")
-        entries.append(
-            _InventoryEntry(
-                category="JOKERS",
-                title=title,
-                detail_lines=tuple(detail),
-            )
+    entries = [_joker_entry(joker) for joker in run.jokers]
+    # 4.11.0: jokers on the partner's own slots (Le Téléphone, Le Complice).
+    entries += [
+        _InventoryEntry(
+            category="PARTNER JOKERS",
+            title=f"{getattr(joker, 'name', '?')} (partner slot)",
+            detail_lines=_joker_entry(joker).detail_lines,
         )
-
-    # Vouchers
+        for joker in run.partner.jokers
+    ]
     for voucher in run.vouchers:
-        name = getattr(voucher, "name", "?")
         desc = getattr(voucher, "description", "")
         entries.append(
             _InventoryEntry(
                 category="VOUCHERS",
-                title=name,
+                title=getattr(voucher, "name", "?"),
                 detail_lines=(desc,) if desc else (),
             )
         )
-
     # Consumables — tarots and planets held but not yet activated. 4.9.0 /
     # U5: each entry remembers its index in `run.consumables` so digit-key
     # and detail-page activation can dispatch without a second snapshot.
     for idx, consumable in enumerate(run.consumables):
-        name = getattr(consumable, "name", "?")
         desc = getattr(consumable, "description", "")
         kind = type(consumable).__name__
-        title = f"[{idx + 1}] {name} ({kind})"
         entries.append(
             _InventoryEntry(
                 category="CONSUMABLES",
-                title=title,
+                title=f"[{idx + 1}] {getattr(consumable, 'name', '?')} ({kind})",
                 detail_lines=(desc,) if desc else (),
                 consumable_idx=idx,
             )
         )
-
-    # Permanent bonuses — single composite row when non-default values exist.
-    perm_chips = run.permanent_chips
-    perm_mult = run.permanent_mult
-    if perm_chips != 0 or perm_mult != 1.0:
-        bits: list[str] = []
-        if perm_chips:
-            bits.append(f"+{perm_chips} chips")
-        if perm_mult != 1.0:
-            bits.append(f"×{perm_mult:.2f} Mult")
-        entries.append(
-            _InventoryEntry(
-                category="PERMANENT BONUSES",
-                title=" · ".join(bits),
-                detail_lines=(
-                    "These bonuses are seeded into the ledger at the start "
-                    "of every round (see `ScoreAccumulator.trigger_round_start`).",
-                    "Accrued from L'Étoile / Le Monde / planet level-ups.",
-                ),
-            )
-        )
-
+    bonus = _permanent_bonus_entry(run)
+    if bonus is not None:
+        entries.append(bonus)
     # Contract levels — each leveled planet shows up here.
-    for contract_id, reward in run.contract_levels.items():
-        if not reward:
-            continue
-        reward_bits: list[str] = []
-        if reward.get("add_chips"):
-            reward_bits.append(f"+{reward['add_chips']} chips/trick")
-        if reward.get("add_mult"):
-            reward_bits.append(f"+{reward['add_mult']} Mult/trick")
-        if reward.get("jack_9_bonus"):
-            reward_bits.append(f"+{reward['jack_9_bonus']} chips per J/9")
-        if reward.get("honor_bonus"):
-            reward_bits.append(f"+{reward['honor_bonus']} chips per honor")
-        if reward.get("bonus_mult_per_trick"):
-            reward_bits.append(f"+{reward['bonus_mult_per_trick']} Mult per trick >4")
-        if reward.get("add_money"):
-            reward_bits.append(f"+${reward['add_money']} at round end")
-        if reward.get("capot_bonus"):
-            reward_bits.append(f"+{reward['capot_bonus']} chips on capot")
-        if reward.get("coinche_multiplier"):
-            reward_bits.append(f"+{reward['coinche_multiplier']} Mult per coinche")
-        detail_body = "; ".join(reward_bits) if reward_bits else "(no leveled effects)"
-        entries.append(
-            _InventoryEntry(
-                category="CONTRACT LEVELS",
-                title=f"{contract_id}",
-                detail_lines=(detail_body,),
-            )
-        )
-
+    entries.extend(
+        _contract_level_entry(cid, reward) for cid, reward in run.contract_levels.items() if reward
+    )
     return entries
 
 
@@ -264,16 +264,8 @@ class InventoryOverlay:
                     while True:
                         self._render_detail(entries[detail_idx])
                         de = self.reader.read()
-                        if de.key in (
-                            Key.ESC, Key.QUIT, Key.EOF,
-                            Key.LEFT, Key.INVENTORY,
-                        ):
-                            break
-                        if (
-                            de.key == Key.CHAR
-                            and de.char
-                            and de.char.lower() == "a"
-                        ):
+                        # A is also the LEFT alias (= back): test the letter first.
+                        if typed(de, "a"):
                             cidx = entries[detail_idx].consumable_idx
                             if cidx is not None and self._activate_consumable_at(cidx):
                                 entries = _build_entries(self.run)
@@ -283,6 +275,15 @@ class InventoryOverlay:
                                     return
                                 selected = min(selected, len(entries) - 1)
                                 break  # pop back to list view
+                            continue
+                        if de.key in (
+                            Key.ESC,
+                            Key.QUIT,
+                            Key.EOF,
+                            Key.LEFT,
+                            Key.INVENTORY,
+                        ):
+                            break
         finally:
             invalidate_diff()
 
@@ -291,18 +292,19 @@ class InventoryOverlay:
         if not (0 <= idx < len(self.run.consumables)):
             return False
         item = self.run.consumables[idx]
-        self.run.consume(item, context=self.run)
-        return True
+        return self.run.consume(item, context=self.run)
 
     # ── rendering ────────────────────────────────────────────────────────
 
     def _term(self) -> tuple[int, int]:
         from belote.ui.render import get_term_size
+
         w, h = get_term_size()
         return w, h
 
     def _render_empty(self) -> None:
         from belote.ui.layout import vcenter_lines
+
         term_w, term_h = self._term()
         lines = [
             ansi_center(gold_fg() + BOLD + "INVENTORY" + RESET, term_w),
@@ -321,14 +323,17 @@ class InventoryOverlay:
         while True:
             event = self.reader.read()
             if event.key in (
-                Key.ESC, Key.QUIT, Key.ENTER, Key.EOF, Key.INVENTORY,
+                Key.ESC,
+                Key.QUIT,
+                Key.ENTER,
+                Key.EOF,
+                Key.INVENTORY,
             ):
                 return
 
-    def _render_list(
-        self, entries: list[_InventoryEntry], selected: int
-    ) -> None:
+    def _render_list(self, entries: list[_InventoryEntry], selected: int) -> None:
         from belote.ui.layout import vcenter_lines
+
         term_w, term_h = self._term()
         joker_count = sum(1 for e in entries if e.category == "JOKERS")
         header = (
@@ -360,13 +365,11 @@ class InventoryOverlay:
         lines.append("")
         # 4.9.0 / U5: surface the digit-activate path when consumables exist.
         has_consumables = any(e.consumable_idx is not None for e in entries)
+        close = f"Esc/{key_label('inventory')}/{key_label('quit')}"
         if has_consumables:
-            footer = (
-                "[↑/↓] move   [Enter] detail   [1-9] activate consumable   "
-                "[Esc/V/Q] close"
-            )
+            footer = f"[↑/↓] move   [Enter] detail   [1-9] activate consumable   [{close}] close"
         else:
-            footer = "[↑/↓] move   [Enter] detail   [Esc/V/Q] close"
+            footer = f"[↑/↓] move   [Enter] detail   [{close}] close"
         lines.append(ansi_center(DIM + footer + RESET, term_w))
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
@@ -374,11 +377,10 @@ class InventoryOverlay:
 
     def _render_detail(self, entry: _InventoryEntry) -> None:
         from belote.ui.layout import vcenter_lines
+
         term_w, term_h = self._term()
         lines: list[str] = [
-            ansi_center(
-                green_fg() + BOLD + f"── {entry.category} ──" + RESET, term_w
-            ),
+            ansi_center(green_fg() + BOLD + f"── {entry.category} ──" + RESET, term_w),
             "",
             ansi_center(gold_fg() + BOLD + entry.title + RESET, term_w),
             "",
@@ -390,15 +392,9 @@ class InventoryOverlay:
         lines.append("")
         # 4.9.0 / U5: show activate hint on consumable detail pages.
         if entry.consumable_idx is not None:
-            lines.append(
-                ansi_center(
-                    DIM + "[A] activate   [Esc/←/V] back to list" + RESET, term_w
-                )
-            )
+            lines.append(ansi_center(DIM + "[A] activate   [Esc/←/V] back to list" + RESET, term_w))
         else:
-            lines.append(
-                ansi_center(DIM + "[Esc/←/V] back to list" + RESET, term_w)
-            )
+            lines.append(ansi_center(DIM + "[Esc/←/V] back to list" + RESET, term_w))
 
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()

@@ -4,6 +4,7 @@
 winning team's credit by `2 ** coinche_level`. The HARD AI defender
 coinches on a strong trump hand.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -21,7 +22,9 @@ def _state(coinche_level: int = 0) -> GameState:
     return dataclasses.replace(s, coinche_level=coinche_level, taker=Seat.SOUTH)
 
 
-def _breakdown(*, taker_total: int, defender_total: int, failed: bool, taker_team: int = 0) -> ScoringBreakdown:
+def _breakdown(
+    *, taker_total: int, defender_total: int, failed: bool, taker_team: int = 0
+) -> ScoringBreakdown:
     # Minimal ScoringBreakdown for apply_round_score; only the fields it reads matter.
     return ScoringBreakdown(
         taker_team=taker_team,
@@ -173,9 +176,11 @@ def test_animation_targets_match_stored_score_under_coinche() -> None:
 
     for level, taker_failed in ((1, False), (2, False), (1, True)):
         s = _state(coinche_level=level)
-        b = _breakdown(taker_total=0 if taker_failed else 100,
-                       defender_total=162 if taker_failed else 62,
-                       failed=taker_failed)
+        b = _breakdown(
+            taker_total=0 if taker_failed else 100,
+            defender_total=162 if taker_failed else 62,
+            failed=taker_failed,
+        )
         ns_old, ew_old = s.team_scores
         taker_credit, defender_credit = coinche_adjusted_credits(b, s.coinche_level)
         if b.taker_team == 0:

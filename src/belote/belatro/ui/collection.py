@@ -18,7 +18,7 @@ from belote.ansi import (
     move,
     white_fg,
 )
-from belote.input import Key
+from belote.input import Key, key_label
 from belote.ui.render import get_term_size, invalidate_diff
 from belote.ui.text import wrap_words
 
@@ -46,8 +46,12 @@ def collection_frame(
     item_idx: int,
     term_w: int,
     term_h: int,
+    hints: dict[str, str] | None = None,
 ) -> str:
-    """Pure frame builder for the collection gallery (one full repaint)."""
+    """Pure frame builder for the collection gallery (one full repaint).
+
+    `hints` maps a category name to a one-line teaser painted under its list
+    (4.11.0: the secret joker's riddle while it is still hidden)."""
     cat_name, items = categories[cat_idx]
     out = [clear_screen(), hide_cursor()]
 
@@ -66,7 +70,8 @@ def collection_frame(
 
     # Item list (scrolls to keep the selection visible)
     start_row = 7
-    max_rows = term_h - 12
+    hint = (hints or {}).get(cat_name, "")
+    max_rows = term_h - 12 - (2 if hint else 0)
     top = collection_top(len(items), item_idx, max_rows)
     for i, item_cls in enumerate(items[top : top + max(0, max_rows)]):
         real_idx = top + i
@@ -78,18 +83,24 @@ def collection_frame(
 
     # Details for the selected item on the right
     if items:
-        out.extend(_detail_panel(items[item_idx], item_idx, discovered, start_row, term_w))
+        out.extend(_detail_panel(items[item_idx], discovered, start_row, term_w))
+
+    if hint:
+        out.append(move(term_h - 4, 1) + ansi_center(DIM + "✦ " + hint + RESET, term_w))
 
     # Footer
     out.append(
         move(term_h - 1, 1)
-        + ansi_center(light_gray_fg() + "←/→: Category  ↑/↓: Item  Esc/Q: Back" + RESET, term_w)
+        + ansi_center(
+            light_gray_fg() + f"←/→: Category  ↑/↓: Item  Esc/{key_label('quit')}: Back" + RESET,
+            term_w,
+        )
     )
     return "".join(out)
 
 
 def _detail_panel(
-    item_cls: Any, item_idx: int, discovered: Collection[str], start_row: int, term_w: int
+    item_cls: Any, discovered: Collection[str], start_row: int, term_w: int
 ) -> list[str]:
     info_col = max(40, term_w // 2)
     if item_cls.id not in discovered:
@@ -112,18 +123,41 @@ def _detail_panel(
     return out
 
 
+def collection_categories(
+    profile: Profile,
+) -> tuple[list[tuple[str, list[Any]]], dict[str, str]]:
+    """Gallery tabs and per-tab hints for `profile`.
+
+    4.11.0: secret jokers are left out entirely (not even a "???" row) until
+    the profile unlocks them; their riddle shows as the Jokers tab hint
+    instead. Bosses get their own tab (discovered when first faced).
+    """
+    from ..items.registry import registry
+    from ..run.boss import ALL_BOSS_MODIFIERS
+
+    jokers: list[Any] = []
+    riddles: list[str] = []
+    for cls in registry.jokers.values():
+        if cls.is_secret and not profile.is_unlocked(cls.id):
+            riddles.append(cls.secret_hint)
+        else:
+            jokers.append(cls)
+    categories: list[tuple[str, list[Any]]] = [
+        ("Jokers", jokers),
+        ("Tarots", list(registry.tarots.values())),
+        ("Planets", list(registry.planets.values())),
+        ("Vouchers", list(registry.vouchers.values())),
+        ("Bosses", list(ALL_BOSS_MODIFIERS)),
+    ]
+    hints = {"Jokers": riddles[0]} if riddles else {}
+    return categories, hints
+
+
 def show_collection(reader: KeyReader, profile: Profile) -> None:
     """Gallery browser for discovered items."""
     from belote.ui.fit_guard import require_minimum
 
-    from ..items.registry import registry
-
-    categories: list[tuple[str, list[Any]]] = [
-        ("Jokers", list(registry.jokers.values())),
-        ("Tarots", list(registry.tarots.values())),
-        ("Planets", list(registry.planets.values())),
-        ("Vouchers", list(registry.vouchers.values())),
-    ]
+    categories, hints = collection_categories(profile)
     cat_idx = 0
     item_idx = 0
     while True:
@@ -133,7 +167,7 @@ def show_collection(reader: KeyReader, profile: Profile) -> None:
         item_idx = min(item_idx, len(items) - 1) if items else 0
         sys.stdout.write(
             collection_frame(
-                categories, profile.discovered_items, cat_idx, item_idx, term_w, term_h
+                categories, profile.discovered_items, cat_idx, item_idx, term_w, term_h, hints
             )
         )
         sys.stdout.flush()

@@ -28,7 +28,9 @@ class LaSymbiose(Joker):
     cost = 7
     is_partner_joker = True
 
-    def on_declaration(self, event: DeclarationScoredEvent, state: dict[str, Any]) -> JokerResult | None:
+    def on_declaration(
+        self, event: DeclarationScoredEvent, state: dict[str, Any]
+    ) -> JokerResult | None:
         # Gate on points so Le Mime (declarations_zero) — which emits
         # declarations worth 0 — doesn't grant the multiplier for a
         # declaration that scored nothing. Mirrors LeMathematicien's guard.

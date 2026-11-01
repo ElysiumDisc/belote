@@ -34,6 +34,7 @@ class LeJugement(Tarot):
     def use(self, run: BelAtroRun, context: object) -> None:
         from .base import Rarity
         from .registry import registry
+
         run.last_tarot_message = None
         # Description promises a Common joker — pre-3.3.3 the pool was the
         # full unlocked set, so late-run players could roll Rare/Legendary
@@ -50,9 +51,7 @@ class LeJugement(Tarot):
             run.last_tarot_message = "Le Jugement: no jokers available to grant."
             return
         if len(run.jokers) >= run.joker_slots:
-            run.last_tarot_message = (
-                "Le Jugement: joker slots are full — no joker granted."
-            )
+            run.last_tarot_message = "Le Jugement: joker slots are full — no joker granted."
             return
         rng = run._get_rng()
         j_id = rng.choice(list(avail.keys()))
@@ -75,6 +74,7 @@ class LaPretresse(Tarot):
 
     def use(self, run: BelAtroRun, context: object) -> None:
         from .registry import registry
+
         run.last_tarot_message = None
         planets = list(registry.planets.values())
         if not planets:
@@ -170,7 +170,59 @@ class LeDiable(Tarot):
 
     id = "le_diable"
     name = "Le Diable"
-    description = "Partner always over-cuts the trick (sometimes great, sometimes ruinous) for one round."
+    description = (
+        "Partner always over-cuts the trick (sometimes great, sometimes ruinous) for one round."
+    )
 
     def use(self, run: BelAtroRun, context: object) -> None:
         run.card_enhancements["partner_overcut_round"] = True
+
+
+# ── 4.11.0 ────────────────────────────────────────────────────────────────
+
+
+class LeJuge(Tarot):
+    """Rerolls the upcoming Boss Blind — once per ante."""
+
+    id = "le_juge"
+    name = "Le Juge"
+    description = "Reroll this ante's upcoming Boss Blind into a different boss (once per ante)."
+
+    def refusal(self, run: BelAtroRun) -> str | None:
+        if run.challenge_boss_id is not None:
+            return "Le Juge: the boss is fixed in this challenge."
+        if run.boss_reroll_ante == run.boss_reroll_key():
+            return "Le Juge: this ante's boss was already rerolled."
+        return None
+
+    def use(self, run: BelAtroRun, context: object) -> None:
+        from ..run.boss import peek_upcoming_boss, roll_boss
+
+        before = peek_upcoming_boss(run)
+        after = roll_boss(run, exclude=before.id)
+        run.upcoming_boss_id = after.id
+        run.boss_reroll_ante = run.boss_reroll_key()
+        run.last_tarot_message = f"Le Juge: {before.name} → {after.name}"
+
+
+_AMOUREUX_TRUST = 2
+_AMOUREUX_FALLBACK_MONEY = 3
+
+
+class LAmoureux(Tarot):
+    """The Lovers: mends the partnership."""
+
+    id = "l_amoureux"
+    name = "L'Amoureux"
+    description = "Your partner's Trust rises by 2 (already at max: earn $3 instead)."
+
+    def use(self, run: BelAtroRun, context: object) -> None:
+        trust = run.partner.trust
+        if trust.value >= 10:
+            run.economy.money += _AMOUREUX_FALLBACK_MONEY
+            run.last_tarot_message = (
+                f"L'Amoureux: trust already full — +${_AMOUREUX_FALLBACK_MONEY}"
+            )
+            return
+        trust.value = min(10, trust.value + _AMOUREUX_TRUST)
+        run.last_tarot_message = f"L'Amoureux: partner trust now {trust.value}"

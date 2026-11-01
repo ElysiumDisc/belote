@@ -188,10 +188,7 @@ def test_tierce_charger_skips_non_ns() -> None:
 
 def test_rebelote_echo_only_on_rebelote() -> None:
     j = RebeloteEcho()
-    assert (
-        j.on_belote(BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False), {})
-        is None
-    )
+    assert j.on_belote(BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=False), {}) is None
     res = j.on_belote(BeloteAnnouncedEvent(seat=Seat.SOUTH, is_rebelote=True), {})
     assert res is not None and res.times_mult == 3.0
 
@@ -361,9 +358,7 @@ def test_partner_joker_tier_scaling_amplifies_effect() -> None:
         description = ""
         is_partner_joker = True
 
-        def on_trick_won(
-            self, event: TrickWonEvent, state: dict[str, Any]
-        ) -> JokerResult | None:
+        def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
             return JokerResult(add_chips=10)
 
     base = ScoreAccumulator(partner_tier=1)

@@ -74,9 +74,7 @@ class TournoiAnte(AnteTheme):
 
     id = "tournoi"
     name = "Le Tournoi"
-    description = (
-        "Le Tournoi — every win pays 50% extra money. Coinche always offered."
-    )
+    description = "Le Tournoi — every win pays 50% extra money. Coinche always offered."
 
     def on_ante_start(self, run: BelAtroRun) -> None:
         run.card_enhancements["always_offer_coinche"] = True

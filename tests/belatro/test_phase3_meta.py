@@ -231,7 +231,7 @@ def test_endless_ante_target_scaling() -> None:
     """
     from belote.belatro.run.ante import endless_ante
 
-    expected = int(100 * (1.5 ** 7) * 2.0 * (2.2 ** 3))
+    expected = int(100 * (1.5**7) * 2.0 * (2.2**3))
     ante = endless_ante(8, 2, 3)
     assert ante.number == 8
     assert ante.name == "Boss Blind"

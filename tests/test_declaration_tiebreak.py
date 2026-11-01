@@ -13,16 +13,21 @@ from belote.game import Carre, Seat, Sequence
 from belote.scoring import resolve_declarations
 
 _RANK_VAL = {
-    Rank.SEVEN: 1, Rank.EIGHT: 2, Rank.NINE: 3, Rank.TEN: 4,
-    Rank.JACK: 5, Rank.QUEEN: 6, Rank.KING: 7, Rank.ACE: 8,
+    Rank.SEVEN: 1,
+    Rank.EIGHT: 2,
+    Rank.NINE: 3,
+    Rank.TEN: 4,
+    Rank.JACK: 5,
+    Rank.QUEEN: 6,
+    Rank.KING: 7,
+    Rank.ACE: 8,
 }
 
 
 def _carre(rank: Rank) -> Carre:
     """Build a Carre at the given rank with four placeholder cards."""
     cards = tuple(
-        Card(suit=s, rank=rank)
-        for s in (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS)
+        Card(suit=s, rank=rank) for s in (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS)
     )
     return Carre(rank=_RANK_VAL[rank], cards=cards)
 

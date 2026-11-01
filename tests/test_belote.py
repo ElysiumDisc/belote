@@ -624,6 +624,7 @@ class TestCapot:
         assert breakdown.taker_total == CAPOT_BASE + BELOTE_POINTS + 200
         assert breakdown.taker_belote == BELOTE_POINTS
 
+
 # ---------------------------------------------------------------------------
 # 14b. Capot per contract (3.0.0 fix)
 # ---------------------------------------------------------------------------
@@ -716,7 +717,6 @@ class TestCapotPerContract:
         # Hearts trump means South's K+Q hearts trigger Belote (BELOTE_POINTS=20).
         # Plus 200 from NS sequences.
         assert breakdown.taker_total == GLOBAL_CONFIG.CAPOT_BASE + breakdown.taker_belote + 200
-
 
 
 # ---------------------------------------------------------------------------
@@ -885,34 +885,65 @@ class TestLastTrickBonus:
         # 92 + 60 + 10 = 162 (TOTAL_POINTS + LAST_TRICK_BONUS) ✓
         trick_data = [
             # T1: ♣ lead, SOUTH wins A♣ — 11 pts
-            (Card(Suit.CLUBS, Rank.ACE), Card(Suit.CLUBS, Rank.SEVEN),
-             Card(Suit.CLUBS, Rank.EIGHT), Card(Suit.CLUBS, Rank.NINE)),
+            (
+                Card(Suit.CLUBS, Rank.ACE),
+                Card(Suit.CLUBS, Rank.SEVEN),
+                Card(Suit.CLUBS, Rank.EIGHT),
+                Card(Suit.CLUBS, Rank.NINE),
+            ),
             # T2: ♣ lead, SOUTH wins 10♣ — 19 pts
-            (Card(Suit.CLUBS, Rank.TEN), Card(Suit.CLUBS, Rank.QUEEN),
-             Card(Suit.CLUBS, Rank.KING), Card(Suit.CLUBS, Rank.JACK)),
+            (
+                Card(Suit.CLUBS, Rank.TEN),
+                Card(Suit.CLUBS, Rank.QUEEN),
+                Card(Suit.CLUBS, Rank.KING),
+                Card(Suit.CLUBS, Rank.JACK),
+            ),
             # T3: ♥ lead, EAST wins 10♥ — 10 pts to EW
-            (Card(Suit.HEARTS, Rank.SEVEN), Card(Suit.HEARTS, Rank.EIGHT),
-             Card(Suit.HEARTS, Rank.NINE), Card(Suit.HEARTS, Rank.TEN)),
+            (
+                Card(Suit.HEARTS, Rank.SEVEN),
+                Card(Suit.HEARTS, Rank.EIGHT),
+                Card(Suit.HEARTS, Rank.NINE),
+                Card(Suit.HEARTS, Rank.TEN),
+            ),
             # T4: ♥ lead, EAST wins A♥ — 20 pts to EW
-            (Card(Suit.HEARTS, Rank.JACK), Card(Suit.HEARTS, Rank.QUEEN),
-             Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.ACE)),
+            (
+                Card(Suit.HEARTS, Rank.JACK),
+                Card(Suit.HEARTS, Rank.QUEEN),
+                Card(Suit.HEARTS, Rank.KING),
+                Card(Suit.HEARTS, Rank.ACE),
+            ),
             # T5: ♦ lead, EAST wins 10♦ — 10 pts to EW
-            (Card(Suit.DIAMONDS, Rank.SEVEN), Card(Suit.DIAMONDS, Rank.EIGHT),
-             Card(Suit.DIAMONDS, Rank.NINE), Card(Suit.DIAMONDS, Rank.TEN)),
+            (
+                Card(Suit.DIAMONDS, Rank.SEVEN),
+                Card(Suit.DIAMONDS, Rank.EIGHT),
+                Card(Suit.DIAMONDS, Rank.NINE),
+                Card(Suit.DIAMONDS, Rank.TEN),
+            ),
             # T6: ♦ lead, EAST wins A♦ — 20 pts to EW
-            (Card(Suit.DIAMONDS, Rank.JACK), Card(Suit.DIAMONDS, Rank.QUEEN),
-             Card(Suit.DIAMONDS, Rank.KING), Card(Suit.DIAMONDS, Rank.ACE)),
+            (
+                Card(Suit.DIAMONDS, Rank.JACK),
+                Card(Suit.DIAMONDS, Rank.QUEEN),
+                Card(Suit.DIAMONDS, Rank.KING),
+                Card(Suit.DIAMONDS, Rank.ACE),
+            ),
             # T7: ♠ TRUMP lead, NORTH wins 9♠ (trump rank: J>9>A>10>K>Q>8>7)
             # — 24 pts to NS
-            (Card(Suit.SPADES, Rank.SEVEN), Card(Suit.SPADES, Rank.EIGHT),
-             Card(Suit.SPADES, Rank.NINE), Card(Suit.SPADES, Rank.TEN)),
+            (
+                Card(Suit.SPADES, Rank.SEVEN),
+                Card(Suit.SPADES, Rank.EIGHT),
+                Card(Suit.SPADES, Rank.NINE),
+                Card(Suit.SPADES, Rank.TEN),
+            ),
             # T8 (last): ♠ TRUMP lead, SOUTH wins J♠ — 38 pts + 10 dix-de-der
-            (Card(Suit.SPADES, Rank.JACK), Card(Suit.SPADES, Rank.QUEEN),
-             Card(Suit.SPADES, Rank.KING), Card(Suit.SPADES, Rank.ACE)),
+            (
+                Card(Suit.SPADES, Rank.JACK),
+                Card(Suit.SPADES, Rank.QUEEN),
+                Card(Suit.SPADES, Rank.KING),
+                Card(Suit.SPADES, Rank.ACE),
+            ),
         ]
         tricks = tuple(
-            tuple(TrickCard(list(Seat)[i], cards[i]) for i in range(4))
-            for cards in trick_data
+            tuple(TrickCard(list(Seat)[i], cards[i]) for i in range(4)) for cards in trick_data
         )
 
         state = GameState(
@@ -944,8 +975,7 @@ class TestLastTrickBonus:
         breakdown = score_round(state)
         assert breakdown.is_capot is False
         assert breakdown.last_trick_team == 0, (
-            "Fixture invariant: NS must win the last trick for the +10 to "
-            "land on the taker side."
+            "Fixture invariant: NS must win the last trick for the +10 to land on the taker side."
         )
         # Card points NS won (92) + 10 dix-de-der = 102
         assert breakdown.table_taker_pts == 92 + LAST_TRICK_BONUS
@@ -1089,7 +1119,7 @@ def test_package_version_matches_pyproject() -> None:
         encoding="utf-8"
     )
     match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, flags=re.MULTILINE)
-    assert match is not None, "pyproject.toml is missing a top-level `version = \"…\"` line"
+    assert match is not None, 'pyproject.toml is missing a top-level `version = "…"` line'
     declared = match.group(1)
     assert __version__ == declared, (
         f"belote.__version__ is {__version__!r} but pyproject.toml declares {declared!r}. "
@@ -1214,8 +1244,6 @@ def test_anarchie_normal_belote_still_works_without_rotation() -> None:
         is_sa=False,
         se_trump=False,
     )
-    tracker, _, _, announced = _record_belote_announcement(
-        ctx, Card(Suit.HEARTS, Rank.QUEEN)
-    )
+    tracker, _, _, announced = _record_belote_announcement(ctx, Card(Suit.HEARTS, Rank.QUEEN))
     assert tracker == (True, True)
     assert announced == "Rebelote!"

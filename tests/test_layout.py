@@ -11,9 +11,11 @@ from belote.ui.layout import (
     COMPACT,
     MIN_COLS,
     MIN_ROWS,
+    MINI,
     SPACIOUS,
     STANDARD,
     choose_layout,
+    fit_table,
     fits_minimum,
 )
 from belote.variants import RuleVariants
@@ -21,13 +23,22 @@ from belote.variants import RuleVariants
 # ── choose_layout boundaries ────────────────────────────────────────────────
 
 
-def test_compact_picked_at_minimum() -> None:
+# 4.11.0: thresholds are the table's real essential height (12 + 4 × card_h);
+# before, they under-counted by 2-8 rows and the hand was cut off.
+
+
+def test_mini_picked_at_minimum() -> None:
+    assert choose_layout(80, 24) is MINI
+    assert choose_layout(200, 31) is MINI
+
+
+def test_compact_picked_at_its_threshold() -> None:
     assert choose_layout(80, 32) is COMPACT
-    assert choose_layout(95, 37) is COMPACT  # one row/col below standard
+    assert choose_layout(95, 39) is COMPACT  # one col/row below standard
 
 
 def test_standard_picked_at_its_threshold() -> None:
-    assert choose_layout(96, 38) is STANDARD
+    assert choose_layout(96, 40) is STANDARD
     assert choose_layout(119, 47) is STANDARD
 
 
@@ -36,22 +47,47 @@ def test_spacious_picked_when_room() -> None:
     assert choose_layout(200, 80) is SPACIOUS
 
 
-def test_below_minimum_falls_back_to_compact() -> None:
+def test_below_minimum_falls_back_to_mini() -> None:
     # We don't reject inside choose_layout — caller does that. We just
     # always return *something* so render code never hits a None layout.
-    assert choose_layout(40, 20) is COMPACT
+    assert choose_layout(40, 20) is MINI
 
 
 def test_fits_minimum() -> None:
-    assert fits_minimum(80, 32) is True
-    assert fits_minimum(79, 32) is False
-    assert fits_minimum(80, 31) is False
+    assert fits_minimum(80, 24) is True  # a default terminal can play
+    assert fits_minimum(79, 24) is False
+    assert fits_minimum(80, 23) is False
     assert fits_minimum(200, 60) is True
 
 
-def test_min_constants_match_compact_preset() -> None:
-    assert COMPACT.min_cols == MIN_COLS
-    assert COMPACT.min_rows == MIN_ROWS
+def test_min_constants_match_mini_preset() -> None:
+    assert MINI.min_cols == MIN_COLS
+    assert MINI.min_rows == MIN_ROWS == 24
+
+
+def test_preset_min_rows_are_the_essential_table_height() -> None:
+    for preset in ALL_LAYOUTS:
+        bare = fit_table(preset.min_cols, preset.min_rows)
+        assert bare.layout is preset
+        assert bare.height == preset.min_rows == 12 + 4 * preset.card_h
+
+
+def test_fit_adds_optional_rows_in_order_of_value() -> None:
+    tight = fit_table(80, 32)
+    assert tight.layout is COMPACT and not (tight.hand_bar or tight.readout or tight.framed)
+    roomy = fit_table(160, 70)
+    assert roomy.layout is SPACIOUS
+    assert roomy.hand_bar and roomy.mat_labels and roomy.readout and roomy.framed
+    assert roomy.spacers == 4
+    # Never the frame on 3-row cards.
+    assert not fit_table(80, 31).framed
+
+
+def test_fit_strips_last_resort_rows_below_the_floor() -> None:
+    f = fit_table(80, 23)
+    assert f.layout is MINI and not f.hints and f.height <= 23
+    f = fit_table(80, 22)
+    assert not f.hints and not f.phase_row and f.height == 22
 
 
 # ── Preset shape sanity ─────────────────────────────────────────────────────
@@ -59,10 +95,10 @@ def test_min_constants_match_compact_preset() -> None:
 
 def test_all_presets_have_increasing_dimensions() -> None:
     # SPACIOUS > STANDARD > COMPACT on every relevant axis.
-    cw_chain = [p.card_w for p in (COMPACT, STANDARD, SPACIOUS)]
-    ch_chain = [p.card_h for p in (COMPACT, STANDARD, SPACIOUS)]
-    cols_chain = [p.min_cols for p in (COMPACT, STANDARD, SPACIOUS)]
-    rows_chain = [p.min_rows for p in (COMPACT, STANDARD, SPACIOUS)]
+    cw_chain = [p.card_w for p in (MINI, COMPACT, STANDARD, SPACIOUS)]
+    ch_chain = [p.card_h for p in (MINI, COMPACT, STANDARD, SPACIOUS)]
+    cols_chain = [p.min_cols for p in (MINI, COMPACT, STANDARD, SPACIOUS)]
+    rows_chain = [p.min_rows for p in (MINI, COMPACT, STANDARD, SPACIOUS)]
     for chain in (cw_chain, ch_chain, cols_chain, rows_chain):
         assert chain == sorted(chain), f"Chain not strictly increasing: {chain}"
 
@@ -70,7 +106,7 @@ def test_all_presets_have_increasing_dimensions() -> None:
 def test_all_layouts_lookup_is_largest_first() -> None:
     # Largest first → choose_layout iterates and picks the first that fits.
     assert ALL_LAYOUTS[0] is SPACIOUS
-    assert ALL_LAYOUTS[-1] is COMPACT
+    assert ALL_LAYOUTS[-1] is MINI
 
 
 def test_compact_layout_disables_last_trick_sidebar() -> None:
@@ -151,9 +187,7 @@ def test_hud_compact_fits_in_80_cols() -> None:
     from belote.ui.render import _build_hud
 
     bar = _build_hud(_hud_state(), term_w=80, layout=COMPACT)
-    assert visible_len(bar) <= 80, (
-        f"Compact HUD overflows 80 cols: width={visible_len(bar)}"
-    )
+    assert visible_len(bar) <= 80, f"Compact HUD overflows 80 cols: width={visible_len(bar)}"
 
 
 def test_hud_handles_hide_hud_boss_under_compact() -> None:
@@ -186,9 +220,7 @@ def test_render_pads_vertically_when_terminal_taller_than_content(monkeypatch) -
     state = new_game()
     out = render_mod.render(state)
     body = out.split("\r\n")
-    first_visible = next(
-        (i for i, ln in enumerate(body) if visible_len(ln) > 0), len(body)
-    )
+    first_visible = next((i for i, ln in enumerate(body) if visible_len(ln) > 0), len(body))
     assert first_visible >= 5, (
         f"Expected vertical padding above content, got first visible at row {first_visible}"
     )
@@ -238,6 +270,7 @@ def test_keyreader_factory_returns_initialised_concrete_reader(monkeypatch) -> N
 
     # pytest's captured stdin has no fileno(); patch it for this test only.
     if _os.name != "nt":
+
         class _FakeStdin:
             def fileno(self) -> int:
                 return 0

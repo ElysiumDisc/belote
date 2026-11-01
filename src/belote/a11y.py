@@ -104,7 +104,7 @@ def _open_sink() -> TextIO:
         target = str(log_path)
     if target:
         try:
-            return Path(target).open("a", encoding="utf-8", buffering=1)  # noqa: SIM115
+            return Path(target).open("a", encoding="utf-8", buffering=1)
         except OSError:
             return sys.stderr
     return sys.stderr

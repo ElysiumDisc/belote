@@ -34,7 +34,7 @@ class Shop:
         ("foil", 0.08),
         ("holo", 0.06),
         ("poly", 0.04),
-        ("neg",  0.02),
+        ("neg", 0.02),
     )
 
     def _roll_edition(self, rng: Any) -> str:
@@ -70,8 +70,7 @@ class Shop:
         # row is simply left empty rather than offering a duplicate.
         partner = getattr(self.run, "partner", None)
         owned_ids = {
-            getattr(j, "id", None)
-            for j in [*self.run.jokers, *getattr(partner, "jokers", [])]
+            getattr(j, "id", None) for j in [*self.run.jokers, *getattr(partner, "jokers", [])]
         }
         joker_ids = [j_id for j_id in available_jokers if j_id not in owned_ids]
         if joker_ids:
@@ -125,11 +124,42 @@ class Shop:
             if self.profile:
                 self.profile.discover(v_id)
 
+        # 4.11.0 Le Téléphone: sometimes an extra Partner Joker that equips on
+        # the partner's own slots. Drawn last, and only with the voucher, so
+        # every other shop rolls exactly as before.
+        if getattr(self.run, "partner_joker_offers", False):
+            self._offer_partner_joker(rng, available_jokers, owned_ids)
+
+    # Le Téléphone: chance per shop of a partner-slot offer.
+    PARTNER_OFFER_CHANCE = 0.5
+
+    def _offer_partner_joker(self, rng: Any, available: dict[str, Any], owned: set[Any]) -> None:
+        if rng.random() >= self.PARTNER_OFFER_CHANCE:
+            return
+        offered = {getattr(i, "id", None) for i in self.inventory}
+        pool = [
+            j_id
+            for j_id, cls in available.items()
+            if cls.is_partner_joker and j_id not in owned and j_id not in offered
+        ]
+        if not pool:
+            return
+        j_id = rng.choice(pool)
+        item: Any = available[j_id]()
+        item.for_partner = True
+        self.inventory.append(item)
+        if self.profile:
+            self.profile.discover(j_id)
+
     def reroll(self) -> bool:
         """Pay to refresh the shop inventory."""
-        if self.run.economy.spend_money(self.reroll_cost):
+        cost = self.reroll_cost
+        if self.run.economy.spend_money(cost):
             self.generate_inventory()
             self.reroll_cost += 1
+            recorder = getattr(self.run, "recorder", None)
+            if recorder is not None:
+                recorder.note_reroll(cost)
             return True
         return False
 
@@ -150,6 +180,9 @@ class Shop:
             self._apply_item(item)
             self.inventory.pop(index)
             self.last_buy_failure = None
+            recorder = getattr(self.run, "recorder", None)
+            if recorder is not None:
+                recorder.note_buy(item, item.cost)
             return True
         self.last_buy_failure = "no_money"
         return False
@@ -185,6 +218,9 @@ class Shop:
         value = self.sell_value(joker)
         if value > 0:
             self.run.economy.add_money(value)
+        recorder = getattr(self.run, "recorder", None)
+        if recorder is not None:
+            recorder.note_sell(joker, value)
         return value
 
     def _can_accept(self, item: object) -> bool:
@@ -197,6 +233,9 @@ class Shop:
         from ..items.base import Edition, Joker, Voucher
 
         if isinstance(item, Joker):
+            if item.for_partner:
+                partner = self.run.partner
+                return len(partner.jokers) < partner.joker_slots
             if item.edition == Edition.NEGATIVE:
                 return True
             return len(self.run.jokers) < self.run.joker_slots
@@ -207,7 +246,11 @@ class Shop:
     def _apply_item(self, item: object) -> None:
         from ..items.base import Edition, Joker, Voucher
 
-        if isinstance(item, Joker):
+        if isinstance(item, Joker) and item.for_partner:
+            # Le Téléphone offer: the partner's own slots (capacity checked
+            # in _can_accept); on_purchase fires through equip_joker.
+            self.run.partner.equip_joker(item, self.run)
+        elif isinstance(item, Joker):
             # 3.0.0: Negative-edition jokers don't consume a slot — they grow
             # the run's slot count instead. Other editions follow the normal
             # capacity check.

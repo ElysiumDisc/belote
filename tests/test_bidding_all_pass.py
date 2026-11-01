@@ -234,6 +234,5 @@ def test_litige_pool_consumed_after_normal_round_following_redeals() -> None:
     )
     state = apply_round_score(state, success)
     assert state.litige_points == 0, (
-        f"litige pool not consumed by normal-round success: "
-        f"litige_points={state.litige_points}"
+        f"litige pool not consumed by normal-round success: litige_points={state.litige_points}"
     )

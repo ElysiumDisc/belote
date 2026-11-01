@@ -98,9 +98,7 @@ def test_la_rupture_makes_capot_unreachable() -> None:
         bm = RuleVariants(no_consecutive_team_wins=True)
         state = _drive(rng, bm, Suit.SPADES)
         bd = score_round(state)
-        assert not bd.is_capot, (
-            f"seed={seed}: capot fired under La Rupture (impossible by rule)"
-        )
+        assert not bd.is_capot, f"seed={seed}: capot fired under La Rupture (impossible by rule)"
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +137,4 @@ def test_zero_rank_flags_never_increase_table_total() -> None:
             state = _drive(rng, bm, Suit.SPADES)
             bd = score_round(state)
             total = bd.table_taker_pts + bd.table_defender_pts
-            assert total <= 162, (
-                f"{flag} seed={seed}: table total {total} exceeded 162 baseline"
-            )
+            assert total <= 162, f"{flag} seed={seed}: table total {total} exceeded 162 baseline"

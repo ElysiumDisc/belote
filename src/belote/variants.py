@@ -46,4 +46,8 @@ class RuleVariants:
     lock_trust_zero: bool = False
     # ── Presentation ────────────────────────────────────────────────────
     hide_hud: bool = False
+    # 4.11.0 (Le Bal Masqué): display-only — the opponents' cards in the first
+    # trick are drawn face-down until the trick is won. Rules / AI / legal
+    # moves still see the real cards.
+    masked_first_trick: bool = False
     hide_partner_hand: bool = False

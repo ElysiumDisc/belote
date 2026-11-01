@@ -40,9 +40,7 @@ def test_stats_shows_discovered_and_unlocked_separately(
     # Profile with 3 unlocks (default starters) and 2 discovered items.
     profile = Profile()
     profile.discovered_items.extend(["foo", "bar"])
-    monkeypatch.setattr(
-        save_mod.SaveManager, "load_profile", lambda self: profile
-    )
+    monkeypatch.setattr(save_mod.SaveManager, "load_profile", lambda self: profile)
 
     # show_stats calls load_stats() which caches into the shared manager —
     # if other tests later monkeypatch the stats_file path, the cache hides

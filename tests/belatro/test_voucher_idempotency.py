@@ -59,9 +59,7 @@ def test_voucher_double_apply_via_shop_is_noop() -> None:
     # apply() short-circuits.
     shop.inventory = [LaTelescope()]
     shop.buy_item(0)
-    assert run.economy.bonus_per_round == 1, (
-        "Second apply() leaked through the idempotency guard"
-    )
+    assert run.economy.bonus_per_round == 1, "Second apply() leaked through the idempotency guard"
 
 
 def test_each_distinct_voucher_applies_independently() -> None:

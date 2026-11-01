@@ -35,7 +35,9 @@ class LeTraitre(Joker):
 class LeDemon(Joker):
     id = "le_demon"
     name = "Le Démon"
-    description = "+3 Mult unconditionally per trick won. Partner personality permanently degrades one tier."
+    description = (
+        "+3 Mult unconditionally per trick won. Partner personality permanently degrades one tier."
+    )
     cost = 8
     is_corrupted = True
 

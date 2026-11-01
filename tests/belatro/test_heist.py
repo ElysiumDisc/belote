@@ -404,9 +404,7 @@ def test_heist_north_partner_win_counts_toward_ns_trick_chips() -> None:
     "rate,expected_mult",
     [(0, 1.0), (1, 2.0), (2, 3.0), (3, 4.0)],
 )
-def test_heist_multiplier_matches_one_plus_interest_rate(
-    rate: int, expected_mult: float
-) -> None:
+def test_heist_multiplier_matches_one_plus_interest_rate(rate: int, expected_mult: float) -> None:
     acc = _make_acc(interest_rate=rate)
     state = _make_state()
     state = acc.trigger_round_start(state)
@@ -548,9 +546,7 @@ def test_heist_la_rupture_auto_bust_when_ns_won_trick_7() -> None:
 # ── La Voûte discoverability hint (4.7.0 follow-up) ──
 
 
-def test_heist_hint_flips_profile_flag_on_first_low_interest_prompt(
-    monkeypatch, tmp_path
-) -> None:
+def test_heist_hint_flips_profile_flag_on_first_low_interest_prompt(monkeypatch, tmp_path) -> None:
     """First time the player takes a contract with interest_rate=0, the
     hint banner should fire and `Profile.seen_heist_hint` flips True.
     Subsequent calls must NOT fire again.
@@ -590,9 +586,7 @@ def test_heist_hint_flips_profile_flag_on_first_low_interest_prompt(
     assert banner_fired["count"] == 1  # unchanged
 
 
-def test_profile_seen_heist_hint_defaults_false_on_legacy_save(
-    monkeypatch, tmp_path
-) -> None:
+def test_profile_seen_heist_hint_defaults_false_on_legacy_save(monkeypatch, tmp_path) -> None:
     """A profile JSON file written before 4.7.0 won't have the
     `seen_heist_hint` key. SaveManager.load_profile must default it to
     False without bumping SCHEMA_VERSION."""
@@ -646,9 +640,7 @@ def test_prompt_heist_default_returns_false() -> None:
         def on_card_played(self, state: GameState, seat: Seat, card: Card) -> None:
             pass
 
-        def on_trick_end(
-            self, state: GameState, winner: Seat, points: int
-        ) -> None:
+        def on_trick_end(self, state: GameState, winner: Seat, points: int) -> None:
             pass
 
         def on_round_end(self, breakdown: object) -> None:

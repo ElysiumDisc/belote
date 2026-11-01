@@ -19,12 +19,8 @@ class ItemRegistry:
         # Bumped on every register_* call; the get_available_* caches key on
         # this so a re-registration invalidates the cache automatically.
         self._gen: int = 0
-        self._jokers_cache: dict[
-            tuple[int, frozenset[str] | None], dict[str, type[Joker]]
-        ] = {}
-        self._vouchers_cache: dict[
-            tuple[int, frozenset[str] | None], dict[str, type[Voucher]]
-        ] = {}
+        self._jokers_cache: dict[tuple[int, frozenset[str] | None], dict[str, type[Joker]]] = {}
+        self._vouchers_cache: dict[tuple[int, frozenset[str] | None], dict[str, type[Voucher]]] = {}
 
     def _bump(self) -> None:
         self._gen += 1
@@ -34,8 +30,7 @@ class ItemRegistry:
     def register_joker(self, joker_cls: type[Joker]) -> None:
         existing = self.jokers.get(joker_cls.id)
         assert existing is None or existing is joker_cls, (
-            f"duplicate joker id {joker_cls.id!r}: "
-            f"{existing.__name__} vs {joker_cls.__name__}"
+            f"duplicate joker id {joker_cls.id!r}: {existing.__name__} vs {joker_cls.__name__}"
         )
         self.jokers[joker_cls.id] = joker_cls
         self._bump()
@@ -43,8 +38,7 @@ class ItemRegistry:
     def register_planet(self, planet_cls: type[Planet]) -> None:
         existing = self.planets.get(planet_cls.id)
         assert existing is None or existing is planet_cls, (
-            f"duplicate planet id {planet_cls.id!r}: "
-            f"{existing.__name__} vs {planet_cls.__name__}"
+            f"duplicate planet id {planet_cls.id!r}: {existing.__name__} vs {planet_cls.__name__}"
         )
         self.planets[planet_cls.id] = planet_cls
         self._bump()
@@ -52,8 +46,7 @@ class ItemRegistry:
     def register_tarot(self, tarot_cls: type[Tarot]) -> None:
         existing = self.tarots.get(tarot_cls.id)
         assert existing is None or existing is tarot_cls, (
-            f"duplicate tarot id {tarot_cls.id!r}: "
-            f"{existing.__name__} vs {tarot_cls.__name__}"
+            f"duplicate tarot id {tarot_cls.id!r}: {existing.__name__} vs {tarot_cls.__name__}"
         )
         self.tarots[tarot_cls.id] = tarot_cls
         self._bump()
@@ -141,6 +134,8 @@ def register_all_items() -> None:
         corrupted,
         economy,
         hand_comp,
+        rivals,
+        tempo,
         trick_timing,
     )
     from .partner_jokers import passive, risky, shaper
@@ -157,10 +152,18 @@ def register_all_items() -> None:
         risky,
         coinche,
         annonces,
+        # 4.11.0 — appended last so the older pool keeps its order.
+        rivals,
+        tempo,
     ]:
         for attr_name in dir(mod):
             attr = getattr(mod, attr_name)
-            if isinstance(attr, type) and issubclass(attr, Joker) and attr is not Joker:
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, Joker)
+                and attr is not Joker
+                and attr.__module__ == mod.__name__  # skip re-exported classes
+            ):
                 registry.register_joker(attr)
 
     # Planets

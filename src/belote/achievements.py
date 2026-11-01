@@ -18,6 +18,9 @@ class Achievement:
     id: str
     title: str
     description: str
+    # Toast heading. Cosmetic unlocks (`cosmetics.Unlock.as_achievement`)
+    # reuse the toast with their own heading ("★ CARD BACK UNLOCKED ★").
+    headline: str = "★ ACHIEVEMENT UNLOCKED ★"
 
 
 # Catalog. New achievements: add a row here AND a check in
@@ -92,9 +95,7 @@ def evaluate_round(
     return newly
 
 
-def evaluate_game(
-    stats: Statistics, *, won: bool, difficulty: str
-) -> list[Achievement]:
+def evaluate_game(stats: Statistics, *, won: bool, difficulty: str) -> list[Achievement]:
     newly: list[Achievement] = []
 
     def _try(aid: str) -> None:

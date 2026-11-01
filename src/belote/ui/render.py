@@ -4,53 +4,135 @@ import os
 import signal
 import sys
 from collections.abc import Callable
-from functools import lru_cache
-from typing import Final
+from dataclasses import dataclass, replace
 
 from ..ansi import (
-    BOLD,
-    DIM,
     RESET,
-    REVERSE,
-    UNDERLINE,
     ansi_center,
-    ansi_ljust,
-    ansi_truncate,
-    banner_bg,
-    banner_fg,
-    black_fg,
-    card_back_bg,
-    card_face_bg,
     clear_to_eol,
-    face_card_bg,
-    felt_bg,
-    felt_edge_bg,
-    felt_placeholder_fg,
-    gold_fg,
     hide_cursor,
-    highlight_bg,
-    light_gray_fg,
     move,
-    red_fg,
     show_cursor,
     visible_len,
-    white_fg,
 )
 from ..ansi import (
     clear_screen as _clear_screen,
 )
 from ..context import TERMINAL
-from ..deck import Card, Rank, Suit
+from ..deck import Card
 from ..game import (
-    SANS_ATOUT_BID,
     GameState,
     Phase,
     Seat,
-    legal_bids,
-    legal_cards,
 )
 from ..themes import theme_manager
-from .layout import STANDARD, LayoutPreset, choose_layout, vcenter_lines
+from .cards import (
+    _FACE_ART as _FACE_ART,
+)
+from .cards import (
+    _PIP_ART as _PIP_ART,
+)
+from .cards import (
+    _card_back as _card_back,
+)
+from .cards import (
+    _card_back_small as _card_back_small,
+)
+from .cards import (
+    _card_face_internal as _card_face_internal,
+)
+
+# 4.11.0: split into cards / table / hud_classic; re-exported for callers.
+from .cards import (
+    _card_symbol as _card_symbol,
+)
+from .cards import (
+    _get_card_face as _get_card_face,
+)
+from .cards import card_back_lines
+from .hud_classic import (
+    _bid_hint_provider as _bid_hint_provider,
+)
+from .hud_classic import (
+    _bid_lines as _bid_lines,
+)
+from .hud_classic import (
+    _build_bid_prompt_lines as _build_bid_prompt_lines,
+)
+from .hud_classic import (
+    _build_hud as _build_hud,
+)
+from .hud_classic import (
+    _fit_hud as _fit_hud,
+)
+from .hud_classic import (
+    _phase_info as _phase_info,
+)
+from .hud_classic import (
+    set_bid_hint_provider as set_bid_hint_provider,
+)
+from .layout import TableFit, choose_layout, fit_table, vcenter_lines
+from .table import (
+    _BRAILLE_DOTS as _BRAILLE_DOTS,
+)
+from .table import (
+    _VIGNETTE_WIDTH as _VIGNETTE_WIDTH,
+)
+from .table import (
+    _felt_blank_internal as _felt_blank_internal,
+)
+from .table import (
+    _felt_pad_ns as _felt_pad_ns,
+)
+from .table import (
+    _felt_placeholder as _felt_placeholder,
+)
+from .table import (
+    _felt_segment as _felt_segment,
+)
+from .table import (
+    _felt_segment_cached as _felt_segment_cached,
+)
+from .table import (
+    _north_line as _north_line,
+)
+from .table import (
+    _pip_at as _pip_at,
+)
+from .table import (
+    _render_hand_horizontal as _render_hand_horizontal,
+)
+from .table import (
+    _render_middle_section as _render_middle_section,
+)
+from .table import (
+    _render_trick_mat as _render_trick_mat,
+)
+from .table import (
+    _render_trick_mat_framed as _render_trick_mat_framed,
+)
+from .table import (
+    _seat_label as _seat_label,
+)
+from .table import (
+    _slot_anchors as _slot_anchors,
+)
+from .table import (
+    _slot_frame_row as _slot_frame_row,
+)
+from .table import (
+    _slot_label_ns as _slot_label_ns,
+)
+from .table import (
+    _south_lines as _south_lines,
+)
+from .table import (
+    _trick_row_offsets as _trick_row_offsets,
+)
+from .table import (
+    _we_row as _we_row,
+)
+from .table import masked_seats, mat_is_framed
 
 # Tracks the (term_w, term_h, layout.name) of the previous render so we can
 # clear the screen when the layout flavour changes (avoids stale artifacts
@@ -72,45 +154,64 @@ _last_render_key: tuple[int, int, str] | None = None
 _last_emitted_lines: tuple[str, ...] | None = None
 
 
-# 4.1.0 (perf): cache `theme_manager.current_name` here so the felt-row
-# segment cache key reads a module-local instead of a method call + dict
-# lookup. Pattern mirrors `_active_palette` in `ansi.py`. Refreshed by the
-# `_refresh_theme_name_cache` callback registered against the theme manager.
-_cached_theme_name: str = theme_manager.current_name
+@dataclass(frozen=True)
+class _MatGeometry:
+    """Where the last render() put the trick mat, for `patch_trick_card`.
+
+    4.11.0: recorded instead of re-derived. The old re-derivation repeated
+    render()'s spacer thresholds by hand and ignored the decorative frame, so
+    whenever the frame was on, every patched card landed one row too high
+    (and one column off) until the next full redraw."""
+
+    first_row: int  # index of the middle section's first line (pre-centering)
+    fit: TableFit
+    framed: bool
+    rows_budget: int  # the height the table was fitted to
 
 
-def _refresh_theme_name_cache() -> None:
-    global _cached_theme_name, _last_emitted_lines
-    _cached_theme_name = theme_manager.current_name
-    # Theme change invalidates the diff baseline so the next display() emits
-    # a full frame with the new palette.
-    _last_emitted_lines = None
+# 4.11.0: rows an expansion paints over the table (top, bottom), e.g.
+# BelAtro's joker strip / trust bar at the top and its score tally at the
+# bottom. The top count includes the table's own HUD + rule rows, which the
+# overlay replaces by design. Installed per run via `set_overlay_provider`;
+# read on every frame so a visibility toggle (BelAtro's I key) applies at once.
+_overlay_provider: Callable[[], tuple[int, int]] | None = None
 
 
-theme_manager.register_callback(_refresh_theme_name_cache)
+def set_overlay_provider(provider: Callable[[], tuple[int, int]] | None) -> None:
+    """Install (or clear, with None) the expansion overlay-rows provider."""
+    global _overlay_provider
+    _overlay_provider = provider
+    invalidate_diff()
 
 
-def _trick_row_offsets(layout: LayoutPreset) -> dict[Seat, int]:
-    """Where each compass card lives inside the trick mat, given a layout.
+def _overlay_rows() -> tuple[int, int]:
+    if _overlay_provider is None:
+        return (0, 0)
+    top, bottom = _overlay_provider()
+    return max(0, top), max(0, bottom)
 
-    Mat layout (top-to-bottom):
-      row 0: top pad (1)
-      row 1: N label (1)
-      rows 2 .. 2+CH-1: N card (CH rows)
-      row 2+CH: gap (1)
-      rows 2+CH+1 .. 2+2*CH: W/E cards (CH rows)
-      row 2+2*CH+1: gap (1)
-      rows 2+2*CH+2 .. 2+3*CH+1: S card (CH rows)
-      row 3+3*CH+2: S label (1)
-      row 3+3*CH+3: bottom pad (1)
-    """
-    ch = layout.card_h
-    return {
-        Seat.NORTH: 2,
-        Seat.WEST: 2 + ch + 1,
-        Seat.EAST: 2 + ch + 1,
-        Seat.SOUTH: 2 + 2 * ch + 2,
-    }
+
+def _table_budget(term_h: int) -> tuple[int, int, int]:
+    """(rows the table may use, blank rows to keep under the HUD rule, blank
+    rows to keep at the bottom) for the current overlays."""
+    top, bottom = _overlay_rows()
+    top_extra = max(0, top - 2)  # the overlay covers the table's HUD + rule
+    return max(1, term_h - top_extra - bottom), top_extra, bottom
+
+
+_last_mat_geometry: _MatGeometry | None = None
+
+
+def _rule_with(text: str, width: int) -> str:
+    """A horizontal rule with `text` centred in it: ──── text ────."""
+    label = f" {text} " if text else ""
+    side = max(0, width - visible_len(label))
+    return "─" * (side // 2) + label + "─" * (side - side // 2)
+
+
+def _center_w(fit: TableFit) -> int:
+    term_w, _ = get_term_size()
+    return max(0, term_w - fit.layout.side_col_w * 2)
 
 
 def get_term_size() -> tuple[int, int]:
@@ -125,162 +226,6 @@ def _handle_sigwinch(_signum: int, _frame: object) -> None:
 
 if hasattr(signal, "SIGWINCH"):
     signal.signal(signal.SIGWINCH, _handle_sigwinch)
-
-
-def _card_symbol(card: Card) -> str:
-
-    suit_str = card.suit.symbol if TERMINAL.has_utf8 else card.suit.name[0]
-    return f"{card.rank.value}{suit_str}"
-
-
-# Centre art for the full-size (card_h >= 7) face, "{s}" = suit glyph.
-# Face cards + Ace: (utf8 top, ascii top, middle, utf8 bottom, ascii bottom).
-_FACE_ART: dict[Rank, tuple[str, str, str, str, str]] = {
-    Rank.JACK: ("╭━┳━╮", " ***  ", "{s}J{s}", "╰─┃─╯", " -|-  "),  # knave with sword
-    Rank.QUEEN: ("╭◊─◊╮", " (-)  ", "{s}Q{s}", "╰─♥─╯", " -v-  "),  # jewelled headdress
-    Rank.KING: ("╭┻━┻╮", " /=\\  ", "{s}K{s}", "╰─┴─╯", " ---  "),  # crown
-    Rank.ACE: ("╭─◆─╮", "*-+-*", " {s}A{s} ", "╰─◆─╯", "*-+-*"),  # wreath
-}
-# Pip cards: three rows of suit pips in a recognisable pattern.
-_PIP_ART: dict[Rank, tuple[str, str, str]] = {
-    Rank.SEVEN: ("{s}   {s}", "  {s}  ", "{s}   {s}"),
-    Rank.EIGHT: ("{s}   {s}", "{s}   {s}", "{s}   {s}"),
-    Rank.NINE: ("{s} {s} {s}", "{s}   {s}", "{s} {s} {s}"),
-    Rank.TEN: ("{s} {s} {s}", "{s} {s} {s}", "{s}   {s}"),
-}
-
-
-@lru_cache(maxsize=8192)
-def _card_face_internal(
-    card: Card,
-    selected: bool,
-    legal: bool,
-    theme_name: str,
-    has_utf8: bool,
-    card_w: int,
-    card_h: int,
-) -> list[str]:
-    """Render a card as `card_h` lines of width `card_w` (cached).
-
-    `card_h` must be ≥ 4 (top + at least one inner + corners + bottom).
-    Standard layout (9×7) gets the full Art Nouveau face art; smaller layouts
-    fall back to a minimal rank-corner-and-suit design that fits the tighter
-    inner area.
-    """
-    rank_str = card.rank.value
-    suit_sym = card.suit.symbol if has_utf8 else card.suit.name[0]
-
-    is_face = card.rank in (Rank.JACK, Rank.QUEEN, Rank.KING)
-
-    color = red_fg() if card.suit.is_red else black_fg()
-
-    if selected:
-        bg_code = highlight_bg()
-    elif is_face:
-        bg_code = face_card_bg()
-    else:
-        bg_code = card_face_bg()
-
-    prefix = "" if legal else DIM
-    inner_w = card_w - 2
-
-    # Both corners carry rank+suit (GRIMAUD-style index):
-    #   top-left: "A♠" / "10♥" — 3 visible cells
-    #   bottom-right mirror.
-    if inner_w >= 3:
-        tl_index = f"{rank_str.ljust(2)}{suit_sym}"
-        br_index = f"{suit_sym}{rank_str.rjust(2)}"
-        index_w = 3
-    else:
-        # Defensive fallback for impossibly-narrow layouts.
-        tl_index = rank_str.ljust(2)
-        br_index = rank_str.rjust(2)
-        index_w = 2
-
-    # Ornate border characters
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = (
-        ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
-    )
-
-    def _line(content: str) -> str:
-        return f"{prefix}{bg_code}{color}{b_v}{content}{b_v}{RESET}"
-
-    top_border = f"{prefix}{bg_code}{color}{b_tl}{b_h * inner_w}{b_tr}{RESET}"
-    bottom_border = f"{prefix}{bg_code}{color}{b_bl}{b_h * inner_w}{b_br}{RESET}"
-
-    # Standard / spacious: room for 3-row centre art between the index corners.
-    # Compact (card_h <= 5): just index corners and a single suit row.
-    if card_h >= 7:
-        face = _FACE_ART.get(card.rank)
-        if face is not None:
-            utf_top, ascii_top, mid, utf_bot, ascii_bot = face
-            raw = (utf_top if has_utf8 else ascii_top, mid, utf_bot if has_utf8 else ascii_bot)
-        else:
-            raw = _PIP_ART.get(card.rank, ("", "{s}", ""))
-        # Center, then truncate/pad to inner_w (handles card_w other than 9).
-        art_top, art_mid, art_bot = (
-            r.replace("{s}", suit_sym).center(inner_w)[:inner_w].ljust(inner_w) for r in raw
-        )
-
-        idx_pad = max(0, inner_w - index_w)
-        rows = [
-            top_border,
-            _line(f"{tl_index}{' ' * idx_pad}"),
-            _line(art_top),
-            _line(art_mid),
-            _line(art_bot),
-            _line(f"{' ' * idx_pad}{br_index}"),
-            bottom_border,
-        ]
-        # If a non-standard taller height was requested, add filler rows above
-        # the bottom corner so total length == card_h.
-        while len(rows) < card_h:
-            rows.insert(-2, _line(" " * inner_w))
-        return rows[:card_h]
-
-    # Compact path (card_h == 5 typically): 3 inner rows, no Art Nouveau.
-    # Layout: top-index | suit/face indicator | bottom-index.
-    if is_face:
-        center = f"{suit_sym}{rank_str}{suit_sym}".center(inner_w)
-    else:
-        center = suit_sym.center(inner_w)
-    center = center[:inner_w].ljust(inner_w)
-
-    idx_pad = max(0, inner_w - index_w)
-    rows = [
-        top_border,
-        _line(f"{tl_index}{' ' * idx_pad}"),
-        _line(center),
-        _line(f"{' ' * idx_pad}{br_index}"),
-        bottom_border,
-    ]
-    while len(rows) < card_h:
-        rows.insert(-2, _line(" " * inner_w))
-    return rows[:card_h]
-
-
-def _get_card_face(
-    card: Card,
-    selected: bool = False,
-    legal: bool = True,
-    layout: LayoutPreset = STANDARD,
-) -> list[str]:
-    """Helper to call cached _card_face with current global state.
-
-    Uses the module-local `_cached_theme_name` (kept in sync by the theme
-    callback) instead of the live `theme_manager.current_name` property to
-    skip a property lookup + attribute dereference per card render
-    (~52 calls per game frame).
-    """
-    return _card_face_internal(
-        card,
-        selected,
-        legal,
-        _cached_theme_name,
-        TERMINAL.has_utf8,
-        layout.card_w,
-        layout.card_h,
-    )
 
 
 def clear_card_cache() -> None:
@@ -406,9 +351,7 @@ def pulse_winner_glow(winner: Seat, reader: object | None = None) -> None:
     has_reader = reader is not None and hasattr(reader, "read_timeout")
     try:
         for prefix in frames:
-            _sys.stdout.write(
-                move(row, 1) + ansi_center(prefix + body + RESET, term_w)
-            )
+            _sys.stdout.write(move(row, 1) + ansi_center(prefix + body + RESET, term_w))
             _sys.stdout.flush()
             if has_reader:
                 event = reader.read_timeout(0.08)  # type: ignore[union-attr]
@@ -420,708 +363,6 @@ def pulse_winner_glow(winner: Seat, reader: object | None = None) -> None:
                 _time.sleep(0.08)
     finally:
         invalidate_diff()
-
-
-@lru_cache(maxsize=128)
-def _card_back(theme_name: str, has_utf8: bool, card_w: int, card_h: int) -> list[str]:
-    """Render a face-down card with an ornate pattern, sized to (card_w, card_h)."""
-    inner_w = card_w - 2
-    inner_h = card_h - 2  # rows between the borders
-
-    # Decorative lattice pattern for the back, sized to inner_w
-    fill = ("░▒▓▒░" if has_utf8 else "XXXXX")
-    # Centre the fill in inner_w cells
-    pattern_row = (" " + fill + " ").center(inner_w)[:inner_w].ljust(inner_w)
-
-    b_tl, b_tr, b_bl, b_br, b_h, b_v = (
-        ("╔", "╗", "╚", "╝", "═", "║") if has_utf8 else ("+", "+", "+", "+", "-", "|")
-    )
-
-    res = [f"{card_back_bg()}{b_tl}{b_h * inner_w}{b_tr}{RESET}"]
-    for _ in range(inner_h):
-        res.append(f"{card_back_bg()}{b_v}{pattern_row}{b_v}{RESET}")
-    res.append(f"{card_back_bg()}{b_bl}{b_h * inner_w}{b_br}{RESET}")
-    return res
-
-
-def _card_back_small() -> str:
-    """Single-line face-down card for opponent hand display."""
-    char = "▓▓" if TERMINAL.has_utf8 else "[]"
-    return f"{card_back_bg()}{char}{RESET}"
-
-
-@lru_cache(maxsize=32)
-def _felt_blank_internal(width: int, theme_name: str) -> str:
-    return felt_bg() + " " * width + RESET
-
-
-# 3.9.4 felt-mat polish ────────────────────────────────────────────────────
-# Sparse braille texture stamped on blank felt cells. Pure function of
-# (row_id, col) so the render-diff layer (display(), line ~956+) can still
-# skip unchanged rows. Never random, never time-dependent.
-_BRAILLE_DOTS: Final = "⠁⠂⠄⡀⠈⠐⠠⢀"
-# Cells from each mat edge that use felt_edge_bg (vignette band).
-_VIGNETTE_WIDTH: Final = 2
-
-
-@lru_cache(maxsize=8192)
-def _pip_at(row_id: int, col: int) -> str | None:
-    # Pure deterministic function of (row_id, col). Called once per non-edge
-    # felt cell on a cache-miss path of `_felt_segment_cached`; the lru_cache
-    # collapses the second-and-later hits within a frame. UTF-8 fallback is
-    # captured in `TERMINAL.has_utf8` which is process-constant, so the cache
-    # entry is stable for the process lifetime. 4.1.0.
-    # 4.9.5 (P1): bumped 4096→8192 — a spacious-layout mat (term_w ≥ 120) can
-    # need >5000 distinct (row_id, col) keys per frame, which thrashed the
-    # 4096 cache and recomputed ~1000 cells every frame.
-    if not TERMINAL.has_utf8:
-        return None
-    if ((row_id * 31 + col * 17) % 23) >= 2:
-        return None
-    return _BRAILLE_DOTS[(row_id * 7 + col * 13) % 8]
-
-
-@lru_cache(maxsize=4096)
-def _felt_segment_cached(
-    width: int,
-    row_id: int,
-    col_offset: int,
-    mat_w: int,
-    theme_name: str,
-    has_utf8: bool,
-    top_or_bottom: bool,
-) -> str:
-    """`width` cells of felt starting at column [col_offset, col_offset+width).
-
-    `mat_w` is the total mat width — used to decide which cells fall in the
-    vignette band (leftmost / rightmost `_VIGNETTE_WIDTH` cols). On the top
-    or bottom row of the mat, the entire row uses the edge color.
-    """
-    if width <= 0:
-        return ""
-
-    base = felt_bg()
-    edge = felt_edge_bg()
-    pip_fg = felt_placeholder_fg()
-
-    parts: list[str] = []
-    for i in range(width):
-        col = col_offset + i
-        is_edge_col = col < _VIGNETTE_WIDTH or col >= mat_w - _VIGNETTE_WIDTH
-        is_edge = top_or_bottom or is_edge_col
-        bg_seq = edge if is_edge else base
-        glyph = None if is_edge else _pip_at(row_id, col)
-        if glyph is not None:
-            parts.append(pip_fg + bg_seq + glyph)
-        else:
-            parts.append(bg_seq + " ")
-    parts.append(RESET)
-    return "".join(parts)
-
-
-def _felt_segment(
-    width: int, row_id: int, col_offset: int, mat_w: int, *, top_or_bottom: bool = False
-) -> str:
-    # 4.1.0: read the cached theme name instead of querying the manager on
-    # every felt-row call. The cache is refreshed by `_refresh_theme_name_cache`
-    # registered against `theme_manager.register_callback` above.
-    return _felt_segment_cached(
-        width, row_id, col_offset, mat_w,
-        _cached_theme_name, TERMINAL.has_utf8, top_or_bottom,
-    )
-
-
-def _felt_placeholder(layout: LayoutPreset = STANDARD) -> list[str]:
-    """Card-sized dashed outline on the felt — shown for an empty trick slot."""
-    inner_w = layout.card_w - 2
-    dim = felt_placeholder_fg()
-    top = felt_bg() + dim + "┌" + "─" * inner_w + "┐" + RESET
-    mid = felt_bg() + dim + "│" + " " * inner_w + "│" + RESET
-    bottom = felt_bg() + dim + "└" + "─" * inner_w + "┘" + RESET
-    return [top] + [mid] * (layout.card_h - 2) + [bottom]
-
-
-def _slot_anchors(center_w: int, cw: int) -> tuple[int, int, int]:
-    """Horizontal column starts for the N/S, W, E slots inside the centre band."""
-    n_s_start = max(0, (center_w - cw) // 2)
-    w_start = max(0, center_w // 4 - cw // 2)
-    e_start = max(0, 3 * center_w // 4 - cw // 2)
-    return n_s_start, w_start, e_start
-
-
-def _slot_frame_row(
-    center_w: int,
-    layout: LayoutPreset,
-    segments: tuple[str, ...],
-    *,
-    row_id: int = 0,
-    top_or_bottom: bool = False,
-) -> str:
-    """Build a felt row with `─` segments above/below the named slots.
-
-    segments is a subset of {"N", "S", "W", "E"}; the corresponding slot
-    columns receive a thin horizontal frame line in the felt-placeholder dim
-    colour. All other cells use the felt segment (vignette + pip overlay).
-    """
-    cw = layout.card_w
-    n_s_start, w_start, e_start = _slot_anchors(center_w, cw)
-    h_char = "─" if TERMINAL.has_utf8 else "-"
-    dim = felt_placeholder_fg()
-
-    # Mark which columns are frame cells; the rest get felt-segment treatment.
-    is_frame = [False] * center_w
-    seg_starts = {"N": n_s_start, "S": n_s_start, "W": w_start, "E": e_start}
-    for seg in segments:
-        start = seg_starts[seg]
-        for i in range(start, min(center_w, start + cw)):
-            is_frame[i] = True
-
-    out: list[str] = []
-    i = 0
-    while i < center_w:
-        if is_frame[i]:
-            j = i
-            while j < center_w and is_frame[j]:
-                j += 1
-            out.append(felt_bg() + dim + h_char * (j - i) + RESET)
-            i = j
-        else:
-            j = i
-            while j < center_w and not is_frame[j]:
-                j += 1
-            out.append(_felt_segment(j - i, row_id, i, center_w, top_or_bottom=top_or_bottom))
-            i = j
-    return "".join(out)
-
-
-def _felt_pad_ns(
-    content: str, center_w: int, layout: LayoutPreset, *, row_id: int = 0
-) -> str:
-    """Centre a N/S card line on felt and inject │ borders one cell outside it."""
-    cw = layout.card_w
-    n_s_start, _, _ = _slot_anchors(center_w, cw)
-    v = "│" if TERMINAL.has_utf8 else "|"
-    dim = felt_placeholder_fg()
-
-    has_left = n_s_start > 0
-    right_total = max(0, center_w - n_s_start - cw)
-    has_right = right_total > 0
-    left_blank = max(0, n_s_start - 1)
-    right_blank = max(0, right_total - 1)
-
-    # Column offsets for the felt segments either side of the centred card.
-    right_blank_start = n_s_start + cw + (1 if has_right else 0)
-
-    parts: list[str] = []
-    parts.append(_felt_segment(left_blank, row_id, 0, center_w))
-    if has_left:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(content)
-    if has_right:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(_felt_segment(right_blank, row_id, right_blank_start, center_w))
-    return "".join(parts)
-
-
-def _slot_label_ns(
-    label_text: str, center_w: int, layout: LayoutPreset, *, row_id: int = 0
-) -> str:
-    """N/S compass label centred inside the slot, with │ slot borders."""
-    cw = layout.card_w
-    vlen = visible_len(label_text)
-    pad = max(0, cw - vlen)
-    lpad = pad // 2
-    rpad = pad - lpad
-    inner = felt_bg() + " " * lpad + RESET + label_text + felt_bg() + " " * rpad + RESET
-    return _felt_pad_ns(inner, center_w, layout, row_id=row_id)
-
-
-def _we_row(
-    w_line: str, e_line: str, center_w: int, layout: LayoutPreset, *, row_id: int = 0
-) -> str:
-    """Build the W+E card row with │ borders flanking each card."""
-    cw = layout.card_w
-    _, w_start, e_start = _slot_anchors(center_w, cw)
-    mid_gap = max(0, e_start - w_start - cw)
-    r_pad = max(0, center_w - e_start - cw)
-    v = "│" if TERMINAL.has_utf8 else "|"
-    dim = felt_placeholder_fg()
-
-    has_w_left = w_start > 0
-    has_w_right_and_e_left = mid_gap >= 2
-    has_e_right = r_pad > 0
-
-    w_left_blank = max(0, w_start - 1)
-    mid_blank = max(0, mid_gap - (2 if has_w_right_and_e_left else 0))
-    e_right_blank = max(0, r_pad - 1)
-
-    # Column offsets for the inter-card felt segments.
-    mid_blank_start = w_start + cw + (1 if has_w_right_and_e_left else 0)
-    e_right_blank_start = e_start + cw + (1 if has_e_right else 0)
-
-    parts: list[str] = []
-    parts.append(_felt_segment(w_left_blank, row_id, 0, center_w))
-    if has_w_left:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(w_line)
-    if has_w_right_and_e_left:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(_felt_segment(mid_blank, row_id, mid_blank_start, center_w))
-    if has_w_right_and_e_left:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(e_line)
-    if has_e_right:
-        parts.append(felt_bg() + dim + v + RESET)
-    parts.append(_felt_segment(e_right_blank, row_id, e_right_blank_start, center_w))
-    return "".join(parts)
-
-
-def _render_trick_mat(
-    seat_map: dict[Seat, Card], center_w: int, layout: LayoutPreset = STANDARD
-) -> list[str]:
-    """Felt mat with full card graphics at compass positions.
-
-    Total height = 6 + 3*card_h rows (compact: 21, standard: 27, spacious: 33).
-    Each slot is wrapped by a thin frame drawn in the felt-placeholder colour
-    on the cells immediately surrounding the card area, so a played card
-    always reads as anchored within its player's slot. Blank felt cells carry
-    a deterministic braille pip overlay and a left/right vignette band.
-    """
-
-    def slot(seat: Seat) -> list[str]:
-        return (
-            _get_card_face(seat_map[seat], layout=layout)
-            if seat in seat_map
-            else _felt_placeholder(layout)
-        )
-
-    n_card = slot(Seat.NORTH)
-    w_card = slot(Seat.WEST)
-    e_card = slot(Seat.EAST)
-    s_card = slot(Seat.SOUTH)
-
-    ch = layout.card_h
-    mat_h = 6 + 3 * ch  # total mat height — needed for top/bottom row markers
-
-    rows: list[str] = []
-
-    def row_id() -> int:
-        # The pip overlay is a pure function of (row_id, col); using the
-        # current row index keeps the pattern stable across re-renders so the
-        # display() diff layer can still skip unchanged rows.
-        return len(rows)
-
-    def is_top_or_bottom() -> bool:
-        return len(rows) == 0 or len(rows) == mat_h - 1
-
-    rows.append(_slot_frame_row(
-        center_w, layout, ("N",), row_id=row_id(), top_or_bottom=is_top_or_bottom()
-    ))
-    rows.append(_slot_label_ns(f"{light_gray_fg()}N{RESET}", center_w, layout, row_id=row_id()))
-    for line in n_card:
-        rows.append(_felt_pad_ns(line, center_w, layout, row_id=row_id()))
-    rows.append(_slot_frame_row(center_w, layout, ("N", "W", "E"), row_id=row_id()))
-    for i in range(ch):
-        rows.append(_we_row(w_card[i], e_card[i], center_w, layout, row_id=row_id()))
-    rows.append(_slot_frame_row(center_w, layout, ("W", "E", "S"), row_id=row_id()))
-    for line in s_card:
-        rows.append(_felt_pad_ns(line, center_w, layout, row_id=row_id()))
-    rows.append(_slot_label_ns(f"{light_gray_fg()}S{RESET}", center_w, layout, row_id=row_id()))
-    rows.append(_slot_frame_row(
-        center_w, layout, ("S",), row_id=row_id(), top_or_bottom=is_top_or_bottom()
-    ))
-
-    return rows  # 6 + 3*ch rows total
-
-
-# Decorative outer frame for the trick mat (STANDARD / SPACIOUS only).
-# COMPACT (80×32) has no row budget for the extra wrapper.
-def _render_trick_mat_framed(
-    seat_map: dict[Seat, Card], center_w: int, layout: LayoutPreset
-) -> list[str]:
-    """Wrap _render_trick_mat with a 1-cell decorative border + corner glyphs.
-
-    Reserves 2 columns (left + right border) and 2 rows (top + bottom border).
-    The inner mat is drawn at width center_w - 2.
-    """
-    if center_w < 8 or not TERMINAL.has_utf8:
-        return _render_trick_mat(seat_map, center_w, layout)
-
-    inner_w = center_w - 2
-    inner = _render_trick_mat(seat_map, inner_w, layout)
-
-    dim = felt_placeholder_fg()
-    edge = felt_edge_bg()
-    tl, tr, bl, br, h, v, corner = "╔", "╗", "╚", "╝", "═", "║", "◆"
-
-    # Place corner ornaments at ~⅓ and ⅔ of the top/bottom borders.
-    a1 = max(1, inner_w // 3)
-    a2 = max(a1 + 1, (2 * inner_w) // 3)
-
-    def horizontal(left: str, right: str) -> str:
-        chars = [h] * inner_w
-        if a1 < inner_w:
-            chars[a1] = corner
-        if a2 < inner_w:
-            chars[a2] = corner
-        return edge + dim + left + "".join(chars) + right + RESET
-
-    top = horizontal(tl, tr)
-    bot = horizontal(bl, br)
-    side = edge + dim + v + RESET
-
-    return [top] + [side + row + side for row in inner] + [bot]
-
-
-def _render_hand_horizontal(
-    cards: tuple[Card, ...],
-    selection: int | None,
-    legal: tuple[Card, ...],
-    term_w: int,
-    layout: LayoutPreset = STANDARD,
-    trump: Suit | None = None,
-    show_readout: bool = True,
-) -> list[str]:
-    """Render South's hand horizontally, already centered to term_w.
-
-    Below the cards we add:
-      - a `card_w`-wide highlight bar in highlight_bg under the selected card
-        (replaces the bare ▲ cursor; clearer on busy felt backgrounds);
-      - if `show_readout` (only when the terminal has row slack), a centered
-        card-name readout like `► A♠ — Trump ◄`, color-coded by suit / trump
-        / legality. Suppressed at min layout sizes to preserve room for the
-        south hand at the bottom of the screen.
-    """
-    if not cards:
-        return [""]
-
-    # Build each card's card_h lines
-    legal_set = set(legal)
-    card_line_groups: list[list[str]] = [
-        _get_card_face(c, selected=(i == selection), legal=(c in legal_set), layout=layout)
-        for i, c in enumerate(cards)
-    ]
-
-    # Join cards horizontally with a layout.card_gap-space gap
-    gap = " " * layout.card_gap
-    slot_w = layout.card_w + len(gap)  # visible width of one card slot
-    total_hand_w = len(cards) * slot_w - len(gap)  # visible width of full hand
-
-    # Compute left padding that ansi_center will add — we need this for the cursor
-    left_pad = max(0, (term_w - total_hand_w) // 2)
-
-    # 4.9.0 / U1: lift selected card 1 row above the others (deferred C1).
-    # When `selection` is set, output has card_h + 1 rows; the selected card
-    # paints at rows [0..card_h-1] while the others paint at rows [1..card_h].
-    # Blank cells are bare spaces so the felt background shows through.
-    has_lift = selection is not None and 0 <= selection < len(cards)
-    n_rows = layout.card_h + 1 if has_lift else layout.card_h
-    blank_card_line = " " * layout.card_w
-
-    rows: list[str] = []
-    for row_idx in range(n_rows):
-        if has_lift:
-            parts: list[str] = []
-            for i, group in enumerate(card_line_groups):
-                src_idx = row_idx if i == selection else row_idx - 1
-                if 0 <= src_idx < layout.card_h:
-                    parts.append(group[src_idx])
-                else:
-                    parts.append(blank_card_line)
-            raw = gap.join(parts)
-        else:
-            raw = gap.join(group[row_idx] for group in card_line_groups)
-        rows.append(ansi_center(raw, term_w))  # ← ANSI-aware centering
-
-    if selection is not None and 0 <= selection < len(cards):
-        # Highlight bar — `card_w` cells in highlight_bg directly under the
-        # selected card. ANSI-positioned via leading spaces; no escape pollution
-        # past the bar because we RESET at the end.
-        bar_col = left_pad + selection * slot_w
-        rows.append(" " * bar_col + highlight_bg() + " " * layout.card_w + RESET)
-
-        if show_readout:
-            card = cards[selection]
-            is_trump = trump is not None and (
-                card.suit == trump or trump == Suit.TOUT_ATOUT
-            )
-            is_legal = card in legal_set
-            suit_color = (
-                gold_fg() if is_trump
-                else (red_fg() if card.suit.is_red else white_fg())
-            )
-            if not is_legal:
-                suit_color = light_gray_fg()
-            tag = " — Trump" if is_trump else ("" if is_legal else " — Illegal")
-            label = (
-                f"{suit_color}► {BOLD}{card.rank.value}{card.suit.symbol}{RESET}"
-                f"{suit_color}{tag} ◄{RESET}"
-            )
-            rows.append(ansi_center(label, term_w))
-
-    return rows
-
-
-def _seat_label(seat: Seat, state: GameState) -> str:
-    """Colored seat label, highlighted when it's that seat's turn."""
-    if seat == Seat.SOUTH:
-        name = "You"
-    elif seat == Seat.NORTH:
-        name = "Partner"
-    else:
-        name = seat.name
-
-    if state.turn == seat:
-        return f"{BOLD}{gold_fg()}{name} >>{RESET}"
-    return f"{BOLD}{white_fg()}{name}{RESET}"
-
-
-def _render_middle_section(
-    state: GameState, term_w: int, layout: LayoutPreset = STANDARD
-) -> list[str]:
-    """Build the 3-column middle section: WEST | green felt mat | EAST."""
-    west_hand = state.hand_of(Seat.WEST)
-    east_hand = state.hand_of(Seat.EAST)
-
-    side_col_w = layout.side_col_w
-    center_w = max(0, term_w - side_col_w * 2)
-    mat_height = 6 + 3 * layout.card_h
-
-    # ── Center column (trick area / bidding up-card) ──────────────────────────
-    center_rows = []
-    if state.phase == Phase.BIDDING and state.up_card:
-        # Show the up-card in the center
-        up_face = _get_card_face(state.up_card, layout=layout)
-        center_rows = [
-            ansi_center(f"{light_gray_fg()}UP CARD{RESET}", 20),
-            "",
-        ]
-        for row in up_face:
-            center_rows.append(ansi_center(row, 20))
-        center_rows.append("")
-
-        # Pad to match trick mat height
-        while len(center_rows) < mat_height:
-            center_rows.insert(0, "")
-            if len(center_rows) < mat_height:
-                center_rows.append("")
-    else:
-        trick = state.current_trick
-        seat_map: dict[Seat, Card] = {tc.seat: tc.card for tc in trick}
-        # Decorative frame costs +2 rows. Only fire when the terminal has at
-        # least 2 rows of slack over the chosen layout's minimum — otherwise
-        # vcenter would truncate the bottom of the screen.
-        _, term_h = get_term_size()
-        if term_h >= layout.min_rows + 2:
-            center_rows = _render_trick_mat_framed(seat_map, center_w, layout)
-        else:
-            center_rows = _render_trick_mat(seat_map, center_w, layout)
-
-    n_rows = len(center_rows)
-
-    # ── Left column (WEST) — vertically centred in the mat ───────────────────
-    w_label = _seat_label(Seat.WEST, state)
-    w_cards = f"{_card_back_small()} " * min(len(west_hand), 4)
-    w_count = f"{light_gray_fg()}({len(west_hand)} left){RESET}"
-
-    left_rows: list[str] = [""] * n_rows
-    mid = n_rows // 2
-    left_rows[mid - 1] = w_label
-    left_rows[mid] = w_cards
-    left_rows[mid + 1] = w_count
-
-    # ── Right column (EAST) — vertically centred in the mat ──────────────────
-    e_label = _seat_label(Seat.EAST, state)
-    e_cards = f"{_card_back_small()} " * min(len(east_hand), 4)
-    e_count = f"{light_gray_fg()}({len(east_hand)} left){RESET}"
-
-    right_rows: list[str] = [""] * n_rows
-    right_rows[mid - 3] = e_label
-    right_rows[mid - 2] = e_cards
-    right_rows[mid - 1] = e_count
-
-    # Last Trick Panel — hidden at compact widths (press H for full history).
-    if state.completed_tricks and layout.show_last_trick_sidebar:
-        last = state.completed_tricks[-1]
-        right_rows[mid + 1] = f"{UNDERLINE}Last Trick:{RESET}"
-        line1 = " ".join(f"{tc.seat.name[0]}:{_card_symbol(tc.card)}" for tc in last[:2])
-        line2 = " ".join(f"{tc.seat.name[0]}:{_card_symbol(tc.card)}" for tc in last[2:])
-        right_rows[mid + 2] = line1
-        right_rows[mid + 3] = line2
-
-    # ── Combine columns ───────────────────────────────────────────────────────
-    result: list[str] = []
-    for left, c, r in zip(left_rows, center_rows, right_rows, strict=False):
-        result.append(ansi_ljust(left, side_col_w) + c + ansi_ljust(r, side_col_w))
-
-    return result
-
-
-def _build_hud(
-    state: GameState,
-    term_w: int,
-    layout: LayoutPreset = STANDARD,
-    *,
-    team_scores_override: tuple[int, int] | None = None,
-) -> str:
-    """Build the top HUD bar, padded to term_w visible chars.
-
-    Verbosity is layout-driven:
-      - "verbose"  (spacious): all labels, help hints, theme name
-      - "standard": current behaviour (full labels, hints, theme)
-      - "compact"  (≤80 cols): abbreviated labels, no help hints, no theme name
-
-    `team_scores_override` lets the score-roll animation in announce.py paint
-    intermediate frames without allocating a fresh frozen GameState per step.
-    """
-    if state.variants.hide_hud:
-        left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
-        mid = f"{DIM} [HUD HIDDEN BY BOSS] {RESET}"
-        if layout.hud_style == "compact":
-            return ansi_ljust(left + "   " + mid, term_w)
-        theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
-        return _fit_hud(left + "   " + mid, theme_label, term_w)
-
-    trump_sym = state.trump.symbol if state.trump else "?"
-    ns, ew = team_scores_override if team_scores_override is not None else state.team_scores
-    trick_num = len(state.completed_tricks) + (1 if state.current_trick else 0)
-    taker_name = state.taker.name if state.taker else "-"
-    ns_pts, ew_pts = state.current_round_points
-
-    left = f"{BOLD}{gold_fg()}BELOTE{RESET}"
-
-    # 4.9.0 / G3: surface the carried-over litige pool. The pool is team-
-    # neutral — it accrues across all-pass-litige rounds and is absorbed by
-    # whichever team fulfills the next non-litige contract (see
-    # `scoring.py::_score_normal_outcome` line ~911).
-    litige_chip_compact = ""
-    litige_chip_full = ""
-    if state.litige_points > 0:
-        litige_chip_compact = f"  {DIM}{gold_fg()}Lit:{state.litige_points}{RESET}"
-        litige_chip_full = f"{DIM}{gold_fg()}Litige: {state.litige_points}{RESET}   "
-
-    if layout.hud_style == "compact":
-        # Abbreviated form: "BELOTE  T:♥  NS:200(+50)  EW:80(+30)  5/8  Tk:S"
-        # Drops keyboard hints and theme name; both still reachable via H/help.
-        taker_short = taker_name[0] if taker_name != "-" else "-"
-        bar = (
-            f"{left}  "
-            f"{white_fg()}T:{trump_sym}  "
-            f"NS:{BOLD}{ns}{RESET}{white_fg()}(+{ns_pts})  "
-            f"EW:{BOLD}{ew}{RESET}{white_fg()}(+{ew_pts})  "
-            f"{trick_num}/8  Tk:{taker_short}{RESET}"
-            f"{litige_chip_compact}"
-        )
-        return ansi_ljust(bar, term_w)
-
-    # Standard / verbose: full labels, hints, theme on the right.
-    theme_label = f"{DIM}Theme: {theme_manager.get_current().name}{RESET}"
-    core = (
-        f"{left}   "
-        f"{white_fg()}Trump: {trump_sym}   "
-        f"NS: {BOLD}{ns}{RESET}{white_fg()} (+{ns_pts})   "
-        f"EW: {BOLD}{ew}{RESET}{white_fg()} (+{ew_pts})   "
-        f"{litige_chip_full}"
-        f"Trick {trick_num}/8   Taker: {taker_name}"
-    )
-    bar = core + f"   {DIM}[H]Hist [T]Theme [Z]Undo [I]HUD{RESET}"
-    return _fit_hud(bar, theme_label, term_w, fallback=core + RESET)
-
-
-def _fit_hud(bar: str, theme_label: str, term_w: int, *, fallback: str | None = None) -> str:
-    """Lay out `bar` + right-aligned `theme_label` in exactly `term_w` cells.
-
-    At 120-143 cols, 3-digit scores / the litige chip / a long theme name
-    pushed the spacious HUD past term_w, so the row wrapped and the alt screen
-    scrolled. Optional segments are dropped in order — theme label, then the
-    key-hint tail (`bar` -> `fallback`) — and the result is finally clamped.
-    """
-    vlen_bar = visible_len(bar)
-    vlen_theme = visible_len(theme_label)
-    # Historical layout leaves the last column free (width term_w - 1); the
-    # extra +1 keeps at least one space so the hints never run into "Theme:".
-    if vlen_bar + vlen_theme + 2 <= term_w:
-        pad = term_w - vlen_bar - vlen_theme - 1
-        return bar + " " * pad + theme_label
-    for cand in (bar, fallback):
-        if cand is not None and visible_len(cand) <= term_w:
-            return ansi_ljust(cand, term_w)
-    # RESET after the cut so a truncated colour span can't bleed onward.
-    clamped = ansi_truncate(fallback if fallback is not None else bar, term_w) + RESET
-    return ansi_ljust(clamped, term_w)
-
-
-# Optional one-line hint painted above the bid selector. Expansions install a
-# provider (BelAtro shows the partner's bidding tendency); classic has none.
-_bid_hint_provider: Callable[[GameState], str | None] | None = None
-
-
-def set_bid_hint_provider(provider: Callable[[GameState], str | None] | None) -> None:
-    global _bid_hint_provider
-    _bid_hint_provider = provider
-
-
-def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -> list[str]:
-    """Build the in-frame bidding prompt: optional tendency line, then the
-    selector (Round 1: inline highlighted Take/Pass; Round 2: boxed grid).
-
-    Painted as part of the main render so no writes happen after `display()` —
-    that's what was causing the Konsole UI to stack (post-render \\r\\n's
-    scrolled the alt-screen, leaving stale content on rows the next frame's
-    blank padding doesn't repaint).
-    """
-    if state.bidding_round == 1:
-        up_card = state.up_card
-        assert up_card is not None  # guaranteed by Phase.BIDDING + round 1
-        labels = [f"Take {up_card.suit.symbol}", "Pass"]
-    else:
-        round2_suits = legal_bids(state)
-        labels = [
-            "Pass" if b is None
-            else "TA" if b == Suit.TOUT_ATOUT
-            else "SA" if b == SANS_ATOUT_BID
-            else b.symbol
-            for b in round2_suits
-        ]
-
-    lines: list[str] = []
-
-    hint = _bid_hint_provider(state) if _bid_hint_provider is not None else None
-    if hint:
-        lines.append(ansi_center(f"{DIM}{hint}{RESET}", term_w))
-
-    if state.bidding_round == 2:
-        inner_w = 60
-        opt_str = ""
-        for i, lbl in enumerate(labels):
-            prefix = f"{BOLD}{gold_fg()}" if i == bid_selection else ""
-            color = ""
-            opt = round2_suits[i]
-            if isinstance(opt, Suit):
-                color = red_fg() if opt.is_red else black_fg()
-            entry = f"{prefix}({i + 1}) {color}{lbl}{RESET}{prefix}"
-            entry = f"{REVERSE} {entry} {RESET}" if i == bid_selection else f" {entry} "
-            opt_str += entry + "  "
-
-        box = [
-            f"┌{'─' * inner_w}┐",
-            f"│{f'ROUND {state.bidding_round} BID'.center(inner_w)}│",
-            f"├{'─' * inner_w}┤",
-            f"│{' ' * inner_w}│",
-            f"│{ansi_center(opt_str.strip(), inner_w)}│",
-            f"│{' ' * inner_w}│",
-            f"└{'─' * inner_w}┘",
-        ]
-        lines.extend(ansi_center(bl, term_w) for bl in box)
-    else:
-        parts = [
-            f"{BOLD}{gold_fg()}({i + 1}){lbl}{RESET}" if i == bid_selection else f"({i + 1}){lbl}"
-            for i, lbl in enumerate(labels)
-        ]
-        prompt = f"{BOLD}{white_fg()}Round {state.bidding_round} Bid: {'  '.join(parts)}{RESET}"
-        lines.append(ansi_center(prompt, term_w))
-
-    return lines
 
 
 def render(
@@ -1142,7 +383,9 @@ def render(
     static "Bid: [P]ass [1]♠..." hint shows instead).
     """
     term_w, term_h = get_term_size()
-    layout = choose_layout(term_w, term_h)
+    budget, top_extra, bottom_extra = _table_budget(term_h)
+    fit = fit_table(term_w, budget)
+    layout = fit.layout
 
     # If the size or layout flavour changed since the last render, prefix a
     # full screen clear so we don't leak artifacts from the previous layout.
@@ -1158,97 +401,85 @@ def render(
     _last_render_key = key
 
     out = prefix_clear + move(1, 1) + hide_cursor()
-    legal: tuple[Card, ...] = ()
-    if state.phase == Phase.PLAYING and state.turn == Seat.SOUTH:
-        legal = legal_cards(state, Seat.SOUTH)
-
     lines: list[str] = []
+    # 4.11.0: blank breathing rows only where `fit_table` found room for them
+    # (order of value: above the mat, above North, above the divider, under
+    # the turn banner). Before 4.11.0 they were keyed on raw terminal height
+    # and, with the under-counted presets, pushed the hand off the screen.
+    spacer = [i < fit.spacers for i in range(4)]
 
     # ── HUD ──────────────────────────────────────────────────────────────────
     lines.append(_build_hud(state, term_w, layout))
     lines.append("─" * term_w)
+    lines.extend([""] * top_extra)  # under an expansion's top overlay
 
     # ── NORTH ────────────────────────────────────────────────────────────────
-    north_hand = state.hand_of(Seat.NORTH)
-    if show_north_hand:
-        north_cards = " ".join(_card_symbol(c) for c in north_hand)
-    else:
-        north_cards = f"{_card_back_small()} " * min(len(north_hand), 4)
-    north_label = _seat_label(Seat.NORTH, state)
-    north_count = f"{light_gray_fg()}({len(north_hand)} cards){RESET}"
-    if term_h > 40:
+    if spacer[1]:
         lines.append("")
-    lines.append(ansi_center(f"{north_label}  {north_cards}  {north_count}", term_w))
+    lines.append(_north_line(state, term_w, show_hand=show_north_hand))
 
     # ── WEST | trick area | EAST  (3-column, same rows) ──────────────────────
-    if term_h > 38:
+    if spacer[0]:
         lines.append("")
-    for row in _render_middle_section(state, term_w, layout):
-        lines.append(row)
+    global _last_mat_geometry
+    _last_mat_geometry = _MatGeometry(
+        first_row=len(lines),
+        fit=fit,
+        framed=fit.framed and mat_is_framed(_center_w(fit)),
+        rows_budget=budget,
+    )
+    lines.extend(
+        _render_middle_section(state, term_w, layout, framed=fit.framed, labels=fit.mat_labels)
+    )
 
-    # ── DIVIDER ───────────────────────────────────────────────────────────────
-    if term_h > 42:
+    # ── DIVIDER + PHASE INFO ──────────────────────────────────────────────────
+    if spacer[2]:
         lines.append("")
-    lines.append("─" * term_w)
-
-    # ── PHASE INFO ────────────────────────────────────────────────────────────
-    phase_info = ""
-    if state.phase == Phase.BIDDING:
-        if state.turn == Seat.SOUTH:
-            phase_info = f"{BOLD}{gold_fg()}>> YOUR TURN <<{RESET}"
-        else:
-            phase_info = f"{light_gray_fg()}Waiting for {state.turn.name} to bid...{RESET}"
-    elif state.phase == Phase.PLAYING:
-        if state.turn == Seat.SOUTH:
-            phase_info = f"{BOLD}{gold_fg()}>> YOUR TURN <<{RESET}"
-        else:
-            phase_info = f"{light_gray_fg()}Waiting for {state.turn.name}...{RESET}"
-    elif state.phase == Phase.SCORING:
-        phase_info = f"{BOLD}{gold_fg()}Round complete!{RESET}"
-
-    if state.belote_tracker[1]:
-        phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Rebelote! {RESET}"
-    elif state.belote_tracker[0]:
-        phase_info += f"  {BOLD}{banner_bg()}{banner_fg()} Belote! {RESET}"
-
-    lines.append(ansi_center(phase_info, term_w))
-    if term_h > 44:
+    if fit.phase_row:
+        lines.append("─" * term_w)
+        lines.append(ansi_center(_phase_info(state), term_w))
+    else:  # last resort: the turn banner rides in the divider
+        lines.append(_rule_with(_phase_info(state), term_w))
+    if spacer[3]:
         lines.append("")
 
     # ── SOUTH hand ────────────────────────────────────────────────────────────
-    south_hand = state.hand_of(Seat.SOUTH)
-    south_legal = legal if state.turn == Seat.SOUTH else ()
-
-    if south_hand:
-        hints = " ".join(f"[{i + 1}]" for i in range(len(south_hand)))
-        lines.append(ansi_center(hints, term_w))
-
-        # Readout adds +1 row; suppress at layout minimum to avoid pushing the
-        # south hand off the bottom. Threshold matches the +1-spacer pattern
-        # used elsewhere in render().
-        show_readout = term_h > layout.min_rows
-        for sl in _render_hand_horizontal(
-            south_hand, selection, south_legal, term_w, layout,
-            trump=state.trump, show_readout=show_readout,
-        ):
-            lines.append(sl)
-
-    south_label = _seat_label(Seat.SOUTH, state)
-    lines.append(ansi_center(f"{south_label} (you)", term_w))
+    lines.extend(
+        _south_lines(
+            state,
+            selection,
+            term_w,
+            term_h,
+            layout,
+            readout=fit.readout,
+            bar=fit.hand_bar,
+            hints=fit.hints,
+        )
+    )
 
     # ── BIDDING PROMPT ────────────────────────────────────────────────────────
+    # Bidding never shows the lifted card / bar / readout, so this row (and a
+    # spacer above it when there was room for any) always fits.
     if state.phase == Phase.BIDDING and state.turn == Seat.SOUTH:
-        if term_h > 40:
+        if fit.spacers:
             lines.append("")
-        if bid_selection is not None:
-            lines.extend(_build_bid_prompt_lines(state, term_w, bid_selection))
-        else:
-            prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
-            lines.append(ansi_center(prompt, term_w))
+        lines.extend(_bid_lines(state, term_w, bid_selection))
 
     # ── Vertical centering ──────────────────────────────────────────────────
     # If the terminal is taller than the rendered content, pad top + bottom so
     # the game centers vertically instead of clinging to the top.
+    if top_extra or bottom_extra:
+        # Expansion overlays sit at fixed rows, so instead of centring the
+        # whole frame, centre the table body in the window between them and
+        # fill the screen exactly (the HUD stays on rows 1-2 under the overlay).
+        head = 2 + top_extra
+        pad = max(0, (term_h - bottom_extra - len(lines)) // 2)
+        lines[head:head] = [""] * pad
+        if _last_mat_geometry is not None:
+            _last_mat_geometry = replace(
+                _last_mat_geometry, first_row=_last_mat_geometry.first_row + pad
+            )
+        lines += [""] * max(0, term_h - len(lines))
     rendered_h = len(lines)
     # Cache the unpadded line count so patch_trick_card() — which writes single
     # cards into the trick mat after render() — can compute the same vertical-
@@ -1263,9 +494,7 @@ def render(
     # (and other strict emulators) don't auto-blank cells when an empty string
     # passes through, so any debris from external writes (announcements, etc.)
     # would remain visible. The cost is one extra 3-byte escape per row.
-    rendered_lines: tuple[str, ...] = tuple(
-        line + clear_to_eol() for line in lines[:term_h]
-    )
+    rendered_lines: tuple[str, ...] = tuple(line + clear_to_eol() for line in lines[:term_h])
     # 3.9.3 Phase 6: stash the per-row tuple so display() can diff against the
     # previous frame and skip emitting unchanged rows. Layout changes are
     # already reflected via `prefix_clear` above + the cache invalidation in
@@ -1303,8 +532,7 @@ def display_hud(
     term_w, term_h = get_term_size()
     layout = choose_layout(term_w, term_h)
     sys.stdout.write(
-        move(1, 1)
-        + _build_hud(state, term_w, layout, team_scores_override=team_scores_override)
+        move(1, 1) + _build_hud(state, term_w, layout, team_scores_override=team_scores_override)
     )
     sys.stdout.flush()
 
@@ -1386,30 +614,36 @@ def display(
     _last_emitted_lines = new_lines
 
 
-def _calculate_base_row(term_h: int, rendered_lines: int = 0) -> int:
-    """Row at which the trick mat begins (1-indexed).
+def _slot_origin(geo: _MatGeometry, seat: Seat, term_w: int, term_h: int) -> tuple[int, int]:
+    """1-indexed (row, col) of `seat`'s card on screen, from the geometry
+    the last render() recorded."""
+    layout = geo.fit.layout
+    border = 1 if geo.framed else 0
+    center_w = max(0, term_w - layout.side_col_w * 2)
+    inner_w = center_w - 2 * border
+    n_s_start, w_start, e_start = _slot_anchors(inner_w, layout.card_w)
+    # Mat rows: slot frame, ["N"], N card, slot frame, W/E cards, slot frame,
+    # S card, ["S"], slot frame — see `_render_trick_mat`.
+    labels = 1 if geo.fit.mat_labels else 0
+    ch = layout.card_h
+    n_row = 1 + labels
+    we_row = n_row + ch + 1
+    s_row = we_row + ch + 1
+    rel = {
+        Seat.NORTH: (n_row, n_s_start),
+        Seat.WEST: (we_row, w_start),
+        Seat.EAST: (we_row, e_start),
+        Seat.SOUTH: (s_row, n_s_start),
+    }[seat]
+    top_pad = 0
+    if _last_rendered_unpadded_h and _last_rendered_unpadded_h < term_h - 1:
+        top_pad = ((term_h - 1) - _last_rendered_unpadded_h) // 2
+    row = top_pad + geo.first_row + border + rel[0] + 1
+    col = layout.side_col_w + border + rel[1] + 1
+    return row, col
 
-    Account for: HUD(1) + divider(1) + optional spacer + N row(1) + optional spacer.
-    Then add any vertical-centering top-pad applied by render().
-    """
-    base_row = 4  # HUD + divider + N row + 1 (alignment under N row)
-    if term_h > 40:
-        base_row += 1  # spacer above N row
-    if term_h > 38:
-        base_row += 1  # spacer above middle section
-    # If render() applied vertical centering, the top-pad shifts everything down.
-    # `rendered_lines` is the unpadded total; if shorter than term_h-1 we add a
-    # half-slack of empty rows above. Caller passes 0 for "I don't know" and we
-    # skip the adjustment.
-    if rendered_lines and rendered_lines < term_h - 1:
-        slack = (term_h - 1) - rendered_lines
-        base_row += slack // 2
-    return base_row
 
-
-def patch_trick_card(
-    state: GameState, seat: Seat, card: Card, *, force_hud: bool = False
-) -> None:
+def patch_trick_card(state: GameState, seat: Seat, card: Card, *, force_hud: bool = False) -> None:
     """Incrementally render a single card on the trick mat.
 
     Picks the active layout each call so a mid-game terminal resize re-routes
@@ -1424,34 +658,24 @@ def patch_trick_card(
     on every card play — ~300 µs of wasted work per round.
     """
     term_w, term_h = get_term_size()
-    layout = choose_layout(term_w, term_h)
-    side_col_w = layout.side_col_w
-    cw = layout.card_w
-    center_w = max(0, term_w - side_col_w * 2)
-
-    base_row = _calculate_base_row(term_h, _last_rendered_unpadded_h)
-
-    row_offsets = _trick_row_offsets(layout)
-
-    w_start = max(0, center_w // 4 - cw // 2)
-    e_start = max(0, 3 * center_w // 4 - cw // 2)
-    n_s_start = (center_w - cw) // 2
-
-    col_offsets = {
-        Seat.NORTH: n_s_start,
-        Seat.WEST: w_start,
-        Seat.EAST: e_start,
-        Seat.SOUTH: n_s_start,
-    }
-
-    row = base_row + row_offsets[seat]
-    col = side_col_w + col_offsets[seat] + 1
-
+    geo = _last_mat_geometry
+    budget, _, _ = _table_budget(term_h)
+    if geo is None or geo.rows_budget != budget or geo.fit != fit_table(term_w, budget):
+        # No render yet at this size (or the terminal was resized since):
+        # a full frame is both correct and cheap here.
+        display(state, None)
+        return
+    layout = geo.fit.layout
+    row, col = _slot_origin(geo, seat, term_w, term_h)
     # Build the whole patch as a single string and emit one stdout.write so
     # signal-interruptible terminals (Konsole especially) can't paint half the
     # card before the HUD update lands. Pre-3.5.0 each card-face line + the HUD
     # update were separate writes, which produced torn frames under load.
-    face = _get_card_face(card, layout=layout)
+    face = (
+        card_back_lines(layout)
+        if seat in masked_seats(state)
+        else _get_card_face(card, layout=layout)
+    )
     # NOTE: do NOT append clear_to_eol() per row. The card frame is positioned
     # at a specific column over the felt mat, not at end-of-line; clear_to_eol
     # would wipe felt-coloured cells to the right of every face line with the

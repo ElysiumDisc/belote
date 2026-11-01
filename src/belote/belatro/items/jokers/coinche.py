@@ -59,8 +59,7 @@ class ToutStreak(Joker):
 
         is_tout = event.trump == Suit.TOUT_ATOUT
         is_taker_won = (
-            event.taker_seat in (Seat.SOUTH, Seat.NORTH)
-            and not event.breakdown.is_failed
+            event.taker_seat in (Seat.SOUTH, Seat.NORTH) and not event.breakdown.is_failed
         )
 
         if is_tout and is_taker_won:

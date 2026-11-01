@@ -1,73 +1,34 @@
+"""Round scoring: the `ScoringBreakdown`, contract made/failed (litige,
+capot, coinche multipliers) and applying a round to the game score."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
-from typing import TypedDict
 
-from .config import GLOBAL_CONFIG
-from .deck import Card, Contract, Rank, Suit
-from .deck import card_points as card_points_fn
-from .game import (
-    Carre,
-    Declaration,
+from ..config import GLOBAL_CONFIG
+from ..deck import Card, Contract, Rank, Suit
+from ..game import (
     GameState,
     Phase,
     RoundScore,
     Seat,
-    Sequence,
-    TrickCard,
     compute_trick_winners,
     per_trick_trumps,
     reset_round_fields,
     team_of,
 )
-from .variants import RuleVariants
-
-# Rank numeric values for sequence detection (ascending order)
-_RANK_VALUES: dict[Rank, int] = {
-    Rank.SEVEN: 1,
-    Rank.EIGHT: 2,
-    Rank.NINE: 3,
-    Rank.TEN: 4,
-    Rank.JACK: 5,
-    Rank.QUEEN: 6,
-    Rank.KING: 7,
-    Rank.ACE: 8,
-}
-
-_VALUE_TO_RANK: dict[int, Rank] = {v: r for r, v in _RANK_VALUES.items()}
-
-# Carré point values
-_CARRE_POINTS: dict[Rank, int] = {
-    Rank.JACK: 200,
-    Rank.NINE: 150,
-    Rank.ACE: 100,
-    Rank.TEN: 100,
-    Rank.KING: 100,
-    Rank.QUEEN: 100,
-    Rank.SEVEN: 0,
-    Rank.EIGHT: 0,
-}
-
-# Sequence point values
-_SEQUENCE_POINTS: dict[int, int] = {
-    3: 20,
-    4: 50,
-    5: 100,
-}
-
-
-def get_declaration_points(decls: list[Sequence | Carre]) -> int:
-    """Calculate point value for a list of sequences or carres."""
-    pts = 0
-    for d in decls:
-        if isinstance(d, Sequence):
-            # 5+ cards is always a Quinte (100 pts)
-            length = min(d.length, 5)
-            pts += _SEQUENCE_POINTS.get(length, 0)
-        elif isinstance(d, Carre):
-            pts += _CARRE_POINTS.get(_VALUE_TO_RANK[d.rank], 0)
-    return pts
+from .announcements import (
+    ResolvedDeclarations,
+    _carre_points,
+    _decl_short_label,
+    _detect_all_declarations,
+    _sequence_points,
+    resolve_declarations,
+)
+from .tricks import (
+    _trick_points_with_modifiers,
+    is_capot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,461 +59,6 @@ class ScoringBreakdown:
     # `apply_round_score` doesn't have to re-walk completed_tricks.
     tricks_ns: int = 0
     tricks_ew: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedDeclarations:
-    ns_sequences: tuple[Sequence, ...]
-    ew_sequences: tuple[Sequence, ...]
-    ns_carres: tuple[Carre, ...]
-    ew_carres: tuple[Carre, ...]
-    ns_belote: bool
-    ew_belote: bool
-    scoring_team: int | None  # which team scores sequences/carres (0=NS, 1=EW, None=cancel)
-
-
-def detect_belote(hand: tuple[Card, ...], trump: Suit) -> bool:
-    """Check if hand contains both K and Q of trump."""
-    king = Card(trump, Rank.KING)
-    queen = Card(trump, Rank.QUEEN)
-    return king in hand and queen in hand
-
-
-@lru_cache(maxsize=128)
-def detect_sequences(hand: tuple[Card, ...]) -> list[Sequence]:
-    """Find all maximal sequences (tierce/quarte/quinte) in a hand.
-
-    Sequences are based on rank order 7<8<9<10<J<Q<K<A within a single suit.
-    Only sequences of length >= 3 count.
-
-    Cached on the input hand tuple: detect_sequences is ~25% of `score_round`
-    cost (measured 4.7.2), and the same `initial_hands` tuples flow through
-    multiple call paths per round (`get_declarations` at bid-acceptance time
-    in `game.py`, then again from `_detect_all_declarations` during scoring).
-    Cards are frozen dataclasses, so tuple-of-card is hashable. The returned
-    list is treated as read-only by every caller — `decls.extend(seqs)` and
-    dict-storage are non-mutating. maxsize=128 covers ~32 full rounds before
-    eviction (4 seats × 32).
-    """
-    # Group cards by suit
-    by_suit: dict[Suit, list[int]] = {}
-    for card in hand:
-        if card.suit not in by_suit:
-            by_suit[card.suit] = []
-        by_suit[card.suit].append(_RANK_VALUES[card.rank])
-
-    sequences: list[Sequence] = []
-    # Optimization: Map (suit, rank_val) to card for fast lookup within the suit group
-    card_map = {(c.suit, _RANK_VALUES[c.rank]): c for c in hand}
-
-    for suit, ranks in by_suit.items():
-        ranks.sort()
-        # Find consecutive runs
-        if not ranks:
-            continue
-        run_start = 0
-        for i in range(1, len(ranks)):
-            if ranks[i] != ranks[i - 1] + 1:
-                run_len = i - run_start
-                if run_len >= 3:
-                    top = ranks[i - 1]
-                    seq_cards = tuple(
-                        card_map[(suit, r)]
-                        for r in range(ranks[run_start], ranks[i - 1] + 1)
-                    )
-                    sequences.append(
-                        Sequence(
-                            length=run_len,
-                            top_rank=top,
-                            suit=suit,
-                            is_trump=False,  # will be updated later
-                            cards=seq_cards,
-                        )
-                    )
-                run_start = i
-        # Final run
-        run_len = len(ranks) - run_start
-        if run_len >= 3:
-            top = ranks[-1]
-            seq_cards = tuple(
-                card_map[(suit, r)]
-                for r in range(ranks[run_start], ranks[-1] + 1)
-            )
-            sequences.append(
-                Sequence(
-                    length=run_len,
-                    top_rank=top,
-                    suit=suit,
-                    is_trump=False,
-                    cards=seq_cards,
-                )
-            )
-    return sequences
-
-
-def detect_carres(hand: tuple[Card, ...]) -> list[Carre]:
-    """Find all carrés (four of a kind by rank) in a hand."""
-    by_rank: dict[Rank, list[Card]] = {}
-    for card in hand:
-        if card.rank not in by_rank:
-            by_rank[card.rank] = []
-        by_rank[card.rank].append(card)
-
-    carres: list[Carre] = []
-    for rank, cards in by_rank.items():
-        if len(cards) == 4:
-            carres.append(
-                Carre(
-                    rank=_RANK_VALUES[rank],
-                    cards=tuple(cards),
-                )
-            )
-    return carres
-
-
-def _sequence_strength(seq: Sequence) -> tuple[int, int, bool]:
-    """Comparable tuple for sequence priority: (length, top_rank, is_trump)."""
-    return (seq.length, seq.top_rank, seq.is_trump)
-
-
-def _carre_strength(carre: Carre) -> tuple[int, int]:
-    """Comparable tuple for carré priority: (points, rank)."""
-    return (_CARRE_POINTS.get(_VALUE_TO_RANK[carre.rank], 0), carre.rank)
-
-
-def _best_sequence(sequences: list[Sequence]) -> Sequence | None:
-    if not sequences:
-        return None
-    return max(sequences, key=_sequence_strength)
-
-
-def _best_carre(carres: list[Carre]) -> Carre | None:
-    if not carres:
-        return None
-    return max(carres, key=_carre_strength)
-
-
-def _carre_points(carre: Carre) -> int:
-    # 3.6.0 audit L3: use `.get(..., 0)` to match the sibling lookups at
-    # the file's other carre / sequence sites. The dict is currently
-    # complete so this is asymmetry-only — but it makes a future-Rank
-    # addition fail-soft instead of crashing scoring mid-round.
-    return _CARRE_POINTS.get(_VALUE_TO_RANK[carre.rank], 0)
-
-
-def _sequence_points(seq: Sequence) -> int:
-    return _SEQUENCE_POINTS.get(min(seq.length, 5), 0)
-
-
-def resolve_declarations(
-    decls_per_seat: dict[Seat, SeatDeclarations],
-    trump: Suit | None,
-    taker: Seat | None = None,
-) -> ResolvedDeclarations:
-    """Resolve declarations per §3.7.
-
-    When two declarations have identical strength, standard Belote-Coinché
-    awards the tie to the first announcer (the team whose seat declared first
-    during the first trick — announcement order starts at the taker and goes
-    clockwise). Pass `taker` to enable that rule; without it, ties fall back
-    to the historical "cancel" behaviour.
-    """
-    ns_seqs: list[Sequence] = []
-    ew_seqs: list[Sequence] = []
-    ns_carres: list[Carre] = []
-    ew_carres: list[Carre] = []
-    ns_carre_seats: list[Seat] = []  # parallel to ns_carres
-    ew_carre_seats: list[Seat] = []
-    ns_seq_seats: list[Seat] = []  # parallel to ns_seqs
-    ew_seq_seats: list[Seat] = []
-    ns_belote = False
-    ew_belote = False
-
-    for seat, decls in decls_per_seat.items():
-        updated_seqs = [
-            Sequence(
-                length=s.length,
-                top_rank=s.top_rank,
-                suit=s.suit,
-                is_trump=(s.suit == trump),
-                cards=s.cards,
-            )
-            for s in decls["sequences"]
-        ]
-        carres = [c for c in decls["carres"] if _carre_points(c) > 0]
-        has_belote = decls["belote"]
-
-        if team_of(seat) == 0:
-            ns_seqs.extend(updated_seqs)
-            ns_carres.extend(carres)
-            ns_seq_seats.extend([seat] * len(updated_seqs))
-            ns_carre_seats.extend([seat] * len(carres))
-            ns_belote = ns_belote or has_belote
-        else:
-            ew_seqs.extend(updated_seqs)
-            ew_carres.extend(carres)
-            ew_seq_seats.extend([seat] * len(updated_seqs))
-            ew_carre_seats.extend([seat] * len(carres))
-            ew_belote = ew_belote or has_belote
-
-    # Determine which team scores sequences/carres
-    ns_best_seq = _best_sequence(ns_seqs)
-    ew_best_seq = _best_sequence(ew_seqs)
-    ns_best_carre = _best_carre(ns_carres)
-    ew_best_carre = _best_carre(ew_carres)
-
-    # Announce-order walk: clockwise from taker. Used by both tie-break
-    # resolvers below — compute once.
-    seat_order: tuple[Seat, ...] = ()
-    if taker is not None:
-        s1 = taker.next_seat()
-        s2 = s1.next_seat()
-        s3 = s2.next_seat()
-        seat_order = (taker, s1, s2, s3)
-
-    def _resolve_tie_carre() -> int | None:
-        # 4.6.5: pre-build a per-seat team lookup once, then walk seat_order
-        # in O(seats). Pre-fix this was nested zips inside the seat loop —
-        # O(seats × decls); both factors tiny in practice but the dict form
-        # also reads more clearly than "first-match wins NS, else EW".
-        if taker is None:
-            return None  # legacy cancel behaviour
-        assert ns_best_carre is not None and ew_best_carre is not None
-        tied_rank = ns_best_carre.rank
-        seat_team: dict[Seat, int] = {}
-        for c, cs in zip(ns_carres, ns_carre_seats, strict=True):
-            if c.rank == tied_rank:
-                seat_team.setdefault(cs, 0)
-        for c, cs in zip(ew_carres, ew_carre_seats, strict=True):
-            if c.rank == tied_rank:
-                seat_team.setdefault(cs, 1)
-        for s in seat_order:
-            if s in seat_team:
-                return seat_team[s]
-        return None
-
-    def _resolve_tie_seq() -> int | None:
-        # Symmetric to _resolve_tie_carre — see comment there for the
-        # O(seats × decls) → O(seats) reasoning.
-        if taker is None:
-            return None
-        assert ns_best_seq is not None and ew_best_seq is not None
-        tied_strength = _sequence_strength(ns_best_seq)
-        seat_team: dict[Seat, int] = {}
-        for seq, ss in zip(ns_seqs, ns_seq_seats, strict=True):
-            if _sequence_strength(seq) == tied_strength:
-                seat_team.setdefault(ss, 0)
-        for seq, ss in zip(ew_seqs, ew_seq_seats, strict=True):
-            if _sequence_strength(seq) == tied_strength:
-                seat_team.setdefault(ss, 1)
-        for s in seat_order:
-            if s in seat_team:
-                return seat_team[s]
-        return None
-
-    scoring_team: int | None = None
-
-    # Carrés outrank any sequence
-    if ns_best_carre and ew_best_carre:
-        # Both have carrés - higher carré wins
-        ns_cp = _carre_points(ns_best_carre)
-        ew_cp = _carre_points(ew_best_carre)
-        if ns_cp > ew_cp:
-            scoring_team = 0
-        elif ew_cp > ns_cp:
-            scoring_team = 1
-        else:
-            # Same carré strength - compare rank
-            if ns_best_carre.rank > ew_best_carre.rank:
-                scoring_team = 0
-            elif ew_best_carre.rank > ns_best_carre.rank:
-                scoring_team = 1
-            else:
-                scoring_team = _resolve_tie_carre()  # first-announcer or cancel
-    elif ns_best_carre:
-        scoring_team = 0
-    elif ew_best_carre:
-        scoring_team = 1
-    elif ns_best_seq and ew_best_seq:
-        ns_str = _sequence_strength(ns_best_seq)
-        ew_str = _sequence_strength(ew_best_seq)
-        if ns_str > ew_str:
-            scoring_team = 0
-        elif ew_str > ns_str:
-            scoring_team = 1
-        else:
-            scoring_team = _resolve_tie_seq()  # first-announcer or cancel
-    elif ns_best_seq:
-        scoring_team = 0
-    elif ew_best_seq:
-        scoring_team = 1
-
-    return ResolvedDeclarations(
-        ns_sequences=tuple(ns_seqs),
-        ew_sequences=tuple(ew_seqs),
-        ns_carres=tuple(ns_carres),
-        ew_carres=tuple(ew_carres),
-        ns_belote=ns_belote,
-        ew_belote=ew_belote,
-        scoring_team=scoring_team,
-    )
-
-
-def is_capot(
-    state: GameState,
-    tricks: list[tuple[TrickCard, ...]] | None = None,
-    winners: list[Seat | None] | None = None,
-) -> int | None:
-    """Check if either team won all 8 tricks. Returns team index (0=NS, 1=EW) or None.
-
-    Honors La Rupture (`no_consecutive_team_wins`) for both the default
-    (`state.completed_tricks`) and explicit-tricks branches. Capot under La
-    Rupture is effectively impossible; the live HUD CAPOT announcement on the
-    8th trick (`gameflow.py` passes `tricks=completed + [current]`) must use
-    the same Rupture-aware resolution as the final scoring path or it will
-    falsely announce CAPOT mid-round.
-
-    `winners` is honored only when `tricks is None` — when a caller already
-    resolved winners for `state.completed_tricks`, pass them in to avoid the
-    repeated trick-winner walk that `score_round` would otherwise trigger.
-    """
-    is_sa = state.contract == Contract.SANS_ATOUT
-    if tricks is None:
-        if winners is None:
-            winners = compute_trick_winners(state, state.trump, is_sa)
-    else:
-        if not tricks or len(tricks) < 8:
-            return None
-        winners = compute_trick_winners(state, state.trump, is_sa, tuple(tricks))
-
-    if not winners or len(winners) < 8:
-        return None
-    first_winner = winners[0]
-    if first_winner is None:
-        return None
-    winning_team = team_of(first_winner)
-
-    for w in winners[1:]:
-        if w is None or team_of(w) != winning_team:
-            return None
-    return winning_team
-
-
-class SeatDeclarations(TypedDict):
-    sequences: list[Sequence]
-    carres: list[Carre]
-    belote: bool
-
-
-def _detect_all_declarations(
-    state: GameState, trump: Suit | None
-) -> dict[Seat, SeatDeclarations]:
-    """Internal helper to find all potential declarations in all hands.
-
-    Sequences and carrés exist under every contract (Sans Atout included), so
-    `trump=None` is acceptable here. Belote is disabled under Sans Atout and
-    Tout Atout (no unique K+Q-of-trump) — `detect_belote` is skipped.
-    """
-    decls_per_seat: dict[Seat, SeatDeclarations] = {}
-    no_belote_contract = trump is None or trump == Suit.TOUT_ATOUT
-    for seat in Seat:
-        # Default empty decls
-        decls_per_seat[seat] = {
-            "sequences": [],
-            "carres": [],
-            "belote": False,
-        }
-
-        # Use initial_hands if in scoring phase, else current hands (bidding phase)
-        hand = (
-            state.initial_hands[seat.value] if state.phase == Phase.SCORING else state.hand_of(seat)
-        )
-        if not hand:
-            continue
-
-        seqs = detect_sequences(hand)
-        # 7/8 carrés are detected (detect_carres) but are not declarations:
-        # a 0-point carré must not outrank the other team's sequences.
-        carres = [c for c in detect_carres(hand) if _carre_points(c) > 0]
-        has_belote = False if no_belote_contract else detect_belote(hand, trump)  # type: ignore[arg-type]
-        decls_per_seat[seat] = {
-            "sequences": seqs,
-            "carres": carres,
-            "belote": has_belote,
-        }
-    return decls_per_seat
-
-
-# ── Zero-rank / ban-clubs helpers (3.6.0 audit M1+M2) ───────────────────────
-# Single source of truth for boss zero-rank flags. Three sites used to inline
-# this with subtle drift risk: every new zero-rank flag had to be added in
-# three places or the HUD running total would silently disagree with the
-# final round score. Use these helpers from every scoring path.
-
-
-def _trick_zeroed_by_ban_clubs(
-    trick: tuple[TrickCard, ...], bm: RuleVariants
-) -> bool:
-    """``ban_clubs`` zeros the entire trick if ANY card is a club. Matches
-    the rule in `_calculate_base_points` — earlier the separate-scoring
-    branch checked only the lead card and silently awarded points for
-    off-lead clubs."""
-    return bm.ban_clubs and any(tc.card.suit == Suit.CLUBS for tc in trick)
-
-
-def _card_points_with_zero_ranks(card: Card, trump: Suit | None, bm: RuleVariants) -> int:
-    """Per-card point value after applying every active zero-rank boss flag.
-
-    When a new zero-rank flag is added to RuleVariants, this is the only
-    site that needs to learn about it. Also propagates `seven_eight_trump`
-    to `card_points` for correctness even though current point tables zero
-    those cards anyway."""
-    r = card.rank
-    if bm.kings_zero and r == Rank.KING:
-        return 0
-    if bm.tens_zero and r == Rank.TEN:
-        return 0
-    if bm.aces_zero and r == Rank.ACE:
-        return 0
-    if bm.jacks_zero and r == Rank.JACK:
-        return 0
-    if bm.ban_clubs and card.suit == Suit.CLUBS:
-        return 0
-    return card_points_fn(card, trump, bm.seven_eight_trump)
-
-
-def card_points_with_modifiers(card: Card, trump: Suit | None, bm: RuleVariants) -> int:
-    """Public helper: per-card point value with active zero-rank boss flags.
-
-    Mirrors `trick_card_points` (per-trick canonical helper) at the per-card
-    level. Bidding heuristics (`ai.py`) call this to honor zero-rank bosses
-    when evaluating Tout Atout / Sans Atout / regular-suit bid strength —
-    pre-3.9.3 the AI used raw `card_points` and overbid on rank-suppressed
-    hands.
-    """
-    return _card_points_with_zero_ranks(card, trump, bm)
-
-
-def _trick_points_with_modifiers(
-    trick: tuple[TrickCard, ...], trump: Suit | None, bm: RuleVariants
-) -> int:
-    """Total card points for a single trick after every boss modifier."""
-    if not trick:
-        return 0
-    if _trick_zeroed_by_ban_clubs(trick, bm):
-        return 0
-    return sum(_card_points_with_zero_ranks(tc.card, trump, bm) for tc in trick)
-
-
-def trick_card_points(state: GameState, trick: tuple[TrickCard, ...]) -> int:
-    """Card-point sum for a single trick, applying boss zero-rank flags and
-    `ban_clubs`. Public helper so non-scoring callers (gameflow/a11y, HUD)
-    don't duplicate the flag table.
-
-    Returns 0 if the trick is empty. The dix-de-der bonus is NOT included
-    here — it's a per-round concept, not per-trick.
-    """
-    return _trick_points_with_modifiers(trick, state.trump, state.variants)
 
 
 def _calculate_base_points(
@@ -617,18 +123,13 @@ def _apply_scoring_modifiers(
         scores = {Seat.SOUTH: 0, Seat.NORTH: 0, Seat.EAST: 0, Seat.WEST: 0}
         bm = state.variants
         trumps = per_trick_trumps(state, trump, len(state.completed_tricks))
-        for trick, winner, t_trump in zip(
-            state.completed_tricks, winners, trumps, strict=True
-        ):
+        for trick, winner, t_trump in zip(state.completed_tricks, winners, trumps, strict=True):
             if winner is None:
                 continue
             scores[winner] += _trick_points_with_modifiers(trick, t_trump, bm)
 
         # Add 10 de der to individual winner (suppressed by Le Zéro Final).
-        if (
-            state.last_trick_winner in scores
-            and not state.variants.no_dix_de_der
-        ):
+        if state.last_trick_winner in scores and not state.variants.no_dix_de_der:
             scores[state.last_trick_winner] += GLOBAL_CONFIG.LAST_TRICK_BONUS
 
         if taker_team == 0:
@@ -661,6 +162,7 @@ class _ScoringContext:
     helpers so they don't each re-derive the same 4-5 fields off GameState.
     Internal — no public consumers.
     """
+
     state: GameState
     trump: Suit | None
     taker: Seat
@@ -709,8 +211,7 @@ def _compute_belote_points(ctx: _ScoringContext) -> tuple[int, int, bool, bool]:
     # would credit belote points despite no announcement having fired. Surface
     # this as a hard assertion rather than silently mis-scoring.
     assert state.belote_announcer is None or state.belote_tracker[0], (
-        "belote_announcer set without belote_tracker[0] flipped — "
-        "GameState invariant violated."
+        "belote_announcer set without belote_tracker[0] flipped — GameState invariant violated."
     )
     # Prefer the captured announcer seat (recorded at the moment belote was
     # declared) over re-deriving from belote_holders — under L'Anarchie the
@@ -877,9 +378,7 @@ def _score_normal_outcome(
         # La Balance voucher: taker wins automatically on a card-point tie.
         if state.variants.tie_breaks_for_taker:
             messages.append("La Balance: tie awarded to taker.")
-            taker_total = (
-                taker_card_pts + taker_declarations + taker_belote + state.litige_points
-            )
+            taker_total = taker_card_pts + taker_declarations + taker_belote + state.litige_points
             defender_total = defender_card_pts + defender_declarations + defender_belote
         else:
             is_litige = True
@@ -1066,23 +565,7 @@ def score_round(state: GameState) -> ScoringBreakdown:
     )
 
 
-def _decl_short_label(d: Declaration) -> str:
-    if d.kind == "belote":
-        return "Belote"
-    if d.kind == "rebelote":
-        return "Rebelote"
-    if d.kind == "carre" and isinstance(d.detail, Carre):
-        rank = _VALUE_TO_RANK.get(d.detail.rank)
-        return f"Carré-{rank.value}" if rank else "Carré"
-    if d.kind == "sequence" and isinstance(d.detail, Sequence):
-        pts = _sequence_points(d.detail)
-        return f"{pts}{d.detail.suit.symbol}"
-    return d.kind
-
-
-def coinche_adjusted_credits(
-    breakdown: ScoringBreakdown, coinche_level: int
-) -> tuple[int, int]:
+def coinche_adjusted_credits(breakdown: ScoringBreakdown, coinche_level: int) -> tuple[int, int]:
     """Return ``(taker_credit, defender_credit)`` after the coinche multiplier.
 
     4.9.0 / G1: the winning side's credit is doubled at coinche_level=1,
@@ -1094,7 +577,7 @@ def coinche_adjusted_credits(
     gameflow round-end animation, so the on-screen counter lands on exactly the
     value that gets stored.
     """
-    coinche_mult = 2 ** coinche_level if coinche_level > 0 else 1
+    coinche_mult = 2**coinche_level if coinche_level > 0 else 1
     if coinche_mult > 1 and not breakdown.is_litige:
         if breakdown.is_failed:
             return breakdown.taker_total, breakdown.defender_total * coinche_mult
@@ -1104,9 +587,7 @@ def coinche_adjusted_credits(
 
 def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameState:
     """Apply round scoring result to team scores and advance state."""
-    taker_credit, defender_credit = coinche_adjusted_credits(
-        breakdown, state.coinche_level
-    )
+    taker_credit, defender_credit = coinche_adjusted_credits(breakdown, state.coinche_level)
 
     ns, ew = state.team_scores
     if breakdown.taker_team == 0:
@@ -1136,25 +617,41 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
 
     # Declaration summaries — only show the team(s) that actually scored decls,
     # which matches Belote's "best team takes all decls" rule.
-    ns_decl_total = breakdown.taker_declarations if breakdown.taker_team == 0 else breakdown.defender_declarations
-    ew_decl_total = breakdown.defender_declarations if breakdown.taker_team == 0 else breakdown.taker_declarations
-    ns_decls = tuple(
-        _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 0
-    ) if ns_decl_total > 0 else ()
-    ew_decls = tuple(
-        _decl_short_label(d) for d in state.declarations if team_of(d.seat) == 1
-    ) if ew_decl_total > 0 else ()
+    ns_decl_total = (
+        breakdown.taker_declarations
+        if breakdown.taker_team == 0
+        else breakdown.defender_declarations
+    )
+    ew_decl_total = (
+        breakdown.defender_declarations
+        if breakdown.taker_team == 0
+        else breakdown.taker_declarations
+    )
+    ns_decls = (
+        tuple(_decl_short_label(d) for d in state.declarations if team_of(d.seat) == 0)
+        if ns_decl_total > 0
+        else ()
+    )
+    ew_decls = (
+        tuple(_decl_short_label(d) for d in state.declarations if team_of(d.seat) == 1)
+        if ew_decl_total > 0
+        else ()
+    )
 
     # 4.6.6: Unified RoundScore construction. Pre-4.6.6 this used two
     # identical-but-swapped branches for taker_team=0 vs 1, which was 50 lines
     # of redundant mapping.
-    ns_is_taker = (breakdown.taker_team == 0)
+    ns_is_taker = breakdown.taker_team == 0
     round_score = RoundScore(
         taker_team=breakdown.taker_team,
         ns_card_pts=breakdown.credit_taker_pts if ns_is_taker else breakdown.credit_defender_pts,
         ew_card_pts=breakdown.credit_defender_pts if ns_is_taker else breakdown.credit_taker_pts,
-        ns_decl_pts=breakdown.taker_declarations if ns_is_taker else breakdown.defender_declarations,
-        ew_decl_pts=breakdown.defender_declarations if ns_is_taker else breakdown.taker_declarations,
+        ns_decl_pts=breakdown.taker_declarations
+        if ns_is_taker
+        else breakdown.defender_declarations,
+        ew_decl_pts=breakdown.defender_declarations
+        if ns_is_taker
+        else breakdown.taker_declarations,
         ns_belote_pts=breakdown.taker_belote if ns_is_taker else breakdown.defender_belote,
         ew_belote_pts=breakdown.defender_belote if ns_is_taker else breakdown.taker_belote,
         ns_rebelote=breakdown.taker_rebelote if ns_is_taker else breakdown.defender_rebelote,
@@ -1198,44 +695,3 @@ def apply_round_score(state: GameState, breakdown: ScoringBreakdown) -> GameStat
         score_history=new_history,
         litige_points=new_litige_pool,
     )
-
-
-def get_declarations(state: GameState) -> tuple[Declaration, ...]:
-    """Pre-calculate all declarations from initial hands.
-
-    Sequences and carrés exist under every contract (Sans Atout included).
-    Returns empty when the contract isn't established (no trump set and
-    contract field unset) — pre-existing call sites that only set `trump`
-    keep working.
-    """
-    if state.trump is None and state.contract != Contract.SANS_ATOUT:
-        return ()
-
-    decls_per_seat = _detect_all_declarations(state, state.trump)
-    resolved = resolve_declarations(decls_per_seat, state.trump, state.taker)
-    scoring_team = resolved.scoring_team
-
-    all_decls: list[Declaration] = []
-
-    # We only care about sequences and carres if they actually score
-    if scoring_team is not None:
-        for seat in Seat:
-            if team_of(seat) == scoring_team:
-                decls = decls_per_seat[seat]
-                for seq in decls["sequences"]:
-                    all_decls.append(Declaration(seat, "sequence", seq))
-                for carre in decls["carres"]:
-                    all_decls.append(Declaration(seat, "carre", carre))
-
-    # Belote is separate from sequence scoring
-    if resolved.ns_belote:
-        for s in (Seat.SOUTH, Seat.NORTH):
-            if decls_per_seat[s]["belote"]:
-                all_decls.append(Declaration(s, "belote"))
-
-    if resolved.ew_belote:
-        for s in (Seat.EAST, Seat.WEST):
-            if decls_per_seat[s]["belote"]:
-                all_decls.append(Declaration(s, "belote"))
-
-    return tuple(all_decls)

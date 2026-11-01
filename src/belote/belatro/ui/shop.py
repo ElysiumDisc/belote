@@ -15,13 +15,12 @@ from belote.ansi import (
     move,
     white_fg,
 )
-from belote.input import Key
+from belote.input import Key, typed
 
 if TYPE_CHECKING:
     from belote.input import KeyReader
 
     from ..run.shop import Shop
-
 
 
 # Shop description prefix per joker edition (values of items.base.Edition).
@@ -31,6 +30,7 @@ _EDITION_LABELS: dict[str, str] = {
     "poly": "Polychrome: x1.5 Mult per trigger",
     "neg": "Negative: +1 joker slot",
 }
+
 
 class ShopScreen:
     """The interactive shop UI."""
@@ -97,11 +97,16 @@ class ShopScreen:
 
                 overlay = ConsumablesOverlay(self.shop.run, self.reader)
                 used = overlay.open()
-                if used:
+                # 4.11.0: surface the tarot's own message (Le Juge's reroll,
+                # or why it refused) instead of a generic line.
+                message = self.shop.run.last_tarot_message
+                if used or message:
                     from .announce import BelAtroAnnounce
 
-                    BelAtroAnnounce.banner("Consumable activated.", self.reader, hold=0.8)
-            elif key == Key.CHAR and event.char and event.char.lower() == "s":
+                    BelAtroAnnounce.banner(
+                        message or "Consumable activated.", self.reader, hold=1.2
+                    )
+            elif typed(event, "s"):  # S is also the DOWN alias
                 self._handle_sell()
             elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 break
@@ -148,7 +153,9 @@ class ShopScreen:
                     continue
                 name = getattr(jokers[idx], "name", "?")
                 if not self.shop.can_sell(idx):
-                    BelAtroAnnounce.banner(f"{name} is corrupted — can't sell", self.reader, hold=1.0)
+                    BelAtroAnnounce.banner(
+                        f"{name} is corrupted — can't sell", self.reader, hold=1.0
+                    )
                     return
                 gained = self.shop.sell_joker(idx)
                 BelAtroAnnounce.banner(f"Sold {name} for ${gained}", self.reader, hold=0.8)
@@ -202,6 +209,7 @@ class ShopScreen:
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
         from belote.ui.render import invalidate_diff
+
         invalidate_diff()
 
         while True:
@@ -249,16 +257,25 @@ class ShopScreen:
         parts: list[str] = [move(row, col) + bc + "╔══════════════╗" + ac + "\n"]
         for i, art_line in enumerate(art):
             parts.append(
-                move(row + 1 + i, col) + bc + f"│{menu_art_fg()}{art_line:<14}{RESET}{bc}│" + ac
+                move(row + 1 + i, col)
+                + bc
+                + f"│{menu_art_fg()}{art_line:<14}{RESET}{bc}│"
+                + ac
                 + "\n"
             )
         parts.append(
-            move(row + 1 + len(art), col) + bc + f"│{white_fg()}{level_inner:<14}{RESET}{bc}│" + ac
+            move(row + 1 + len(art), col)
+            + bc
+            + f"│{white_fg()}{level_inner:<14}{RESET}{bc}│"
+            + ac
             + "\n"
         )
         for i, sl in enumerate(shop_lines):
             parts.append(
-                move(row + 2 + len(art) + i, col) + bc + f"│{white_fg()}{sl:<14}{RESET}{bc}│" + ac
+                move(row + 2 + len(art) + i, col)
+                + bc
+                + f"│{white_fg()}{sl:<14}{RESET}{bc}│"
+                + ac
                 + "\n"
             )
         cost = getattr(item, "cost", 0)
@@ -278,10 +295,12 @@ class ShopScreen:
         # 14 cells used to overflow the frame into the neighbouring card.
         name = str(getattr(item, "name", "?"))[:14]
         cost = getattr(item, "cost", 0)
+        # 4.11.0 Le Téléphone: partner-slot offers are tagged on the blank row.
+        tag = "for partner" if getattr(item, "for_partner", False) else ""
         return [
             move(row, col) + bc + "┌──────────────┐" + ac + "\n",
             move(row + 1, col) + bc + f"│{gold_fg()}{name:^14}{RESET}{bc}│" + ac + "\n",
-            move(row + 2, col) + bc + "│" + " " * 14 + "│" + ac + "\n",
+            move(row + 2, col) + bc + f"│{green_fg()}{tag:^14}{RESET}{bc}│" + ac + "\n",
             move(row + 3, col) + bc + f"│{white_fg()}{'$' + str(cost):^14}{RESET}{bc}│" + ac + "\n",
             move(row + 4, col) + bc + "└──────────────┘" + ac + "\n",
         ]
@@ -345,9 +364,7 @@ class ShopScreen:
         reroll_idx = num_items
         forge_idx = num_items + 1 if self._forge_available() else -1
         reroll_label = f"[ Reroll ${self.shop.reroll_cost} ]"
-        forge_label = (
-            f"[ Forge x{self.shop.run.tierce_charges}/3 ]" if forge_idx >= 0 else ""
-        )
+        forge_label = f"[ Forge x{self.shop.run.tierce_charges}/3 ]" if forge_idx >= 0 else ""
         actions: list[tuple[int, str, bool]] = [
             (reroll_idx, reroll_label, self.selected == reroll_idx),
         ]
@@ -373,6 +390,8 @@ class ShopScreen:
             ed_label = _EDITION_LABELS.get(getattr(getattr(item, "edition", None), "value", ""))
             if ed_label:
                 desc = f"[{ed_label}] {desc}"
+            if getattr(item, "for_partner", False):
+                desc = f"[Partner slot] {desc}"
             parts.append(
                 move(desc_row, 1)
                 + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w)
@@ -382,8 +401,7 @@ class ShopScreen:
             parts.append(
                 move(desc_row, 1)
                 + ansi_center(
-                    white_fg() + "Spend 3 Tierce charges to level up a Planet contract."
-                    + RESET,
+                    white_fg() + "Spend 3 Tierce charges to level up a Planet contract." + RESET,
                     term_w,
                 )
                 + "\n"
@@ -394,9 +412,7 @@ class ShopScreen:
             f"← → Navigate   Enter: Buy   S: Sell   C: Consumables ({consumable_count})   "
             "Esc: Continue"
         )
-        parts.append(
-            move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w) + "\n"
-        )
+        parts.append(move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w) + "\n")
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
@@ -446,9 +462,7 @@ class ShopScreen:
 
         # Money tick-down via a single-line redraw helper.
         def _paint_money(val: int) -> None:
-            line = ansi_center(
-                white_fg() + "Money: " + green_fg() + f"${val}" + RESET, term_w
-            )
+            line = ansi_center(white_fg() + "Money: " + green_fg() + f"${val}" + RESET, term_w)
             sys.stdout.write(move(money_row, 1) + line)
             sys.stdout.flush()
 

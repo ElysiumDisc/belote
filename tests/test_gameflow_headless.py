@@ -3,6 +3,7 @@ shared round engine + ClassicRound policy), with every UI call stubbed."""
 
 from __future__ import annotations
 
+import itertools
 import random
 
 import pytest
@@ -21,11 +22,20 @@ def headless(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
         def f(*a: object, **k: object) -> object:
             log.append((name, str(a[0]) if a and isinstance(a[0], str) else ""))
             return ret
+
         return f
 
-    for name in ("display", "patch_trick_card", "slide_card_to_table_hint",
-                 "pulse_winner_glow", "animate_score_update", "show_hand_preview",
-                 "announce", "belote_stinger", "achievement_toast"):
+    for name in (
+        "display",
+        "patch_trick_card",
+        "slide_card_to_table_hint",
+        "pulse_winner_glow",
+        "animate_score_update",
+        "show_hand_preview",
+        "announce",
+        "belote_stinger",
+        "achievement_toast",
+    ):
         monkeypatch.setattr(gf, name, stub(name))
     monkeypatch.setattr(gf, "update_stats_round", stub("update_stats_round", []))
     monkeypatch.setattr(gf, "interruptible_sleep", stub("sleep", False))
@@ -95,7 +105,7 @@ def test_classic_undo_never_reprompts_coinche_mid_play(
         assert res is not None
         # Every coinche prompt must come right after a bid (the contract
         # being locked), never after a card prompt (a resumed play phase).
-        for prev, cur in zip(asked, asked[1:], strict=False):
+        for prev, cur in itertools.pairwise(asked):
             if cur == "coinche":
                 assert prev == "bid", asked
 
@@ -107,4 +117,6 @@ def test_classic_quit_returns_none(
     monkeypatch.setattr(gf, "prompt_bid", lambda state, reader: "QUIT")
     monkeypatch.setattr(gf, "prompt_card", lambda state, reader, **k: (None, state))
     for seed in range(4):
-        assert gf.run_round(new_game(), None, _ai(seed), 0, 0, 0, [], rng=random.Random(seed)) is None  # type: ignore[arg-type]
+        assert (
+            gf.run_round(new_game(), None, _ai(seed), 0, 0, 0, [], rng=random.Random(seed)) is None
+        )  # type: ignore[arg-type]

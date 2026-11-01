@@ -24,7 +24,10 @@ class Profile:
     discovered_items: list[str] = field(default_factory=list)
     stats: dict[str, Any] = field(
         default_factory=lambda: dict.fromkeys(
-            ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins"), 0
+            # 4.11.0: bosses_defeated (lifetime Boss Blind wins, normal runs)
+            # unlocks the Le Complice deck. Older saves load it as 0.
+            ("runs_won", "total_capots", "sans_atout_wins", "tout_atout_wins", "bosses_defeated"),
+            0,
         )
     )
     # 4.7.0: one-time discoverability flag for the Dix de Der Heist.
@@ -140,6 +143,7 @@ class SaveManager:
         Raises TypeError on a field of the wrong type (e.g. a string where a
         list is expected — `list("abc")` would otherwise load as chars).
         """
+
         def _str_list(key: str, default: list[str]) -> list[str]:
             if key not in data:
                 return default

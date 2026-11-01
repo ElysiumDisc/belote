@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -33,6 +33,10 @@ class Suit(Enum):
     # `is_card_suit`.
     TOUT_ATOUT = "🃏"
 
+    def __init__(self, _symbol: str) -> None:
+        # Declaration index (SPADES=0 … TOUT_ATOUT=4): feeds Card's cached hash.
+        self._ord: int = len(type(self).__members__)
+
     @property
     def symbol(self) -> str:
         return self.value
@@ -60,11 +64,27 @@ class Rank(Enum):
     KING = "K"
     ACE = "A"
 
+    def __init__(self, _symbol: str) -> None:
+        # Declaration index (SEVEN=0 … ACE=7): feeds Card's cached hash.
+        self._ord: int = len(type(self).__members__)
+
 
 @dataclass(frozen=True, slots=True)
 class Card:
     suit: Suit
     rank: Rank
+    # 4.11.0 (perf): cards are hashed millions of times per game (legal-card
+    # memo, AI memory sets, trick lookups). The generated dataclass hash built
+    # a tuple and hashed two Enums in Python (`Enum.__hash__` → hash(name));
+    # caching a small int is ~3x cheaper and, unlike the salted str hash, is
+    # identical in every process — so card-set order is reproducible.
+    _hash: int = field(init=False, repr=False, compare=False, default=0)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_hash", self.suit._ord * 8 + self.rank._ord)
+
+    def __hash__(self) -> int:
+        return self._hash
 
     def __repr__(self) -> str:
         return f"{self.rank.value}{self.suit.symbol}"

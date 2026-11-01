@@ -21,9 +21,7 @@ def test_every_synergy_id_resolves_to_a_real_joker() -> None:
     """If the synergy registry drifts, this fails loud rather than silently
     producing a no-op badge."""
     missing = validate_synergy_ids()
-    assert missing == [], (
-        f"_SYNERGY_PAIRS references jokers that don't exist: {missing}"
-    )
+    assert missing == [], f"_SYNERGY_PAIRS references jokers that don't exist: {missing}"
 
 
 def test_detect_synergies_finds_known_coinche_streak_pair() -> None:

@@ -103,9 +103,7 @@ def test_slot_machine_under_hide_hud_renders_nothing(capsys) -> None:
     captured = capsys.readouterr()
 
     # Should be empty — no ANSI move sequences, no glyphs.
-    assert captured.out == "", (
-        f"hide_hud must suppress the animation; got output: {captured.out!r}"
-    )
+    assert captured.out == "", f"hide_hud must suppress the animation; got output: {captured.out!r}"
 
 
 def test_slot_machine_under_hide_hud_still_updates_cache() -> None:
@@ -137,7 +135,8 @@ def test_slot_machine_under_separate_scoring_renders_nothing(capsys) -> None:
 def test_slot_machine_under_separate_scoring_still_updates_cache() -> None:
     reset_tally_state()
     acc, state = _make_acc_and_state(
-        chips=90, mult=2.0,  # total = 180
+        chips=90,
+        mult=2.0,  # total = 180
         boss=RuleVariants(separate_scoring=True),
     )
     BelAtroAnnounce.slot_machine_tally(acc, state, _NeverPressReader(), points=10)
@@ -277,9 +276,7 @@ def test_slot_machine_cache_updates_even_if_render_raises(monkeypatch) -> None:
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        BelAtroAnnounce.slot_machine_tally(
-            acc, state, _RaisingReader(), points=10
-        )
+        BelAtroAnnounce.slot_machine_tally(acc, state, _RaisingReader(), points=10)
 
     # Cache should still reflect the new total — finally block ran.
     assert announce_module._last_tally_total == 200
@@ -331,9 +328,7 @@ def test_slot_machine_each_skip_key_works(skip_key: Key) -> None:
     reset_tally_state()
     acc, state = _make_acc_and_state()
     # Just verifying no crash on each accepted skip key.
-    BelAtroAnnounce.slot_machine_tally(
-        acc, state, _SingleSkipReader(), points=10
-    )
+    BelAtroAnnounce.slot_machine_tally(acc, state, _SingleSkipReader(), points=10)
 
 
 # ── deterministic painting contract ──

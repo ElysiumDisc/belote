@@ -14,6 +14,7 @@ def test_unlock_vs_discovery():
     assert "test_item" in profile.unlocked_ids
     assert "test_item" not in profile.discovered_items  # Should NOT be discovered
 
+
 def test_manual_discovery():
     """Verify that manual discovery works as expected."""
     profile = Profile()
@@ -21,6 +22,7 @@ def test_manual_discovery():
 
     profile.discover("test_item")
     assert "test_item" in profile.discovered_items
+
 
 def test_profile_persistence(tmp_path):
     """Verify profile saving and loading with discovered items."""
@@ -45,11 +47,15 @@ def test_load_profile_missing_unlocked_ids_uses_defaults(tmp_path):
     save_manager = SaveManager()
     save_manager._save_path = tmp_path / "profile.json"
     # Write a save with unlocked_ids omitted entirely.
-    save_manager._save_path.write_text(json.dumps({
-        "schema_version": 1,
-        "discovered_items": ["some_joker"],
-        "stats": {"runs_won": 3},
-    }))
+    save_manager._save_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "discovered_items": ["some_joker"],
+                "stats": {"runs_won": 3},
+            }
+        )
+    )
 
     loaded = save_manager.load_profile()
     assert loaded.unlocked_ids == ["le_classique", "le_courageux", "l_econome"]
@@ -66,12 +72,16 @@ def test_load_profile_explicit_empty_unlocked_ids_stays_empty(tmp_path):
 
     save_manager = SaveManager()
     save_manager._save_path = tmp_path / "profile.json"
-    save_manager._save_path.write_text(json.dumps({
-        "schema_version": 1,
-        "unlocked_ids": [],
-        "discovered_items": [],
-        "stats": {},
-    }))
+    save_manager._save_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "unlocked_ids": [],
+                "discovered_items": [],
+                "stats": {},
+            }
+        )
+    )
 
     loaded = save_manager.load_profile()
     assert loaded.unlocked_ids == []

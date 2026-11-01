@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from functools import lru_cache
 
 from .themes import Theme, theme_manager
@@ -23,6 +23,7 @@ def _refresh_no_color_from_env() -> None:
 
 def no_color_active() -> bool:
     return _NO_COLOR
+
 
 # ── Theme cache ────────────────────────────────────────────────────────────
 # Each color flavor (felt_bg, red_fg, etc.) is hit dozens of times per render.
@@ -54,6 +55,9 @@ class _Palette:
 
 
 _active_palette: _Palette | None = None
+
+# Names accepted by `palette()` — the Theme colour fields (4.11.0).
+PALETTE_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(_Palette))
 
 
 def _refresh_theme_cache() -> None:
@@ -333,3 +337,12 @@ def menu_art_fg() -> str:
 
 def menu_border_fg() -> str:
     return _p().menu_border_fg
+
+
+def palette(name: str) -> str:
+    """Escape string of the active theme's palette field `name` (e.g.
+    ``"card_back_bg"``, ``"gold_fg"``): the same string as the matching
+    accessor above. Used by cosmetics that reference theme colours by name.
+    Raises AttributeError for an unknown name (see ``PALETTE_FIELDS``)."""
+    value: str = getattr(_p(), name)
+    return value

@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from belote.deck import Rank
 from belote.game import Seat
 
-from ..engine.event_bus import DeclarationScoredEvent, RoundEndEvent
+from ..engine.event_bus import DeclarationScoredEvent, RoundEndEvent, TrickWonEvent
 from .save import Profile, SaveManager
 
 if TYPE_CHECKING:
@@ -57,6 +58,8 @@ class UnlockTracker:
             dirty |= self._handle_round_end(event)
         elif isinstance(event, DeclarationScoredEvent):
             dirty |= self._handle_declaration(event)
+        elif isinstance(event, TrickWonEvent):
+            dirty |= self._handle_trick(event)
         else:
             # 4.8.2 (L2): silent no-op was the contract pre-4.8.2, but it
             # masked the case where a new unlock keys off a previously-
@@ -67,6 +70,22 @@ class UnlockTracker:
 
         if dirty:
             self.save_manager.save_profile(self.profile)
+
+    def _handle_trick(self, event: TrickWonEvent) -> bool:
+        """4.11.0 secret: Le Petit Poucet unlocks when South takes the last
+        trick (Dix de Der) with a 7 — the smallest card having the last word.
+        """
+        if not event.is_last or event.winner != Seat.SOUTH:
+            return False
+        card = event.winning_card
+        if card is None or card.rank != Rank.SEVEN:
+            return False
+        if self.profile.unlock("le_petit_poucet"):
+            self.pending_announcements.append(
+                "SECRET UNLOCKED: Le Petit Poucet Joker (took Dix de Der with a 7)"
+            )
+            return True
+        return False
 
     def _handle_declaration(self, event: DeclarationScoredEvent) -> bool:
         """3.9.3 Phase 8: unlock Quinte Royale (legendary joker) when NS
@@ -97,9 +116,7 @@ class UnlockTracker:
 
             # Unlock L'Exécuteur on first Capot
             if self.profile.unlock("l_executeur"):
-                self.pending_announcements.append(
-                    "UNLOCKED: L'Exécuteur Joker (Scored a Capot)"
-                )
+                self.pending_announcements.append("UNLOCKED: L'Exécuteur Joker (Scored a Capot)")
 
         # Sans Atout win: NS declared it and succeeded
         if (
@@ -134,23 +151,27 @@ class UnlockTracker:
     def check_ante_unlocks(self, ante_number: int) -> None:
         """Called when advancing to a new Ante."""
         if ante_number >= 6 and self.profile.unlock("la_surcoinche"):
-            self.pending_announcements.append(
-                "UNLOCKED: La Surcoinche Voucher (Reached Ante 6)"
-            )
+            self.pending_announcements.append("UNLOCKED: La Surcoinche Voucher (Reached Ante 6)")
             self.save_manager.save_profile(self.profile)
+
+    def notify_boss_defeated(self) -> None:
+        """4.11.0: a Boss Blind was beaten in a normal run. Counts toward the
+        Le Complice deck unlock."""
+        from ..run.decks import COMPLICE_BOSSES_REQUIRED, COMPLICE_UNLOCK_ID
+
+        self.profile.stats["bosses_defeated"] = self.profile.stats.get("bosses_defeated", 0) + 1
+        if self.profile.stats["bosses_defeated"] >= COMPLICE_BOSSES_REQUIRED and (
+            self.profile.unlock(COMPLICE_UNLOCK_ID)
+        ):
+            self.pending_announcements.append(
+                f"UNLOCKED: Le Complice Deck (defeated {COMPLICE_BOSSES_REQUIRED} Boss Blinds)"
+            )
+        self.save_manager.save_profile(self.profile)
 
     def notify_run_won(self) -> None:
         """Called by the main game loop when a run (8 antes) is completed."""
         self.profile.stats["runs_won"] += 1
-
-        # Unlock Decks on first win
-        unlocked_any = False
-        unlocked_any |= self.profile.unlock("le_republicain")
-        unlocked_any |= self.profile.unlock("l_ermite")
-
-        if unlocked_any:
-            self.pending_announcements.append(
-                "UNLOCKED: New Starting Decks (Won a Run)"
-            )
-
+        # 4.11.0: the first win used to "unlock" Le Républicain and L'Ermite
+        # and announce new decks — but those decks were never locked, so the
+        # banner promised nothing. Removed; Le Complice is the locked deck.
         self.save_manager.save_profile(self.profile)

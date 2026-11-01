@@ -75,8 +75,12 @@ class TestLeSergent:
         assert result.add_mult == 0.5
 
     def test_consecutive_south_wins_grow_with_streak(self) -> None:
-        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
-        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state)
+        r1 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state
+        )
+        r2 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=2), self.state
+        )
         assert r1.add_mult == 0.5
         assert r2.add_mult == 1.0
         assert self.state.get(f"{self.joker.id}_streak") == 2
@@ -104,8 +108,12 @@ class TestLeSergent:
 
     def test_north_win_continues_streak(self) -> None:
         # H1: partner (North) is on team NS — joker fires and extends streak.
-        r1 = self.joker.on_trick_won(make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state)
-        r2 = self.joker.on_trick_won(make_trick_event(winner=Seat.NORTH, trick_number=2), self.state)
+        r1 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.SOUTH, trick_number=1), self.state
+        )
+        r2 = self.joker.on_trick_won(
+            make_trick_event(winner=Seat.NORTH, trick_number=2), self.state
+        )
         assert r1 is not None and r1.add_mult == 0.5
         assert r2 is not None and r2.add_mult == 1.0
         assert self.state.get(f"{self.joker.id}_streak") == 2
@@ -494,9 +502,9 @@ class TestLAccumulateurTeamCredit:
     def test_mixed_round_credits_only_ns_tricks(self) -> None:
         """Realistic round: NS and EW trade tricks; only NS counts."""
         self.joker.on_trick_won(self._trick_with_seven(Seat.SOUTH), self.state)  # +5
-        self.joker.on_trick_won(self._trick_with_seven(Seat.EAST), self.state)   # +0
+        self.joker.on_trick_won(self._trick_with_seven(Seat.EAST), self.state)  # +0
         self.joker.on_trick_won(self._trick_with_seven(Seat.NORTH), self.state)  # +5
-        self.joker.on_trick_won(self._trick_with_seven(Seat.WEST), self.state)   # +0
+        self.joker.on_trick_won(self._trick_with_seven(Seat.WEST), self.state)  # +0
         assert self.state["laccumulateur_stored_chips"] == 10
 
     def test_credits_eight_too_not_just_seven(self) -> None:

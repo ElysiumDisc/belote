@@ -28,9 +28,7 @@ class _CountingJoker(Joker):
     description = "test stub: +1 chip per trick"
     cost = 0
 
-    def on_trick_won(
-        self, event: TrickWonEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         return JokerResult(add_chips=1)
 
 

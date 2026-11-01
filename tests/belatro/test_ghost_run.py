@@ -30,7 +30,7 @@ def test_recorder_save_writes_valid_json(tmp_path: Path, monkeypatch) -> None:
         data = json.load(f)
     assert data["seed"] == 99
     assert data["deck_id"] == "republicain"
-    assert data["version"] == 1
+    assert data["version"] == 2
     assert len(data["events"]) == 3
 
 

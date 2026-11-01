@@ -112,10 +112,23 @@ def test_themes_have_required_palette_keys() -> None:
     """Every theme must define every palette field — adding a new flavor
     function in ansi.py without updating themes will surface here."""
     required = {
-        "felt_bg", "felt_edge_bg", "card_face_bg", "face_card_bg",
-        "card_back_bg", "highlight_bg", "red_fg", "black_fg", "white_fg",
-        "gold_fg", "light_gray_fg", "green_fg", "banner_bg", "banner_fg",
-        "felt_placeholder_fg", "menu_art_fg", "menu_border_fg",
+        "felt_bg",
+        "felt_edge_bg",
+        "card_face_bg",
+        "face_card_bg",
+        "card_back_bg",
+        "highlight_bg",
+        "red_fg",
+        "black_fg",
+        "white_fg",
+        "gold_fg",
+        "light_gray_fg",
+        "green_fg",
+        "banner_bg",
+        "banner_fg",
+        "felt_placeholder_fg",
+        "menu_art_fg",
+        "menu_border_fg",
     }
     for name, theme in THEMES.items():
         for k in required:

@@ -454,18 +454,22 @@ def test_sans_atout_score_round_baseline() -> None:
     tricks = []
     for suit in (Suit.HEARTS, Suit.SPADES, Suit.DIAMONDS, Suit.CLUBS):
         # Two tricks per suit: A+10+K+Q = 28, then J+9+8+7 = 2
-        tricks.append((
-            TrickCard(Seat.SOUTH, Card(suit, Rank.ACE)),
-            TrickCard(Seat.WEST, Card(suit, Rank.TEN)),
-            TrickCard(Seat.NORTH, Card(suit, Rank.KING)),
-            TrickCard(Seat.EAST, Card(suit, Rank.QUEEN)),
-        ))
-        tricks.append((
-            TrickCard(Seat.SOUTH, Card(suit, Rank.JACK)),
-            TrickCard(Seat.WEST, Card(suit, Rank.NINE)),
-            TrickCard(Seat.NORTH, Card(suit, Rank.EIGHT)),
-            TrickCard(Seat.EAST, Card(suit, Rank.SEVEN)),
-        ))
+        tricks.append(
+            (
+                TrickCard(Seat.SOUTH, Card(suit, Rank.ACE)),
+                TrickCard(Seat.WEST, Card(suit, Rank.TEN)),
+                TrickCard(Seat.NORTH, Card(suit, Rank.KING)),
+                TrickCard(Seat.EAST, Card(suit, Rank.QUEEN)),
+            )
+        )
+        tricks.append(
+            (
+                TrickCard(Seat.SOUTH, Card(suit, Rank.JACK)),
+                TrickCard(Seat.WEST, Card(suit, Rank.NINE)),
+                TrickCard(Seat.NORTH, Card(suit, Rank.EIGHT)),
+                TrickCard(Seat.EAST, Card(suit, Rank.SEVEN)),
+            )
+        )
     state = GameState(
         hands=((), (), (), ()),
         trump=None,
@@ -489,7 +493,9 @@ def test_sans_atout_no_belote_ever() -> None:
     # Single trick state, give NS hearts K+Q in initial_hands but no belote
     initial_hands = (
         (Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.QUEEN)),
-        (), (), (),
+        (),
+        (),
+        (),
     )
     state = GameState(
         hands=((), (), (), ()),
@@ -510,7 +516,9 @@ def test_tout_atout_no_belote_ever() -> None:
     """Belote is also disabled under Tout Atout (no unique K+Q-of-trump)."""
     initial_hands = (
         (Card(Suit.HEARTS, Rank.KING), Card(Suit.HEARTS, Rank.QUEEN)),
-        (), (), (),
+        (),
+        (),
+        (),
     )
     state = GameState(
         hands=((), (), (), ()),

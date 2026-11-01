@@ -54,7 +54,9 @@ class _ScriptedReader:
         return self._events.pop(0)
 
 
-@pytest.mark.parametrize(("key", "expected"), [(Key.RIGHT, 1000), (Key.LEFT, 500), (Key.ENTER, 1000)])
+@pytest.mark.parametrize(
+    ("key", "expected"), [(Key.RIGHT, 1000), (Key.LEFT, 500), (Key.ENTER, 1000)]
+)
 def test_settings_non_preset_target_does_not_crash(
     monkeypatch: pytest.MonkeyPatch, key: Key, expected: int
 ) -> None:

@@ -1,4 +1,5 @@
 """Tests for the 4.8.0 `pulse_winner_glow` trick-end animation."""
+
 from __future__ import annotations
 
 import io
@@ -32,6 +33,7 @@ def test_pulse_winner_glow_renders_direction_label(monkeypatch, seat, label):
         # Pass reader=None so we hit the time.sleep branch — we override
         # time.sleep to instant via the test scope.
         import time
+
         monkeypatch.setattr(time, "sleep", lambda _x: None)
         render.pulse_winner_glow(seat, reader=None)
     assert f"{label} wins" in buf.getvalue()

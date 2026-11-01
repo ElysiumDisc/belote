@@ -62,7 +62,12 @@ class TestPartnerTrust:
         # North is partner of South
         hands = [(), (), list(cards), ()]  # S, E, N, W
         state = BelatroState(hands=tuple(tuple(h) for h in hands))
-        state = replace(state, trump=Suit.SPADES, variants=replace(state.variants, agent_double_active=True), turn=Seat.NORTH)
+        state = replace(
+            state,
+            trump=Suit.SPADES,
+            variants=replace(state.variants, agent_double_active=True),
+            turn=Seat.NORTH,
+        )
         ai = AIPlayer(Seat.NORTH, Difficulty.MEDIUM)
         played = ai.decide_card(state)
 
@@ -78,7 +83,10 @@ class TestPartnerTrust:
         class MockPartnerJoker(Joker):
             name = "Mock Partner Joker"
             is_partner_joker = True
-            def on_trick_won(self, event: object, joker_state: dict[str, object]) -> JokerResult | None:
+
+            def on_trick_won(
+                self, event: object, joker_state: dict[str, object]
+            ) -> JokerResult | None:
                 return JokerResult(add_chips=10)
 
         joker = MockPartnerJoker()

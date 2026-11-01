@@ -25,9 +25,7 @@ class LAvare(Joker):
 class LaSentinelle(Joker):
     id = "la_sentinelle"
     name = "La Sentinelle"
-    description = (
-        "If you are dealt the trump Jack and win NO trick with it, gain ×3 Mult."
-    )
+    description = "If you are dealt the trump Jack and win NO trick with it, gain ×3 Mult."
     cost = 9
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:

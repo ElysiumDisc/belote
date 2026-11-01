@@ -164,9 +164,7 @@ def test_collectionneur_pays_per_annonce_card_in_late_trick() -> None:
     acc.attach_jokers([j])
     state = _state_with_tierce_in_hearts()
     # Declaration scores first to populate `_ns_annonce_cards`.
-    state = acc.update_state(
-        state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20)
-    )
+    state = acc.update_state(state, DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20))
     assert "_ns_annonce_cards" in state._joker_state
 
     # Trick 3 contains the J♥ played by SOUTH (the leader).
@@ -175,7 +173,7 @@ def test_collectionneur_pays_per_annonce_card_in_late_trick() -> None:
         _trick(
             winner=Seat.SOUTH,
             cards=(
-                Card(Suit.HEARTS, Rank.JACK),    # SOUTH — annonce card
+                Card(Suit.HEARTS, Rank.JACK),  # SOUTH — annonce card
                 Card(Suit.HEARTS, Rank.SEVEN),
                 Card(Suit.HEARTS, Rank.EIGHT),
                 Card(Suit.HEARTS, Rank.QUEEN),
@@ -213,27 +211,19 @@ def test_collectionneur_silent_on_trick_1() -> None:
 
 def test_mathematicien_fires_on_multiple_of_5_annonce() -> None:
     j = LeMathematicien()
-    res = j.on_declaration(
-        DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20), {}
-    )
+    res = j.on_declaration(DeclarationScoredEvent(Seat.SOUTH, "Tierce", 20), {})
     assert res is not None and res.times_mult == 2.0
 
 
 def test_mathematicien_silent_on_ew_annonce() -> None:
     j = LeMathematicien()
-    assert (
-        j.on_declaration(DeclarationScoredEvent(Seat.EAST, "Tierce", 20), {})
-        is None
-    )
+    assert j.on_declaration(DeclarationScoredEvent(Seat.EAST, "Tierce", 20), {}) is None
 
 
 def test_mathematicien_silent_on_zero_points() -> None:
     """Defensive: 0 % 5 == 0 mathematically but a no-op declaration shouldn't pay."""
     j = LeMathematicien()
-    assert (
-        j.on_declaration(DeclarationScoredEvent(Seat.SOUTH, "Tierce", 0), {})
-        is None
-    )
+    assert j.on_declaration(DeclarationScoredEvent(Seat.SOUTH, "Tierce", 0), {}) is None
 
 
 # ── LEclat ──────────────────────────────────────────────────────────────────
@@ -246,7 +236,7 @@ def test_eclat_triples_chips_when_belote_in_won_trick() -> None:
     evt = TrickWonEvent(
         winner=Seat.SOUTH,
         cards=(
-            Card(Suit.HEARTS, Rank.KING),     # the belote half — trump K
+            Card(Suit.HEARTS, Rank.KING),  # the belote half — trump K
             Card(Suit.HEARTS, Rank.SEVEN),
             Card(Suit.HEARTS, Rank.EIGHT),
             Card(Suit.HEARTS, Rank.NINE),
@@ -375,6 +365,8 @@ def test_reconcile_bonus_money_helper_credits_and_debits() -> None:
     game._reconcile_bonus_money(15)
     assert game.run.economy.money == 15  # bailout credited
 
+    # 4.11.0: a debit larger than the wallet takes what is there (Le
+    # Contre-Attaquant's steals) — still no crash, never negative.
     game.run.economy = Economy(money=2)
     game._reconcile_bonus_money(-5)
-    assert game.run.economy.money == 2  # broke: debit safely no-ops, no crash
+    assert game.run.economy.money == 0

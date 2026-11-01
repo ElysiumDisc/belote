@@ -49,6 +49,7 @@ def append_summary(run: BelAtroRun, *, won: bool) -> None:
             "ts": int(time.time()),
             "deck_id": run.deck_id,
             "daily": run.daily,
+            "challenge": run.challenge,  # 4.11.0 Boss Rush / Challenge Seed
             "ante_reached": run.ante_number,
             "blind_index": run.blind_index,
             "endless": run.endless,
@@ -57,9 +58,7 @@ def append_summary(run: BelAtroRun, *, won: bool) -> None:
             "joker_count": len(run.jokers),
             "joker_ids": [getattr(j, "id", "?") for j in run.jokers],
             "voucher_count": len(run.vouchers),
-            "money": getattr(run.economy, "money", 0)
-            if hasattr(run, "economy")
-            else 0,
+            "money": getattr(run.economy, "money", 0) if hasattr(run, "economy") else 0,
         }
         path = _summary_path()
         with path.open("a", encoding="utf-8") as f:

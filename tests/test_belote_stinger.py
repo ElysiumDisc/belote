@@ -1,4 +1,5 @@
 """Tests for the 4.8.0 `belote_stinger` banner used for Belote / Rebelote."""
+
 from __future__ import annotations
 
 import io

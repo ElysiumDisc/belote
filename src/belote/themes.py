@@ -3,9 +3,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from .paths import config_dir
@@ -166,12 +167,12 @@ THEMES: dict[str, Theme] = {
         face_card_bg=(245, 240, 220),
         card_back_bg=(50, 80, 150),
         highlight_bg=(255, 200, 0),  # orange highlight
-        red_fg=(0, 100, 200),         # blue replaces red for ♥/♦
+        red_fg=(0, 100, 200),  # blue replaces red for ♥/♦
         black_fg=(20, 20, 20),
         white_fg=(245, 245, 240),
         gold_fg=(255, 200, 0),
         light_gray_fg=(160, 160, 160),
-        green_fg=(0, 150, 200),       # cyan instead of green
+        green_fg=(0, 150, 200),  # cyan instead of green
         banner_bg=(50, 50, 80),
         banner_fg=(255, 200, 0),
         felt_placeholder_fg=(80, 80, 100),
@@ -186,11 +187,11 @@ THEMES: dict[str, Theme] = {
         card_face_bg=(238, 230, 210),
         face_card_bg=(245, 232, 200),
         card_back_bg=(60, 38, 22),
-        highlight_bg=(212, 158, 60),    # lantern gold
+        highlight_bg=(212, 158, 60),  # lantern gold
         red_fg=(180, 60, 50),
         black_fg=(35, 30, 25),
         white_fg=(228, 222, 200),
-        gold_fg=(212, 158, 60),         # copper / lantern
+        gold_fg=(212, 158, 60),  # copper / lantern
         light_gray_fg=(145, 138, 120),
         green_fg=(90, 150, 95),
         banner_bg=(28, 50, 32),
@@ -203,10 +204,10 @@ THEMES: dict[str, Theme] = {
         name="Moonlit Tavern",
         felt_bg=(32, 38, 56),
         felt_edge_bg=(20, 24, 38),
-        card_face_bg=(240, 226, 196),   # parchment
+        card_face_bg=(240, 226, 196),  # parchment
         face_card_bg=(245, 232, 200),
         card_back_bg=(70, 50, 30),
-        highlight_bg=(220, 170, 80),    # candle amber
+        highlight_bg=(220, 170, 80),  # candle amber
         red_fg=(180, 55, 60),
         black_fg=(40, 35, 30),
         white_fg=(230, 224, 210),
@@ -223,10 +224,10 @@ THEMES: dict[str, Theme] = {
         name="Royal Purple",
         felt_bg=(48, 24, 64),
         felt_edge_bg=(32, 14, 44),
-        card_face_bg=(245, 238, 230),   # ivory
+        card_face_bg=(245, 238, 230),  # ivory
         face_card_bg=(250, 232, 200),
         card_back_bg=(35, 18, 50),
-        highlight_bg=(212, 175, 55),    # gold
+        highlight_bg=(212, 175, 55),  # gold
         red_fg=(190, 50, 70),
         black_fg=(35, 25, 40),
         white_fg=(238, 232, 240),
@@ -243,10 +244,10 @@ THEMES: dict[str, Theme] = {
         name="Emerald Isle",
         felt_bg=(12, 70, 50),
         felt_edge_bg=(6, 46, 32),
-        card_face_bg=(245, 240, 220),   # cream
+        card_face_bg=(245, 240, 220),  # cream
         face_card_bg=(248, 238, 200),
-        card_back_bg=(70, 50, 22),      # brass
-        highlight_bg=(212, 175, 55),    # brass gold
+        card_back_bg=(70, 50, 22),  # brass
+        highlight_bg=(212, 175, 55),  # brass gold
         red_fg=(178, 48, 56),
         black_fg=(30, 35, 30),
         white_fg=(232, 230, 215),
@@ -264,20 +265,20 @@ THEMES: dict[str, Theme] = {
     # felt, coral suits, smoky-purple "blacks", amber-sunset highlights.
     "sunset_magma": Theme(
         name="Sunset Magma",
-        felt_bg=(92, 28, 60),           # deep magenta
-        felt_edge_bg=(58, 16, 38),      # rose edge
-        card_face_bg=(248, 232, 210),   # warm cream
-        face_card_bg=(252, 226, 188),   # peach-cream
-        card_back_bg=(168, 50, 70),     # rose
-        highlight_bg=(248, 168, 92),    # amber
-        red_fg=(228, 88, 78),           # coral
-        black_fg=(72, 38, 70),          # smoky purple
+        felt_bg=(92, 28, 60),  # deep magenta
+        felt_edge_bg=(58, 16, 38),  # rose edge
+        card_face_bg=(248, 232, 210),  # warm cream
+        face_card_bg=(252, 226, 188),  # peach-cream
+        card_back_bg=(168, 50, 70),  # rose
+        highlight_bg=(248, 168, 92),  # amber
+        red_fg=(228, 88, 78),  # coral
+        black_fg=(72, 38, 70),  # smoky purple
         white_fg=(248, 238, 226),
-        gold_fg=(232, 168, 78),         # amber-sunset
+        gold_fg=(232, 168, 78),  # amber-sunset
         light_gray_fg=(178, 150, 160),
-        green_fg=(140, 138, 96),        # olive accent
-        banner_bg=(126, 36, 78),        # magenta
-        banner_fg=(248, 232, 210),      # cream
+        green_fg=(140, 138, 96),  # olive accent
+        banner_bg=(126, 36, 78),  # magenta
+        banner_fg=(248, 232, 210),  # cream
         felt_placeholder_fg=(132, 60, 92),
         menu_art_fg=(232, 168, 78),
         menu_border_fg=(228, 88, 78),
@@ -292,25 +293,190 @@ THEMES: dict[str, Theme] = {
     # for selection visibility.
     "provence_lavande": Theme(
         name="Provence Lavande",
-        felt_bg=(160, 130, 210),        # vivid lavender field
-        felt_edge_bg=(95, 70, 135),     # deep mauve vignette
-        card_face_bg=(248, 240, 220),   # sun-parchment
-        face_card_bg=(252, 235, 195),   # warmer parchment for face cards
-        card_back_bg=(95, 65, 130),     # aubergine plum back
-        highlight_bg=(225, 185, 105),   # honey-gold (warm + visible on lavender)
-        red_fg=(170, 50, 95),           # mauve-wine ♥/♦
-        black_fg=(45, 35, 65),          # deep aubergine-noir ♠/♣
-        white_fg=(248, 240, 220),       # parchment
-        gold_fg=(225, 185, 105),        # honey-gold
+        felt_bg=(160, 130, 210),  # vivid lavender field
+        felt_edge_bg=(95, 70, 135),  # deep mauve vignette
+        card_face_bg=(248, 240, 220),  # sun-parchment
+        face_card_bg=(252, 235, 195),  # warmer parchment for face cards
+        card_back_bg=(95, 65, 130),  # aubergine plum back
+        highlight_bg=(225, 185, 105),  # honey-gold (warm + visible on lavender)
+        red_fg=(170, 50, 95),  # mauve-wine ♥/♦
+        black_fg=(45, 35, 65),  # deep aubergine-noir ♠/♣
+        white_fg=(248, 240, 220),  # parchment
+        gold_fg=(225, 185, 105),  # honey-gold
         light_gray_fg=(185, 170, 205),  # lilac-gray
-        green_fg=(130, 150, 100),       # herb green
-        banner_bg=(55, 40, 115),        # deep indigo-violet
-        banner_fg=(248, 240, 220),      # parchment
+        green_fg=(130, 150, 100),  # herb green
+        banner_bg=(55, 40, 115),  # deep indigo-violet
+        banner_fg=(248, 240, 220),  # parchment
         felt_placeholder_fg=(110, 85, 150),
-        menu_art_fg=(225, 185, 105),    # honey-gold
-        menu_border_fg=(175, 130, 200), # soft orchid
+        menu_art_fg=(225, 185, 105),  # honey-gold
+        menu_border_fg=(175, 130, 200),  # soft orchid
     ),
 }
+
+
+# ── theme files (4.11.0 import / export) ──────────────────────────────────
+#
+# Format of `<config dir>/themes/<stem>.json`:
+#   {"format": "belote-theme", "version": 1, "name": "My Theme",
+#    "colors": {"felt_bg": "#194b2d", ..., "menu_border_fg": [60, 160, 90]}}
+# Every colour field of `Theme` is required, no others are allowed; a colour
+# is "#rrggbb" or a 3-int [r, g, b] list (0-255). Imported files are
+# untrusted: size-capped, strictly validated, and registered under
+# "custom:<stem>" so they can never replace a built-in theme.
+
+THEME_FORMAT = "belote-theme"
+THEME_FORMAT_VERSION = 1
+MAX_THEME_BYTES = 8 * 1024
+MAX_THEME_NAME = 32
+CUSTOM_PREFIX = "custom:"
+COLOR_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Theme) if f.name != "name")
+_TOP_KEYS = frozenset({"format", "version", "name", "colors"})
+_STEM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}")
+_HEX_RE = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+class ThemeFileError(ValueError):
+    """A theme file was rejected. The message is safe to show the player (it
+    never echoes raw file content)."""
+
+
+def theme_files_dir() -> Path:
+    return config_dir() / "themes"
+
+
+def _safe_stem(text: str) -> str:
+    """A filesystem-safe file stem (no separators, dots or traversal)."""
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", text).strip("_-")[:40]
+    return stem or "theme"
+
+
+def _hex(rgb: tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
+def theme_to_dict(theme: Theme) -> dict[str, object]:
+    return {
+        "format": THEME_FORMAT,
+        "version": THEME_FORMAT_VERSION,
+        "name": theme.name,
+        "colors": {k: _hex(getattr(theme, k)) for k in COLOR_FIELDS},
+    }
+
+
+def export_theme(key: str) -> Path:
+    """Write theme `key` to `<config dir>/themes/<stem>.json` (atomic,
+    overwriting an earlier export of the same theme). Raises OSError."""
+    theme = THEMES[key]
+    folder = theme_files_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{_safe_stem(key.removeprefix(CUSTOM_PREFIX))}.json"
+    tmp: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=folder, prefix=".theme-", suffix=".tmp", delete=False, encoding="utf-8"
+        ) as tf:
+            tmp = Path(tf.name)
+            json.dump(theme_to_dict(theme), tf, indent=2, ensure_ascii=False)
+        tmp.replace(path)
+    except OSError:
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+        raise
+    return path
+
+
+def list_theme_files() -> list[Path]:
+    """Importable files in the themes folder: regular (non-symlink) `.json`
+    files with a safe name, sorted. A missing folder lists nothing."""
+    try:
+        entries = sorted(theme_files_dir().iterdir())
+    except OSError:
+        return []
+    return [
+        p
+        for p in entries
+        if p.suffix == ".json" and _STEM_RE.fullmatch(p.stem) and not p.is_symlink() and p.is_file()
+    ]
+
+
+def _parse_color(key: str, value: object) -> tuple[int, int, int]:
+    if isinstance(value, str) and _HEX_RE.fullmatch(value):
+        return (int(value[1:3], 16), int(value[3:5], 16), int(value[5:7], 16))
+    if (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 255 for c in value)
+    ):
+        return (value[0], value[1], value[2])
+    raise ThemeFileError(f'"{key}" must be "#rrggbb" or [r, g, b] with values 0-255')
+
+
+def _parse_name(value: object) -> str:
+    if not isinstance(value, str):
+        raise ThemeFileError('"name" must be a string')
+    name = value.strip()
+    if not name or len(name) > MAX_THEME_NAME or not name.isprintable():
+        raise ThemeFileError(f'"name" must be 1-{MAX_THEME_NAME} printable characters')
+    return name
+
+
+def _check_header(data: dict[object, object]) -> None:
+    unknown = [k for k in data if k not in _TOP_KEYS]
+    if unknown:
+        raise ThemeFileError(f"unknown field(s): {len(unknown)} not allowed")
+    if data.get("format", THEME_FORMAT) != THEME_FORMAT:
+        raise ThemeFileError(f'"format" must be "{THEME_FORMAT}"')
+    if data.get("version", THEME_FORMAT_VERSION) != THEME_FORMAT_VERSION:
+        raise ThemeFileError(f"unsupported version (expected {THEME_FORMAT_VERSION})")
+
+
+def parse_theme(raw: bytes) -> Theme:
+    """Strictly validate theme-file bytes. Raises ThemeFileError."""
+    if len(raw) > MAX_THEME_BYTES:
+        raise ThemeFileError(f"file is larger than {MAX_THEME_BYTES // 1024} KiB")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise ThemeFileError("not valid UTF-8 JSON") from None
+    if not isinstance(data, dict):
+        raise ThemeFileError("top level must be a JSON object")
+    _check_header(data)
+    colors = data.get("colors")
+    if not isinstance(colors, dict):
+        raise ThemeFileError('"colors" must be an object')
+    unknown = [k for k in colors if k not in COLOR_FIELDS]
+    if unknown:
+        raise ThemeFileError(f"{len(unknown)} unknown colour key(s)")
+    missing = [k for k in COLOR_FIELDS if k not in colors]
+    if missing:
+        raise ThemeFileError(f'missing colour "{missing[0]}" ({len(missing)} missing)')
+    parsed = {k: _parse_color(k, colors[k]) for k in COLOR_FIELDS}
+    return Theme(name=_parse_name(data.get("name")), **parsed)
+
+
+def _read_capped(path: Path) -> bytes:
+    folder = theme_files_dir()
+    if not _STEM_RE.fullmatch(path.stem) or path.suffix != ".json":
+        raise ThemeFileError("file name must be letters, digits, '-' or '_' + .json")
+    try:
+        if path.is_symlink() or path.resolve().parent != folder.resolve():
+            raise ThemeFileError("file must be inside the themes folder")
+        if path.stat().st_size > MAX_THEME_BYTES:
+            raise ThemeFileError(f"file is larger than {MAX_THEME_BYTES // 1024} KiB")
+        with path.open("rb") as f:
+            return f.read(MAX_THEME_BYTES + 1)
+    except OSError:
+        raise ThemeFileError("file could not be read") from None
+
+
+def import_theme(path: Path) -> str:
+    """Validate and register a theme file; returns its THEMES key
+    (``custom:<stem>``). Does not activate it. Raises ThemeFileError."""
+    theme = parse_theme(_read_capped(path))
+    key = CUSTOM_PREFIX + path.stem
+    THEMES[key] = theme
+    return key
 
 
 class ThemeManager:
@@ -349,9 +515,7 @@ class ThemeManager:
 
     def set_current(self, name: str) -> None:
         if name not in THEMES:
-            raise ValueError(
-                f"Unknown theme {name!r}. Available: {sorted(THEMES.keys())}"
-            )
+            raise ValueError(f"Unknown theme {name!r}. Available: {sorted(THEMES.keys())}")
         self._current_theme_name = name
         # Execute registered callbacks (e.g., to clear UI caches) before
         # persisting, so a failed save can never leave caches stale.
@@ -380,6 +544,10 @@ class ThemeManager:
             with contextlib.suppress(Exception), path.open() as f:
                 data = json.load(f)
                 name = data.get("theme", "classic_green")
+                if isinstance(name, str) and name.startswith(CUSTOM_PREFIX) and name not in THEMES:
+                    # An imported theme: re-read its file (falls back to the
+                    # default when it was removed or no longer validates).
+                    import_theme(theme_files_dir() / f"{name.removeprefix(CUSTOM_PREFIX)}.json")
                 if name in THEMES:
                     self._current_theme_name = name
 
@@ -393,7 +561,10 @@ class ThemeManager:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
-                mode="w", dir=str(path.parent), prefix=".theme-", suffix=".json.tmp",
+                mode="w",
+                dir=str(path.parent),
+                prefix=".theme-",
+                suffix=".json.tmp",
                 delete=False,
             ) as tf:
                 tmp_path = Path(tf.name)

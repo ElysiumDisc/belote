@@ -4,6 +4,7 @@ Selecting a card should rise it one row above its neighbors (deferred C1).
 Unselected hand renders at `card_h` rows; selected renders at `card_h + 1`
 card rows + 1 highlight bar row.
 """
+
 from __future__ import annotations
 
 import random
@@ -23,8 +24,13 @@ def _sample_hand() -> tuple:
 def test_no_selection_renders_card_h_rows() -> None:
     hand = _sample_hand()
     rows = _render_hand_horizontal(
-        hand, None, hand, term_w=80, layout=COMPACT,
-        trump=Suit.HEARTS, show_readout=False,
+        hand,
+        None,
+        hand,
+        term_w=80,
+        layout=COMPACT,
+        trump=Suit.HEARTS,
+        show_readout=False,
     )
     # No lift, no highlight bar — exactly card_h rows.
     assert len(rows) == COMPACT.card_h
@@ -33,8 +39,13 @@ def test_no_selection_renders_card_h_rows() -> None:
 def test_selection_lifts_selected_card_one_row() -> None:
     hand = _sample_hand()
     rows = _render_hand_horizontal(
-        hand, 2, hand, term_w=80, layout=COMPACT,
-        trump=Suit.HEARTS, show_readout=False,
+        hand,
+        2,
+        hand,
+        term_w=80,
+        layout=COMPACT,
+        trump=Suit.HEARTS,
+        show_readout=False,
     )
     # card_h + 1 card rows (lift adds the top row) + 1 highlight bar row.
     assert len(rows) == COMPACT.card_h + 2
@@ -43,8 +54,13 @@ def test_selection_lifts_selected_card_one_row() -> None:
 def test_selection_with_readout_adds_label_row() -> None:
     hand = _sample_hand()
     rows = _render_hand_horizontal(
-        hand, 0, hand, term_w=80, layout=COMPACT,
-        trump=Suit.HEARTS, show_readout=True,
+        hand,
+        0,
+        hand,
+        term_w=80,
+        layout=COMPACT,
+        trump=Suit.HEARTS,
+        show_readout=True,
     )
     # card_h + 1 (cards with lift) + 1 (highlight bar) + 1 (readout label).
     assert len(rows) == COMPACT.card_h + 3
@@ -56,8 +72,13 @@ def test_lifted_row_is_only_the_selected_card() -> None:
     hand = _sample_hand()
     # Select the middle card (index 2 of 5).
     rows = _render_hand_horizontal(
-        hand, 2, hand, term_w=80, layout=COMPACT,
-        trump=Suit.HEARTS, show_readout=False,
+        hand,
+        2,
+        hand,
+        term_w=80,
+        layout=COMPACT,
+        trump=Suit.HEARTS,
+        show_readout=False,
     )
     top_row = rows[0]
     # The top row should have ANSI escapes (the selected card's face) — if any

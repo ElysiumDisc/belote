@@ -126,6 +126,21 @@ class TierceForge(Voucher):
         pass
 
 
+class LeTelephone(Voucher):
+    """4.11.0: the partner joins the shopping."""
+
+    id = "le_telephone"
+    name = "Le Téléphone"
+    description = (
+        "The shop sometimes stocks an extra Partner Joker that goes in your "
+        "partner's own 2 slots (not yours)."
+    )
+    cost = 8
+
+    def _apply_once(self, run: BelAtroRun) -> None:
+        run.partner_joker_offers = True
+
+
 def forge_tierce(run: BelAtroRun, planet_id: str) -> bool:
     """Spend 3 Tierce charges to apply a Planet's level-up reward.
 

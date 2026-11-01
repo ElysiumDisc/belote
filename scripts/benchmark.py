@@ -72,7 +72,9 @@ def benchmark_belatro_bus(num_jokers: int = 5, iterations: int = 1000) -> float:
     from belote.belatro.items.jokers.contract import LeDiplomate
     from belote.deck import Card, Rank
 
-    print(f"Benchmarking BelAtro State Update ({num_jokers} Jokers) over {iterations} iterations...")
+    print(
+        f"Benchmarking BelAtro State Update ({num_jokers} Jokers) over {iterations} iterations..."
+    )
 
     jokers: list[Joker] = [LeDiplomate() for _ in range(num_jokers)]
     acc = ScoreAccumulator()
@@ -114,7 +116,7 @@ def benchmark_scoring(iterations: int = 1000) -> float:
         trump=Suit.SPADES,
         taker=Seat.SOUTH,
         completed_tricks=tuple([(TrickCard(Seat.SOUTH, Card(Suit.SPADES, Rank.ACE)),) * 4] * 8),
-        last_trick_winner=Seat.SOUTH
+        last_trick_winner=Seat.SOUTH,
     )
 
     times = []
@@ -130,6 +132,7 @@ def benchmark_scoring(iterations: int = 1000) -> float:
 
 def benchmark_deal(iterations: int = 1000) -> float:
     from belote.game import start_round
+
     print(f"Benchmarking start_round() (deal) over {iterations} iterations...")
 
     state = new_game()
@@ -148,6 +151,7 @@ def benchmark_deal(iterations: int = 1000) -> float:
 
 def benchmark_legal_cards(iterations: int = 1000) -> float:
     from belote.game import clear_legal_cards_cache, legal_cards
+
     print(f"Benchmarking legal_cards() (cache cleared per call) over {iterations} iterations...")
 
     state = new_game()
@@ -173,6 +177,7 @@ def benchmark_legal_cards_cached(iterations: int = 1000) -> float:
     worst-case-only time.
     """
     from belote.game import clear_legal_cards_cache, legal_cards
+
     print(f"Benchmarking legal_cards() (warm cache) over {iterations} iterations...")
 
     state = new_game()
@@ -229,11 +234,14 @@ def benchmark_ai_legality_filter(iterations: int = 500) -> float:
     benchmark above would over-attribute AI time to legality checks.
     """
     from belote.game import legal_cards
+
     print(f"Benchmarking AI legality filter over {iterations} iterations...")
 
     state = new_game()
     state = start_round(state, random.Random(42))
-    state = replace(state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH, turn=Seat.NORTH)
+    state = replace(
+        state, phase=Phase.PLAYING, trump=Suit.SPADES, taker=Seat.SOUTH, turn=Seat.NORTH
+    )
 
     times = []
     for _ in range(iterations):

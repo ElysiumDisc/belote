@@ -18,6 +18,7 @@ from belote.input import Key, KeyEvent
 @dataclass
 class ScriptedReader:
     """Minimal KeyReader stand-in that pops queued events on each read()."""
+
     events: Iterator[KeyEvent]
 
     def read(self) -> KeyEvent:
@@ -27,8 +28,9 @@ class ScriptedReader:
 def _state_with_unsorted_south_hand() -> GameState:
     """Build a state where SOUTH's hand is deliberately NOT in sorted order."""
     import random
+
     deck = shuffle(make_deck(), random.Random(99))
-    hands = tuple(tuple(deck[i * 8:(i + 1) * 8]) for i in range(4))
+    hands = tuple(tuple(deck[i * 8 : (i + 1) * 8]) for i in range(4))
     return GameState(
         hands=hands,
         initial_hands=hands,

@@ -103,9 +103,7 @@ class LeFlambeur(PartnerPersonality):
         # "2+ honors anywhere" and roughly half as often as the previous flat
         # 40% coin-flip, so it lives up to "aggressive" without being random.
         honors = {Rank.JACK, Rank.NINE, Rank.ACE}
-        per_suit_honors = Counter(
-            c.suit for c in hand if c.rank in honors and c.suit.is_card_suit
-        )
+        per_suit_honors = Counter(c.suit for c in hand if c.rank in honors and c.suit.is_card_suit)
         if not per_suit_honors:
             return False
         return per_suit_honors.most_common(1)[0][1] >= 1
@@ -122,9 +120,7 @@ class LeFlambeur(PartnerPersonality):
         length = Counter(c.suit for c in hand if c.suit.is_card_suit)
         if not length:
             return None
-        honor_count = Counter(
-            c.suit for c in hand if c.rank in honors and c.suit.is_card_suit
-        )
+        honor_count = Counter(c.suit for c in hand if c.rank in honors and c.suit.is_card_suit)
         return max(length, key=lambda s: (length[s], honor_count[s]))
 
     def should_coinche(self, state: GameState, rng: Random) -> bool:

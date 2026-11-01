@@ -163,3 +163,25 @@ class Libra(Planet):
 
     def level_up_reward(self) -> dict[str, Any]:
         return {"coinche_multiplier": 1.0}
+
+
+class Neptune(Planet):
+    """4.11.0 planet variant: levels up Dix de Der instead of a contract."""
+
+    id = "neptune"
+    name = "Neptune"
+    contract_id = "dix_de_der"
+    description = "Level up Dix de Der: +25 chips whenever your team wins the last trick."
+    suit_symbol = "♆"
+    ascii_art = (
+        "      ♆       ",
+        "  ~~ ( ) ~~   ",
+        "  Neptune  ♪  ",
+    )
+    shop_lines = (
+        " Dix de Der:  ",
+        " +25 chips    ",
+    )
+
+    def level_up_reward(self) -> dict[str, Any]:
+        return {"last_trick_chips": 25}

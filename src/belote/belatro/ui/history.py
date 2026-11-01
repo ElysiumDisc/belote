@@ -41,17 +41,17 @@ from ...ui.render import get_term_size, invalidate_diff
 class BelAtroHistoryEntry:
     """One row in the BelAtro [H] overlay — appended at the end of `_play_blind`."""
 
-    ante: int                            # 1..8 (or 9+ in endless)
-    blind_label: str                     # "Small" | "Big" | "Boss"
-    target: int                          # blind target the player needed to reach
-    boss_name: str | None                # boss name when active, else None
-    taker_label: str                     # "S (NS)" / "E (EW)" / "—"
-    contract: str                        # "♥" / "♣" / "♦" / "♠" / "SA" / "TA" / "—"
+    ante: int  # 1..8 (or 9+ in endless)
+    blind_label: str  # "Small" | "Big" | "Boss"
+    target: int  # blind target the player needed to reach
+    boss_name: str | None  # boss name when active, else None
+    taker_label: str  # "S (NS)" / "E (EW)" / "—"
+    contract: str  # "♥" / "♣" / "♦" / "♠" / "SA" / "TA" / "—"
     tricks_ns: int
     tricks_ew: int
-    score: int                           # acc.get_total(final_state) at round end
-    status: str                          # "WON" | "FAILED" | "CAPOT" | "SURVIVED"
-    money_delta: int                     # economy.money change across the blind
+    score: int  # acc.get_total(final_state) at round end
+    status: str  # "WON" | "FAILED" | "CAPOT" | "SURVIVED"
+    money_delta: int  # economy.money change across the blind
     decl_summary_ns: tuple[str, ...]
     decl_summary_ew: tuple[str, ...]
 
@@ -112,7 +112,17 @@ def _build_history_lines(entries: list[BelAtroHistoryEntry], term_w: int) -> lis
         wide = term_w >= 100
         if wide:
             w_no, w_ante, w_bl, w_tgt, w_boss, w_tkr, w_con, w_trk, w_score, w_st, w_money = (
-                3, 4, 5, 5, 14, 7, 4, 7, 7, 8, 6,
+                3,
+                4,
+                5,
+                5,
+                14,
+                7,
+                4,
+                7,
+                7,
+                8,
+                6,
             )
             header_cells = [
                 _ljust_visible("#", w_no),
@@ -152,8 +162,7 @@ def _build_history_lines(entries: list[BelAtroHistoryEntry], term_w: int) -> lis
         else:
             # Compact three-line-per-row layout for narrow terminals.
             lines.append(
-                f"{BOLD}{white_fg()}{'#':<3} {'A.B':<4} {'TGT':<5} "
-                f"{'SCORE':<7} STATUS{RESET}"
+                f"{BOLD}{white_fg()}{'#':<3} {'A.B':<4} {'TGT':<5} {'SCORE':<7} STATUS{RESET}"
             )
             lines.append("─" * 40)
             for i, e in enumerate(entries):

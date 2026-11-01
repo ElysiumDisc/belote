@@ -34,7 +34,7 @@ def test_first_render_emits_full_frame(monkeypatch: pytest.MonkeyPatch) -> None:
     """A fresh render (no baseline) must emit the full string from render()."""
     render_mod._last_emitted_lines = None
     render_mod._last_render_key = None
-    buf, first = _flush_baseline(monkeypatch)
+    _, first = _flush_baseline(monkeypatch)
     # Sanity: full frame is non-trivial.
     assert len(first) > 500
 
@@ -170,15 +170,16 @@ def test_theme_name_cache_invalidated_on_theme_change() -> None:
     with the new palette).
     """
     from belote.themes import theme_manager
+    from belote.ui import cards  # 4.11.0: the cache moved with the card code
 
-    before = render_mod._cached_theme_name
+    before = cards._cached_theme_name
     # Pick a different theme from the registry; restore at the end.
     other = "dark_mode" if before != "dark_mode" else "blue_velvet"
     try:
         theme_manager.set_current(other)
-        assert render_mod._cached_theme_name == other, (
+        assert cards._cached_theme_name == other, (
             f"theme-name cache should be {other!r} after set_current, "
-            f"got {render_mod._cached_theme_name!r}"
+            f"got {cards._cached_theme_name!r}"
         )
         # Diff baseline also nuked by the callback.
         assert render_mod._last_emitted_lines is None
@@ -384,6 +385,7 @@ def test_announce_invalidates_diff_baseline(
     `show_card_detail`/`show_round_summary`/`animate_score_update`.
     """
     import belote.ui.announce  # noqa: F401
+
     announce_mod = _sys.modules["belote.ui.announce"]
 
     # Seed a non-None diff baseline. If invalidate_diff() runs, this resets to None.
@@ -419,6 +421,7 @@ def test_animate_score_update_invalidates_diff_baseline(
     # package's __init__, so reach for the module directly via sys.modules
     # (same pattern as test_card_detail.py).
     import belote.ui.announce  # noqa: F401  — ensures the module is imported
+
     announce_mod = _sys.modules["belote.ui.announce"]
 
     # Seed a non-None diff baseline. If invalidate_diff() runs, this resets
@@ -426,9 +429,7 @@ def test_animate_score_update_invalidates_diff_baseline(
     render_mod._last_emitted_lines = ("stale row",)
 
     # Stub out the actual stdout writes and the sleep so the test is fast.
-    monkeypatch.setattr(
-        announce_mod, "display_hud", lambda _s, **_kw: None
-    )
+    monkeypatch.setattr(announce_mod, "display_hud", lambda _s, **_kw: None)
     monkeypatch.setattr(announce_mod.time, "sleep", lambda _d: None)
 
     state = new_game()
@@ -450,6 +451,7 @@ def test_animate_score_update_short_circuits_under_no_anim(
     """
     import belote.ui.anim
     import belote.ui.announce  # noqa: F401
+
     anim_mod = _sys.modules["belote.ui.anim"]
     announce_mod = _sys.modules["belote.ui.announce"]
 
@@ -473,9 +475,7 @@ def test_animate_score_update_short_circuits_under_no_anim(
         monkeypatch.delenv("BELOTE_NO_ANIM", raising=False)
         anim_mod._refresh_animations_enabled_from_env()
 
-    assert paint_count[0] == 1, (
-        f"NO_ANIM must paint exactly one final frame; got {paint_count[0]}"
-    )
+    assert paint_count[0] == 1, f"NO_ANIM must paint exactly one final frame; got {paint_count[0]}"
     assert last_override == [(20, 10)], (
         f"NO_ANIM must paint the final target scores directly; got {last_override}"
     )
@@ -488,6 +488,7 @@ def test_animate_score_update_skips_on_key(monkeypatch: pytest.MonkeyPatch) -> N
     """
     import belote.ui.anim
     import belote.ui.announce  # noqa: F401
+
     anim_mod = _sys.modules["belote.ui.anim"]
     announce_mod = _sys.modules["belote.ui.announce"]
 
@@ -516,16 +517,16 @@ def test_animate_score_update_skips_on_key(monkeypatch: pytest.MonkeyPatch) -> N
     reader = _SkipReader()
     state = new_game()
     announce_mod.animate_score_update(
-        state, target_ns=20, target_ew=10, duration=1.0, reader=reader  # type: ignore[arg-type]
+        state,
+        target_ns=20,
+        target_ew=10,
+        duration=1.0,
+        reader=reader,  # type: ignore[arg-type]
     )
 
     # At least one intermediate paint + one final-snap paint, but
     # strictly fewer than 20 frames (the full loop). The exact intermediate
     # count is 1 — one frame painted before read_timeout returns the skip.
     assert reader.calls == 1, f"reader should be consulted once before skip; got {reader.calls}"
-    assert paints[-1] == (20, 10), (
-        f"final paint must be the target scores; got {paints[-1]}"
-    )
-    assert len(paints) < 20, (
-        f"skip should short-circuit the 20-step loop; got {len(paints)} paints"
-    )
+    assert paints[-1] == (20, 10), f"final paint must be the target scores; got {paints[-1]}"
+    assert len(paints) < 20, f"skip should short-circuit the 20-step loop; got {len(paints)} paints"

@@ -49,23 +49,27 @@ def _ns_capot_tricks(trump: Suit | None) -> tuple[tuple[TrickCard, ...], ...]:
             ordered = [Rank.JACK, Rank.NINE, Rank.ACE, Rank.TEN]
         else:
             ordered = [Rank.ACE, Rank.TEN, Rank.KING, Rank.QUEEN]
-        tricks.append((
-            TrickCard(Seat.SOUTH, Card(suit, ordered[0])),
-            TrickCard(Seat.WEST, Card(suit, ordered[1])),
-            TrickCard(Seat.NORTH, Card(suit, ordered[2])),
-            TrickCard(Seat.EAST, Card(suit, ordered[3])),
-        ))
+        tricks.append(
+            (
+                TrickCard(Seat.SOUTH, Card(suit, ordered[0])),
+                TrickCard(Seat.WEST, Card(suit, ordered[1])),
+                TrickCard(Seat.NORTH, Card(suit, ordered[2])),
+                TrickCard(Seat.EAST, Card(suit, ordered[3])),
+            )
+        )
         # Low trick: SOUTH plays the highest of the remaining cards in the suit
         if trump == Suit.TOUT_ATOUT:
             low_ordered = [Rank.KING, Rank.QUEEN, Rank.EIGHT, Rank.SEVEN]
         else:
             low_ordered = [Rank.JACK, Rank.NINE, Rank.EIGHT, Rank.SEVEN]
-        tricks.append((
-            TrickCard(Seat.SOUTH, Card(suit, low_ordered[0])),
-            TrickCard(Seat.WEST, Card(suit, low_ordered[1])),
-            TrickCard(Seat.NORTH, Card(suit, low_ordered[2])),
-            TrickCard(Seat.EAST, Card(suit, low_ordered[3])),
-        ))
+        tricks.append(
+            (
+                TrickCard(Seat.SOUTH, Card(suit, low_ordered[0])),
+                TrickCard(Seat.WEST, Card(suit, low_ordered[1])),
+                TrickCard(Seat.NORTH, Card(suit, low_ordered[2])),
+                TrickCard(Seat.EAST, Card(suit, low_ordered[3])),
+            )
+        )
     assert master_rank in (Rank.JACK, Rank.ACE)  # touch _master_rank for clarity
     return tuple(tricks)
 
@@ -155,18 +159,22 @@ def test_failed_tout_atout_does_not_increment_counter(
     tricks = []
     for s in suits:
         # EAST leads with master Jack, NS gets low cards
-        tricks.append((
-            TrickCard(Seat.EAST, Card(s, Rank.JACK)),
-            TrickCard(Seat.SOUTH, Card(s, Rank.SEVEN)),
-            TrickCard(Seat.WEST, Card(s, Rank.ACE)),
-            TrickCard(Seat.NORTH, Card(s, Rank.EIGHT)),
-        ))
-        tricks.append((
-            TrickCard(Seat.EAST, Card(s, Rank.NINE)),
-            TrickCard(Seat.SOUTH, Card(s, Rank.QUEEN)),  # Q < 9 under TA
-            TrickCard(Seat.WEST, Card(s, Rank.TEN)),
-            TrickCard(Seat.NORTH, Card(s, Rank.KING)),
-        ))
+        tricks.append(
+            (
+                TrickCard(Seat.EAST, Card(s, Rank.JACK)),
+                TrickCard(Seat.SOUTH, Card(s, Rank.SEVEN)),
+                TrickCard(Seat.WEST, Card(s, Rank.ACE)),
+                TrickCard(Seat.NORTH, Card(s, Rank.EIGHT)),
+            )
+        )
+        tricks.append(
+            (
+                TrickCard(Seat.EAST, Card(s, Rank.NINE)),
+                TrickCard(Seat.SOUTH, Card(s, Rank.QUEEN)),  # Q < 9 under TA
+                TrickCard(Seat.WEST, Card(s, Rank.TEN)),
+                TrickCard(Seat.NORTH, Card(s, Rank.KING)),
+            )
+        )
     state = BelatroState(
         hands=((), (), (), ()),
         trump=Suit.TOUT_ATOUT,

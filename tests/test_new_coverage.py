@@ -371,8 +371,8 @@ def test_main_won_formula_disagrees_with_menu_on_tie_at_target_before_fix() -> N
     # Lock the post-fix shape: `won=(ns >= target and ns > ew)`.
     assert re.search(r"won=\(ns >= target and ns > ew\)", text), (
         "main.py update_stats_game `won` expression must use `ns > ew` "
-        "(strict) to agree with menu.py:344's `winner = \"NS\" if ns > ew "
-        "else \"EW\"`. The pre-3.4.2 form `ns >= ew` is a regression."
+        '(strict) to agree with menu.py:344\'s `winner = "NS" if ns > ew '
+        'else "EW"`. The pre-3.4.2 form `ns >= ew` is a regression.'
     )
     # And the pre-fix anti-pattern must not have crept back.
     assert "ns >= target and ns >= ew" not in text, (
@@ -390,7 +390,7 @@ def test_main_won_formula_evaluates_correctly_on_tie_at_target() -> None:
     ns = 1000
     ew = 1000
     # Post-fix formula.
-    won = (ns >= target and ns > ew)
+    won = ns >= target and ns > ew
     assert won is False
 
     # And NS clearly ahead at target should still register as a win.

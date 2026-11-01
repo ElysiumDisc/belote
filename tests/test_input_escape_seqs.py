@@ -42,8 +42,10 @@ def _fake_stdin(data: bytes) -> Iterator[bytearray]:
     def fake_select(*_a: Any, **_k: Any) -> tuple[list[int], list[int], list[int]]:
         return ([0] if buf else [], [], [])
 
-    with patch("belote.input.os.read", side_effect=fake_read), \
-         patch("belote.input.select.select", side_effect=fake_select):
+    with (
+        patch("belote.input.os.read", side_effect=fake_read),
+        patch("belote.input.select.select", side_effect=fake_select),
+    ):
         yield buf
 
 

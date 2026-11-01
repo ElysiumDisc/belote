@@ -209,7 +209,7 @@ def test_joker_state_only_contains_scalar_values() -> None:
                     continue
                 try:
                     method(ev, state)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     # Hooks expect specific event types; skip mismatches.
                     continue
 

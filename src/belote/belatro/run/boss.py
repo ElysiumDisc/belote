@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from belote.variants import RuleVariants
 
+    from ..core.run_state import BelAtroRun
     from ..engine.modifier_patch import PatchedGameState
 
 
@@ -37,6 +38,35 @@ class BossModifier(ABC):
         bm = patches.get("variants", stub.variants)
         assert isinstance(bm, RuleVariants)
         return bm
+
+    # ── 4.11.0: expansion-only boss flags ──────────────────────────────────
+    #
+    # RuleVariants holds rules the *core* engine plays. A boss whose effect is
+    # purely BelAtro scoring (chips / money / jokers) instead switches a flag
+    # in the round's joker_state through the same `apply()` → patch path:
+    # `PatchedGameState.patch("_joker_state", ...)` lands in
+    # `round_driver._apply_boss`'s `replace()`, before the accumulator's
+    # round start snapshots joker_state. The accumulator reads the flag —
+    # never the boss id.
+
+    @staticmethod
+    def set_joker_flag(state: PatchedGameState, key: str, value: object = True) -> None:
+        """Merge one scalar flag into the round's joker_state (keeps the
+        deck / voucher flags already there)."""
+        current = getattr(state, "_joker_state", None) or {}
+        state.patch("_joker_state", {**current, key: value})
+
+    def joker_flags(self) -> dict[str, object]:
+        """The joker_state flags this boss's apply() switches on (may be {})."""
+        from ..core.state import BelatroState
+        from ..engine.modifier_patch import PatchedGameState
+
+        proxy = PatchedGameState(BelatroState(hands=((), (), (), ())))
+        self.apply(proxy)
+        patches: dict[str, object] = object.__getattribute__(proxy, "_patches")
+        flags = patches.get("_joker_state", {})
+        assert isinstance(flags, dict)
+        return dict(flags)
 
 
 # ── Standard Boss Blinds (11) ──────────────────────────────────────────────
@@ -119,6 +149,22 @@ class LeBrouillard(BossModifier):
 
     def apply(self, state: PatchedGameState) -> PatchedGameState:
         state.patch("hide_hud", True)
+        return state
+
+
+class LeBalMasque(BossModifier):
+    """4.11.0: hides information that is normally public — the opponents'
+    cards in the first trick stay face-down until the trick is won."""
+
+    id = "le_bal_masque"
+    name = "Le Bal Masqué"
+    description = (
+        "Masked ball: the opponents play their first-trick cards face-down "
+        "(normally public) — revealed once the trick is won."
+    )
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        state.patch("masked_first_trick", True)
         return state
 
 
@@ -284,6 +330,37 @@ class LeMime(BossModifier):
         return state
 
 
+# ── 4.11.0: two expansion-flag bosses ─────────────────────────────────────
+
+
+class LeContreAttaquant(BossModifier):
+    """Opponents' Belote / Rebelote announcements rob the player."""
+
+    id = "le_contre_attaquant"
+    name = "Le Contre-Attaquant"
+    description = "Each Belote or Rebelote the opponents announce steals 20 chips and $2 from you."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        from ..core.scoring import CONTRE_ATTAQUE_FLAG
+
+        self.set_joker_flag(state, CONTRE_ATTAQUE_FLAG)
+        return state
+
+
+class LHuissier(BossModifier):
+    """The bailiff seizes the player's leftmost joker for the round."""
+
+    id = "l_huissier"
+    name = "L'Huissier"
+    description = "Your leftmost Joker is seized: it does not trigger this round."
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        from ..core.scoring import SEIZE_JOKER_FLAG
+
+        self.set_joker_flag(state, SEIZE_JOKER_FLAG)
+        return state
+
+
 # ── Registry ───────────────────────────────────────────────────────────────
 
 ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
@@ -308,4 +385,58 @@ ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
     LeSauvage,
     LIconoclaste,
     LeMime,
+    LeContreAttaquant,
+    LHuissier,
+    LeBalMasque,
 ]
+
+BOSS_BY_ID: dict[str, type[BossModifier]] = {cls.id: cls for cls in ALL_BOSS_MODIFIERS}
+
+
+# ── Boss selection (4.11.0: shared by the run loop and Le Juge) ───────────
+
+
+def roll_boss(run: BelAtroRun, exclude: str | None = None) -> type[BossModifier]:
+    """Draw a boss from the seeded run RNG.
+
+    A Boss Rush run with a pinned boss always gets that boss (no draw). In
+    endless mode a pick from the last-2 window is rerolled (capped, so a
+    degenerate pool can't loop). `exclude` (Le Juge) removes one boss from
+    the pool. Without `exclude` the draw sequence is exactly the pre-4.11.0
+    `_pick_boss` one, so seeded runs replay unchanged.
+    """
+    pinned = BOSS_BY_ID.get(run.challenge_boss_id or "")
+    if pinned is not None and exclude is None:
+        return pinned
+    pool = ALL_BOSS_MODIFIERS
+    if exclude is not None:
+        pool = [cls for cls in pool if cls.id != exclude] or pool
+    rng = run._get_rng()
+    boss_cls: type[BossModifier] = rng.choice(pool)
+    if run.endless and len(pool) > 3:
+        attempts = 0
+        while boss_cls.id in run._recent_boss_ids and attempts < 8:
+            boss_cls = rng.choice(pool)
+            attempts += 1
+    return boss_cls
+
+
+def peek_upcoming_boss(run: BelAtroRun) -> type[BossModifier]:
+    """The next boss blind's boss, rolling (and remembering) it if needed."""
+    boss_cls = BOSS_BY_ID.get(run.upcoming_boss_id or "")
+    if boss_cls is None:
+        boss_cls = roll_boss(run)
+        run.upcoming_boss_id = boss_cls.id
+    return boss_cls
+
+
+def take_upcoming_boss(run: BelAtroRun) -> BossModifier:
+    """Consume the upcoming boss for the boss blind about to start, and track
+    it in the recent-boss window (endless repeat suppression)."""
+    boss = peek_upcoming_boss(run)()
+    run.upcoming_boss_id = None
+    recent = run._recent_boss_ids
+    recent.append(boss.id)
+    if len(recent) > 2:
+        del recent[: len(recent) - 2]
+    return boss

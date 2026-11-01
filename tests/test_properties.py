@@ -211,9 +211,8 @@ def test_dynamic_trump_never_overrides_sans_atout() -> None:
     state = place_bid(state, "sans_atout")
     # Inject dynamic_trump after bid (would normally be set by boss apply).
     from dataclasses import replace as dc_replace
-    state = dc_replace(
-        state, variants=RuleVariants(dynamic_trump=True)
-    )
+
+    state = dc_replace(state, variants=RuleVariants(dynamic_trump=True))
 
     while state.phase == Phase.PLAYING:
         assert state.trump is None, (
@@ -240,9 +239,8 @@ def test_no_consecutive_team_wins_invariant_when_rupture_active() -> None:
         rng = random.Random(seed)
         state = start_round(new_game(), rng)
         from dataclasses import replace as dc_replace
-        state = dc_replace(
-            state, variants=RuleVariants(no_consecutive_team_wins=True)
-        )
+
+        state = dc_replace(state, variants=RuleVariants(no_consecutive_team_wins=True))
         state = place_bid(state, state.up_card.suit)
         while state.phase == Phase.PLAYING:
             legal = legal_cards(state, state.turn)

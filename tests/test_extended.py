@@ -48,9 +48,7 @@ def test_round_score_history_extra_fields() -> None:
         completed_tricks=tuple(
             (TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.ACE)),) for _ in range(5)
         )
-        + tuple(
-            (TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.SEVEN)),) for _ in range(3)
-        ),
+        + tuple((TrickCard(Seat.EAST, Card(Suit.SPADES, Rank.SEVEN)),) for _ in range(3)),
         last_trick_winner=Seat.SOUTH,
     )
     breakdown = ScoringBreakdown(

@@ -2,7 +2,8 @@
 
 Every change applies immediately (`settings.apply`) and is saved when the
 screen closes. Rows contributed by expansions (`settings.register_toggle`)
-appear after the core rows.
+appear after the core rows. 4.11.0: card back / table frame pickers (with a
+live preview), Controls and theme files open the screens in `ui/customize.py`.
 """
 
 from __future__ import annotations
@@ -10,19 +11,33 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
+from .. import cosmetics
 from .. import settings as settings_mod
-from ..ansi import BOLD, DIM, RESET, REVERSE, ansi_center, clear_screen, gold_fg, hide_cursor
+from ..ansi import (
+    BOLD,
+    DIM,
+    RESET,
+    REVERSE,
+    ansi_center,
+    ansi_ljust,
+    ansi_truncate,
+    clear_screen,
+    gold_fg,
+    hide_cursor,
+    visible_len,
+)
+from ..cosmetics import CardBack, TableFrame
 from ..game import Seat
 from ..input import Key, KeyReader
 from ..settings import DIFFICULTIES, SPEEDS, TARGETS, Settings
-from ..themes import theme_manager
+from ..themes import THEMES, theme_manager
 from .layout import vcenter_lines
 from .render import get_term_size, invalidate_diff
 
 
 @dataclass(frozen=True)
 class _Row:
-    key: str  # core field name, "theme", "extra:<toggle key>" or "back"
+    key: str  # core field name, "theme", an action row, "extra:<toggle key>" or "back"
     label: str
 
 
@@ -31,11 +46,18 @@ _CORE_ROWS: tuple[_Row, ...] = (
     _Row("target", "Target score"),
     _Row("speed", "Speed"),
     _Row("theme", "Theme"),
+    _Row("theme_files", "Theme files (import / export)"),
+    _Row("card_back", "Card back"),
+    _Row("table_frame", "Table frame"),
     _Row("animations", "Animations"),
     _Row("fast_redraw", "Fast redraw"),
     _Row("screen_reader", "Screen-reader hints"),
     _Row("replay_analysis", "Post-round replay analysis"),
+    _Row("controls", "Controls"),
 )
+
+# Rows that only open a screen (Enter); ←/→ do nothing on them.
+_ACTION_ROWS: frozenset[str] = frozenset({"theme_files", "controls"})
 
 _ENV_FOR: dict[str, str] = {
     "animations": "BELOTE_NO_ANIM",
@@ -67,8 +89,12 @@ def _value(s: Settings, key: str) -> tuple[str, str | None]:
         return s.speed.capitalize(), None
     if key == "theme":
         return theme_manager.get_current().name, None
+    if key == "card_back":
+        return cosmetics.card_back(s.card_back).name, None
+    if key == "table_frame":
+        return cosmetics.table_frame(s.table_frame).name, None
     if key.startswith("extra:"):
-        tkey = key[len("extra:"):]
+        tkey = key[len("extra:") :]
         saved = s.extras.get(tkey, settings_mod.TOGGLES[tkey].default)
         forced = settings_mod.TOGGLES[tkey].env_var if s.extra_on(tkey) != saved else None
         return _on_off(saved), forced
@@ -77,24 +103,70 @@ def _value(s: Settings, key: str) -> tuple[str, str | None]:
     return _on_off(saved), (_ENV_FOR[key] if effective != saved else None)
 
 
+_LABEL_W = 30
+_VALUE_CAP = 18  # imported theme names can be up to 32 characters
+
+
+def _value_width() -> int:
+    """One value-column width for every row (stable while cycling): the
+    widest built-in option, capped; longer values are truncated with "…"."""
+    names = [t.name for t in THEMES.values()]
+    names += [b.name for b in cosmetics.CARD_BACKS.values()]
+    names += [f.name for f in cosmetics.TABLE_FRAMES.values()]
+    return min(_VALUE_CAP, max(10, *(visible_len(n) for n in names)))
+
+
+def _fit(value: str, width: int) -> str:
+    if visible_len(value) > width:
+        value = ansi_truncate(value, width - 1) + "…"
+    return ansi_center(value, width)
+
+
+def _row_text(s: Settings, row: _Row, value_w: int) -> str:
+    if row.key == "back":
+        return "Back"
+    if row.key in _ACTION_ROWS:
+        return f"{row.label:<{_LABEL_W}}  {_fit('Enter ›', value_w)}  "
+    value, forced = _value(s, row.key)
+    text = f"{row.label:<{_LABEL_W}}< {_fit(value, value_w)} >"
+    if forced:
+        text += f"  {DIM}(forced by {forced}){RESET}"
+    return text
+
+
 def settings_lines(s: Settings, sel: int) -> list[str]:
-    """Pure line-builder for the Settings screen."""
+    """Pure line-builder for the Settings screen. Every row is padded to the
+    same visible width so the centred block keeps its columns aligned."""
     lines = [f"{BOLD}{gold_fg()}SETTINGS{RESET}", "", ""]
-    for i, row in enumerate(rows()):
+    all_rows = rows()
+    value_w = _value_width()
+    texts = [_row_text(s, row, value_w) for row in all_rows]
+    width = max(visible_len(t) for t in texts)
+    for i, (row, text) in enumerate(zip(all_rows, texts, strict=True)):
         if row.key == "back":
             lines.append("")
-            text = "Back"
+            text = ansi_center(text, width)
         else:
-            value, forced = _value(s, row.key)
-            text = f"{row.label:<28} < {value:^10} >"
-            if forced:
-                text += f"  {DIM}(forced by {forced}){RESET}"
+            text = ansi_ljust(text, width)
         lines.append(f"{REVERSE} {text} {RESET}" if i == sel else f" {text} ")
     lines += [
         "",
         f"{DIM}↑/↓ select   ←/→ change   Enter: details / toggle   Esc: back (saves){RESET}",
     ]
+    if 0 <= sel < len(all_rows):
+        lines += _preview(s, all_rows[sel].key)
     return lines
+
+
+def _preview(s: Settings, key: str) -> list[str]:
+    """Live preview under the list while a cosmetic row is selected."""
+    from .customize import back_preview, frame_sample
+
+    if key == "card_back":
+        return ["", *back_preview(s.card_back, compact=True)]
+    if key == "table_frame":
+        return ["", *frame_sample(s.table_frame, compact=True)]
+    return []
 
 
 def _step(options: tuple[str, ...], current: str, delta: int) -> str:
@@ -116,24 +188,54 @@ def change(s: Settings, key: str, delta: int) -> None:
         s.speed = _step(SPEEDS, s.speed, delta)
     elif key == "theme":
         theme_manager.cycle(delta)
+    elif key == "card_back":  # only unlocked backs are reachable
+        s.card_back = _step(tuple(cosmetics.unlocked_ids(CardBack)), s.card_back, delta)
+    elif key == "table_frame":
+        s.table_frame = _step(tuple(cosmetics.unlocked_ids(TableFrame)), s.table_frame, delta)
     elif key.startswith("extra:"):
-        tkey = key[len("extra:"):]
+        tkey = key[len("extra:") :]
         s.extras[tkey] = not s.extras.get(tkey, settings_mod.TOGGLES[tkey].default)
-    elif key != "back":
+    elif key != "back" and key not in _ACTION_ROWS:
         setattr(s, key, not getattr(s, key))
+
+
+def _open(reader: KeyReader, s: Settings, key: str) -> None:
+    """Enter on a row: open its screen, or step it like →."""
+    from . import customize
+    from .menu import show_ai_config, show_theme_selector
+
+    if key == "ai":
+        seat_diffs = {seat: s.ai[name] for seat, name in _SEAT_KEYS.items()}
+        chosen = show_ai_config(reader, seat_diffs)
+        s.ai = {name: chosen[seat] for seat, name in _SEAT_KEYS.items()}
+    elif key == "theme":
+        show_theme_selector(reader)
+    elif key == "card_back":
+        customize.show_cosmetic_picker(reader, s, CardBack)
+    elif key == "table_frame":
+        customize.show_cosmetic_picker(reader, s, TableFrame)
+    elif key == "theme_files":
+        customize.show_theme_files(reader)
+    elif key == "controls":
+        customize.show_controls(reader, s)
+    else:
+        change(s, key, 1)
 
 
 def show_settings(reader: KeyReader, s: Settings) -> None:
     """Interactive Settings screen. Mutates `s`, applies live, saves on exit."""
-    from .menu import show_ai_config, show_theme_selector
-
     sel = 0
+    # Record milestones met elsewhere (e.g. a BelAtro run) so the pickers'
+    # ←/→ cycling already offers them.
+    cosmetics.check_unlocks()
     try:
         while True:
             all_rows = rows()
             term_w, term_h = get_term_size()
             lines = [ansi_center(line, term_w) for line in settings_lines(s, sel)]
-            sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(vcenter_lines(lines, term_h)))
+            sys.stdout.write(
+                clear_screen() + hide_cursor() + "\r\n".join(vcenter_lines(lines, term_h))
+            )
             sys.stdout.flush()
 
             event = reader.read()
@@ -150,14 +252,7 @@ def show_settings(reader: KeyReader, s: Settings) -> None:
                 case Key.ENTER:
                     if key == "back":
                         return
-                    if key == "ai":
-                        seat_diffs = {seat: s.ai[name] for seat, name in _SEAT_KEYS.items()}
-                        chosen = show_ai_config(reader, seat_diffs)
-                        s.ai = {name: chosen[seat] for seat, name in _SEAT_KEYS.items()}
-                    elif key == "theme":
-                        show_theme_selector(reader)
-                    else:
-                        change(s, key, 1)
+                    _open(reader, s, key)
                 case _:
                     continue
             settings_mod.apply(s)

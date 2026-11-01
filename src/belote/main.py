@@ -11,6 +11,7 @@ import atexit
 import random
 import signal
 import sys
+from typing import TYPE_CHECKING
 
 from . import __version__
 from .ansi import (
@@ -32,8 +33,9 @@ from .game import (
     new_game,
 )
 from .gameflow import create_ai_players, run_round
-from .input import Key, KeyReader
+from .input import Key, KeyReader, key_label
 from .stats import flush_stats, update_stats_game
+from .table_modes import HOTSEAT_PRESETS, SOLO, SpectatorReader, TableMode, hotseat, spectate
 from .ui import (
     show_final_screen,
     show_history,
@@ -41,8 +43,13 @@ from .ui import (
     show_rules,
     show_stats,
 )
-from .ui.announce import achievement_toast
+from .ui import spectate as spectate_ui
+from .ui.announce import achievement_toast, announce
+from .ui.picker import pick_option
 from .ui.settings_menu import show_settings
+
+if TYPE_CHECKING:
+    from .settings import Settings
 
 
 class TerminalGuard:
@@ -85,8 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--target",
         type=positive_int,
         default=None,
-        help="Target score to win (default: the saved setting, else "
-        f"{GLOBAL_CONFIG.TARGET_SCORE})",
+        help=f"Target score to win (default: the saved setting, else {GLOBAL_CONFIG.TARGET_SCORE})",
     )
     parser.add_argument(
         "--difficulty",
@@ -104,14 +110,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-
-    from .themes import theme_manager
-
-    theme_manager.load_selection()
-
-    # Saved settings, with any CLI flags overriding them for this session.
+def _load_prefs(args: argparse.Namespace) -> Settings:
+    """Saved settings, with any CLI flags overriding them for this session."""
     from . import settings as settings_mod
 
     prefs = settings_mod.load()
@@ -122,6 +122,172 @@ def main() -> None:
     if args.speed is not None:
         prefs.speed = args.speed
     settings_mod.apply(prefs)
+    return prefs
+
+
+def _choose_table_mode(reader: KeyReader) -> TableMode | None:
+    """Spectate (four AIs) or one of the hot-seat seatings."""
+    labels = ["Spectate — watch four AIs play", *(f"Hot-seat: {lbl}" for lbl, _ in HOTSEAT_PRESETS)]
+    idx = pick_option(
+        reader,
+        "Hot-seat & Spectate",
+        labels,
+        subtitle="Hot-seat: players share this terminal; empty seats are AI.",
+    )
+    if idx is None:
+        return None
+    if idx == 0:
+        return spectate()
+    return hotseat(HOTSEAT_PRESETS[idx - 1][1])
+
+
+def _ai_difficulties(prefs: Settings, mode: TableMode) -> dict[Seat, str]:
+    """Difficulty per AI seat. Spectate's SOUTH plays at North's (partner's)
+    level; human seats get no AI."""
+    by_seat = {
+        Seat.EAST: prefs.ai["east"],
+        Seat.NORTH: prefs.ai["north"],
+        Seat.WEST: prefs.ai["west"],
+        Seat.SOUTH: prefs.ai["north"],
+    }
+    return {s: d for s, d in by_seat.items() if s not in mode.humans}
+
+
+def _play_classic_game(
+    reader: KeyReader, prefs: Settings, seed: int | None, mode: TableMode = SOLO
+) -> None:
+    """One classic game to its end (or until the player quits mid-round).
+
+    4.11.0: `mode` = Spectate / Hot-seat (see `table_modes.py`); only the solo
+    game records statistics."""
+    target = prefs.target
+    diffs_map = _ai_difficulties(prefs, mode)
+    ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[prefs.speed]
+    sys.stdout.write(clear_screen() + hide_cursor())
+    sys.stdout.flush()
+
+    ai_players = create_ai_players(diffs_map)
+    # Seed AI random for reproducibility
+    if seed is not None:
+        for i, ai in enumerate(ai_players.values()):
+            ai._rng = random.Random(seed + i)
+
+    state = new_game(target=target)
+    history_stack: list[GameState] = []
+    game_rng = random.Random(seed) if seed is not None else random.Random()
+
+    watch = _Spectator(reader, mode) if mode.pace is not None else None
+    round_reader: KeyReader = watch.reader if watch is not None else reader
+    while state.phase != Phase.GAME_OVER:
+        if watch is not None and not watch.before_round(len(state.score_history) + 1):
+            return
+        res_round = run_round(
+            state,
+            round_reader,
+            ai_players,
+            ai_delay,
+            trick_pause,
+            round_pause,
+            history_stack,
+            game_rng,
+            mode,
+        )
+        if res_round is None:  # User quit mid-game
+            return
+        if watch is not None:
+            watch.after_round(state, res_round)
+        state = res_round
+        # `apply_round_score` (scoring) already set the correct phase:
+        # GAME_OVER when a team is ahead at/over target, DEAL on a tie at
+        # target so a tie-breaker round plays. Pre-3.4.0 this branch
+        # re-checked targets and forced GAME_OVER unconditionally, breaking
+        # the tie-breaker.
+        if state.phase == Phase.GAME_OVER and mode.records_stats:
+            _record_game_over(state, diffs_map, target, reader)
+
+    _game_over_screen(state, reader)
+
+
+class _Spectator:
+    """Spectate's per-game loop state: prediction streak + pace control."""
+
+    def __init__(self, reader: KeyReader, mode: TableMode) -> None:
+        assert mode.pace is not None
+        self.inner = reader
+        self.pace = mode.pace
+        self.reader = SpectatorReader(reader, mode.pace)
+        self.streak = spectate_ui.Streak(best=spectate_ui.load_best())
+        self.guess: int | None = None
+
+    def before_round(self, round_no: int) -> bool:
+        """Ask for a prediction; False = stop watching."""
+        if self.pace.quit:
+            return False
+        answer = spectate_ui.ask_prediction(self.inner, round_no, self.streak, self.pace.label)
+        if answer == "QUIT":
+            return False
+        self.guess = answer if isinstance(answer, int) and answer >= 0 else None
+        return True
+
+    def after_round(self, before: GameState, after: GameState) -> None:
+        hit = self.streak.record(self.guess, spectate_ui.round_winner(before, after))
+        if hit is not None:
+            spectate_ui.save_best(self.streak.best)
+            msg = "✓ Called it!" if hit else "✗ Missed"
+            announce(
+                f"{msg}  Streak {self.streak.current} (best {self.streak.best})",
+                duration=1.2,
+                reader=self.inner,
+            )
+
+
+def _record_game_over(
+    state: GameState, diffs_map: dict[Seat, str], target: int, reader: KeyReader
+) -> None:
+    """Persist the finished game's stats and toast any new achievements."""
+    ns, ew = state.team_scores
+    unique_diffs = set(diffs_map.values())
+    difficulty_str = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"
+    unlocked = update_stats_game(
+        won=(ns >= target and ns > ew),
+        num_rounds=len(state.score_history),
+        difficulty=difficulty_str,
+    )
+    flush_stats()
+    for achievement in unlocked:
+        achievement_toast(achievement, reader)
+
+
+def _game_over_screen(state: GameState, reader: KeyReader) -> None:
+    """Final scores; H opens the round history, Enter/Q returns to the menu."""
+
+    def paint() -> None:
+        # Raw mode is active (OPOST off), so line breaks must be "\r\n" — a
+        # bare "\n" staircases.
+        show_final_screen(state)
+        sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
+        quit_k, hist_k = key_label("quit"), key_label("history")
+        sys.stdout.write(f"\r\n  {white_fg()}[Enter/{quit_k}] Menu  [{hist_k}] History{RESET} ")
+        sys.stdout.flush()
+
+    paint()
+    while True:
+        ev = reader.read()
+        if ev.key == Key.HIST:
+            show_history(state, reader)
+            paint()
+        elif ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
+            return
+
+
+def main() -> None:
+    args = parse_args()
+
+    from .themes import theme_manager
+
+    theme_manager.load_selection()
+
+    prefs = _load_prefs(args)
 
     # Terminal-size enforcement now lives inside the alt-screen as a live
     # overlay (see require_minimum). Below the floor we paint a centered
@@ -186,100 +352,20 @@ def main() -> None:
                     show_stats(reader)
                     continue
 
-                if choice != "Start Game":
+                if choice == "Hot-seat & Spectate":
+                    mode = _choose_table_mode(reader)
+                    if mode is not None:
+                        _play_classic_game(reader, prefs, args.seed, mode)
+                        sys.stdout.write(clear_screen())
+                        sys.stdout.flush()
                     continue
 
-                # Start Game — already in alt-screen, just clear.
-                target = prefs.target
-                diffs_map = {
-                    Seat.EAST: prefs.ai["east"],
-                    Seat.NORTH: prefs.ai["north"],
-                    Seat.WEST: prefs.ai["west"],
-                }
-                ai_delay, trick_pause, round_pause = GLOBAL_CONFIG.SPEED_TIMINGS[prefs.speed]
-                sys.stdout.write(clear_screen() + hide_cursor())
-                sys.stdout.flush()
-
-                # Create AI players
-                ai_players = create_ai_players(diffs_map)
-
-                # Seed AI random for reproducibility
-                if args.seed is not None:
-                    for i, ai in enumerate(ai_players.values()):
-                        ai._rng = random.Random(args.seed + i)
-
-                # Initialize game
-                state = new_game(target=target)
-                history_stack: list[GameState] = []
-                game_rng = random.Random(args.seed) if args.seed is not None else random.Random()
-
-                # Main game loop
-                while state.phase != Phase.GAME_OVER:
-                    # Run one complete round
-                    res_round = run_round(
-                        state,
-                        reader,
-                        ai_players,
-                        ai_delay,
-                        trick_pause,
-                        round_pause,
-                        history_stack,
-                        game_rng,
-                    )
-
-                    if res_round is None:  # User quit mid-game
-                        break
-                    state = res_round
-
-                    # `apply_round_score` (scoring.py) already set the correct
-                    # phase: GAME_OVER when a team is ahead at/over target,
-                    # DEAL on a tie at target so a tie-breaker round plays.
-                    # Pre-3.4.0 this branch re-checked targets and forced
-                    # GAME_OVER unconditionally, breaking the tie-breaker.
-                    if state.phase == Phase.GAME_OVER:
-                        ns, ew = state.team_scores
-                        unique_diffs = set(diffs_map.values())
-                        difficulty_str = (
-                            next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"
-                        )
-
-                        unlocked = update_stats_game(
-                            won=(ns >= target and ns > ew),
-                            num_rounds=len(state.score_history),
-                            difficulty=difficulty_str,
-                        )
-                        flush_stats()
-                        for achievement in unlocked:
-                            achievement_toast(achievement, reader)
-
-                if state.phase == Phase.GAME_OVER:
-                    # Show final screen. Raw mode is active (OPOST off), so
-                    # line breaks must be "\r\n" — a bare "\n" staircases.
-                    show_final_screen(state)
-
-                    sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
-                    sys.stdout.write(
-                        f"\r\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
-                    )
+                if choice == "Start Game":
+                    _play_classic_game(reader, prefs, args.seed)
+                    # Back to menu — stay in alt-screen, just clear before the
+                    # menu loop starts redrawing.
+                    sys.stdout.write(clear_screen())
                     sys.stdout.flush()
-
-                    while True:
-                        ev = reader.read()
-                        if ev.key == Key.HIST:
-                            show_history(state, reader)
-                            show_final_screen(state)
-                            sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
-                            sys.stdout.write(
-                                f"\r\n  {white_fg()}[Enter/Q] Menu  [H] History{RESET} "
-                            )
-                            sys.stdout.flush()
-                        elif ev.key in (Key.ENTER, Key.QUIT, Key.EOF):
-                            break
-
-                # Back to menu — stay in alt-screen, just clear before the menu
-                # loop starts redrawing.
-                sys.stdout.write(clear_screen())
-                sys.stdout.flush()
 
     except (KeyboardInterrupt, FitAbortedError):
         # FitAbortedError: the player quit from an in-game resize prompt

@@ -35,7 +35,7 @@ def _bar_color(value: int) -> str:
 
 
 def _void_label(state: GameState | None) -> str:
-    """"Void: ♠♦" for North's empty suits during play, else "Void Info"."""
+    """ "Void: ♠♦" for North's empty suits during play, else "Void Info"."""
     from belote.deck import CARD_SUITS
     from belote.game import Phase, Seat
 
@@ -92,15 +92,21 @@ class TrustBar:
 
         print(
             move(4, 2)
-            + white_fg() + "Trust: " + RESET
-            + glyph_render + " ["
+            + white_fg()
+            + "Trust: "
+            + RESET
+            + glyph_render
+            + " ["
             + bar
-            + white_fg() + "] " + RESET
+            + white_fg()
+            + "] "
+            + RESET
             + status
         )
         # Bypasses display(); invalidate the render-diff baseline so the next
         # display() repaints row 4 (4.0.0 convention).
         from belote.ui.render import invalidate_diff
+
         invalidate_diff()
 
     # 4.8.0 / B4: tick-up / tick-down animation between two trust values.
@@ -128,6 +134,7 @@ class TrustBar:
 
         real_value = self.trust.value
         try:
+
             def _paint(val: int) -> None:
                 # The render method reads `self.trust.value`; temporarily
                 # override it so we can show intermediate frames without

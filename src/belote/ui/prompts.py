@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
 
 from ..ansi import (
@@ -10,6 +11,7 @@ from ..ansi import (
     DIM,
     RESET,
     ansi_center,
+    ansi_ljust,
     clear_screen,
     gold_fg,
     hide_cursor,
@@ -19,14 +21,16 @@ from ..ansi import (
 )
 from ..deck import Card, Suit
 from ..game import (
+    BidValue,
     GameState,
     RoundScore,
     S,
     Seat,
     legal_cards,
     sort_south_hand,
+    team_of,
 )
-from ..input import Key, KeyReader
+from ..input import Key, KeyReader, key_label, typed
 from ..rules import RULES_CONTENT, RulesPage
 from ..themes import theme_manager
 from .render import display, get_term_size, invalidate_diff
@@ -52,6 +56,79 @@ def register_extension_keys(*keys: Key) -> None:
 
 def unregister_extension_keys(*keys: Key) -> None:
     _EXTENSION_KEYS.difference_update(keys)
+
+
+def _open_overlay(key: Key, state: GameState, reader: KeyReader) -> None:
+    """Help (?), theme cycle (T) and round history (H): shared by the card
+    and bid prompts; each returns to the prompt afterwards."""
+    if key == Key.HELP:
+        show_help(reader)
+    elif key == Key.THEME:
+        theme_manager.cycle()
+    else:
+        show_history(state, reader)
+
+
+def _step_to_legal(hand: tuple[Card, ...], legal: tuple[Card, ...], sel: int, step: int) -> int:
+    """Move the selection to the next legal card in `step`'s direction, or
+    stay put if there is none that way."""
+    new = sel + step
+    while 0 <= new < len(hand) and hand[new] not in legal:
+        new += step
+    return new if 0 <= new < len(hand) else sel
+
+
+def _nearest_legal(hand: tuple[Card, ...], legal: tuple[Card, ...], sel: int) -> Card | None:
+    """The selected card if legal, else the nearest legal one (right first)."""
+    if hand[sel] in legal:
+        return hand[sel]
+    for delta in range(1, len(hand)):
+        for d in (delta, -delta):
+            idx = sel + d
+            if 0 <= idx < len(hand) and hand[idx] in legal:
+                return hand[idx]
+    return None
+
+
+def _card_quick_key(
+    char: str, hand: tuple[Card, ...], legal: tuple[Card, ...]
+) -> Card | Literal["UNDO"] | None:
+    """Z = undo; 1-8 = play that card if legal."""
+    if char == "z":
+        return "UNDO"
+    # isdecimal, not isdigit: "²" is a digit but int("²") used to crash here.
+    if char.isdecimal():
+        idx = int(char) - 1
+        if 0 <= idx < len(hand) and hand[idx] in legal:
+            return hand[idx]
+    return None
+
+
+class _NoBidKey(Enum):
+    """Sentinel: the key isn't a bid shortcut (None is a real bid: pass)."""
+
+    TOKEN = 0
+
+
+def _bid_quick_key(char: str, options: list[BidValue]) -> BidValue | Literal["UNDO"] | _NoBidKey:
+    """Z = undo, P = pass, X = Tout Atout, N = Sans Atout (round 2 only),
+    1-n = that option. Returns `_NO_BID_KEY` for anything else.
+
+    4.5.0 moved the TA/SA keys off `a`/`s`: those are WASD aliases."""
+    from ..game import SANS_ATOUT_BID
+
+    if char == "z":
+        return "UNDO"
+    if char == "p":
+        return None
+    if char == "x" and Suit.TOUT_ATOUT in options:
+        return Suit.TOUT_ATOUT
+    if char == "n" and SANS_ATOUT_BID in options:
+        return SANS_ATOUT_BID
+    # isdecimal, not isdigit: "²" is a digit but int("²") raises.
+    if char.isdecimal() and 0 <= int(char) - 1 < len(options):
+        return options[int(char) - 1]
+    return _NoBidKey.TOKEN
 
 
 def prompt_card(
@@ -109,29 +186,15 @@ def prompt_card(
                 # spin re-reading a dead pipe forever.
                 return None, state
             case Key.LEFT | Key.UP:
-                new = sel - 1
-                while new >= 0 and hand[new] not in legal:
-                    new -= 1
-                if new >= 0:
-                    sel = new
+                sel = _step_to_legal(hand, legal, sel, -1)
             case Key.RIGHT | Key.DOWN:
-                new = sel + 1
-                while new < len(hand) and hand[new] not in legal:
-                    new += 1
-                if new < len(hand):
-                    sel = new
+                sel = _step_to_legal(hand, legal, sel, +1)
             case Key.ENTER:
-                if hand[sel] in legal:
-                    return hand[sel], state
-                # Fallback: return nearest legal card
-                for delta in range(1, len(hand)):
-                    for d in (delta, -delta):
-                        idx = sel + d
-                        if 0 <= idx < len(hand) and hand[idx] in legal:
-                            return hand[idx], state
-            case Key.HELP:
-                show_help(reader)
-                continue
+                card = _nearest_legal(hand, legal, sel)
+                if card is not None:
+                    return card, state
+            case Key.HELP | Key.THEME | Key.HIST:
+                _open_overlay(event.key, state, reader)
             case Key.SORT:
                 selected_card = hand[sel]
                 state = sort_south_hand(state)
@@ -139,22 +202,10 @@ def prompt_card(
                 legal = legal_cards(state, Seat.SOUTH)
                 # Re-find selection index
                 sel = next((i for i, c in enumerate(hand) if c == selected_card), 0)
-                continue
-            case Key.THEME:
-                theme_manager.cycle()
-                continue
-            case Key.HIST:
-                show_history(state, reader)
-                continue
-            case Key.CHAR:
-                if event.char:
-                    char = event.char.lower()
-                    if char == "z":
-                        return "UNDO", state
-                    if char.isdigit():
-                        idx = int(char) - 1
-                        if 0 <= idx < len(hand) and hand[idx] in legal:
-                            return hand[idx], state
+            case Key.CHAR if event.char:
+                choice = _card_quick_key(event.char.lower(), hand, legal)
+                if choice is not None:
+                    return choice, state
     # Unreachable: the while(True) above only exits via return.
     raise AssertionError("prompt_card loop fell through without returning")
 
@@ -169,7 +220,8 @@ def prompt_coinche(state: GameState, reader: KeyReader) -> bool:
     """
     if state.taker is None:
         return False
-    taker_label = "EW" if state.taker.name in ("EAST", "WEST") else "NS"
+    # `Seat.name` is "East"/"West" (display case), so compare teams, not names.
+    taker_label = "EW" if team_of(state.taker) == 1 else "NS"
     prompt = (
         f"{BOLD}{gold_fg()}Coinche?{RESET}  {white_fg()}{taker_label} took the bid. "
         f"Press [C] to coinche (×2), [Enter] to accept.{RESET}"
@@ -187,9 +239,7 @@ def prompt_coinche(state: GameState, reader: KeyReader) -> bool:
             return True
 
 
-def prompt_surcoinche(
-    state: GameState, reader: KeyReader, coincheur_label: str
-) -> bool:
+def prompt_surcoinche(reader: KeyReader, coincheur_label: str) -> bool:
     """4.9.0 / G1: ask SOUTH (taker team) whether to surcoinche a coinche.
 
     Only called when SOUTH is on the taker team and the opposing team just
@@ -208,7 +258,7 @@ def prompt_surcoinche(
         event = reader.read()
         if event.key in (Key.QUIT, Key.EOF, Key.ESC, Key.ENTER):
             return False
-        if event.key == Key.CHAR and event.char and event.char.lower() == "s":
+        if typed(event, "s"):  # S is also the DOWN alias — match the letter
             return True
 
 
@@ -226,7 +276,7 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | ExtensionKey
     display() would scroll the alt-screen on stricter terminals (Konsole) and
     leak previous frames onto blank padding rows.
     """
-    from ..game import SANS_ATOUT_BID, legal_bids
+    from ..game import legal_bids
 
     options = legal_bids(state)
 
@@ -249,76 +299,96 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | ExtensionKey
                 sel = (sel + 1) % len(options)
             case Key.ENTER:
                 return options[sel]
-            case Key.HELP:
-                show_help(reader)
-                continue
-            case Key.THEME:
-                theme_manager.cycle()
-                continue
-            case Key.HIST:
-                show_history(state, reader)
-                continue
-            case Key.CHAR:
-                if event.char:
-                    char = event.char.lower()
-                    if char == "z":
-                        return "UNDO"
-                    if char == "p":
-                        return None
-                    # Round-2-only quick keys for the new contracts. `x` =
-                    # tout-atout (X-tra trump everywhere), `n` = sans-atout
-                    # (No trump). 4.5.0: moved off a/s — those are now WASD
-                    # nav aliases at the reader level (input.py).
-                    if char == "x" and Suit.TOUT_ATOUT in options:
-                        return Suit.TOUT_ATOUT
-                    if char == "n" and SANS_ATOUT_BID in options:
-                        return SANS_ATOUT_BID
-                    try:
-                        idx = int(char) - 1
-                        if 0 <= idx < len(options):
-                            return options[idx]
-                    except ValueError:
-                        pass
+            case Key.HELP | Key.THEME | Key.HIST:
+                _open_overlay(event.key, state, reader)
+            case Key.CHAR if event.char:
+                bid = _bid_quick_key(event.char.lower(), options)
+                if not isinstance(bid, _NoBidKey):
+                    return bid
+
+
+def _help_sections() -> list[tuple[str, list[tuple[str, str]]]]:
+    """Shortcut reference, with the player's current key bindings (4.11.0)."""
+    k = key_label
+    move = "/".join(k(a) for a in ("up", "left", "down", "right"))
+    return [
+        (
+            "General",
+            [
+                (k("help"), "This help screen"),
+                (k("quit"), "Quit to menu / exit"),
+                (k("theme"), "Cycle theme"),
+                ("Esc", "Cancel / back"),
+                (k("history"), "Round history"),
+            ],
+        ),
+        (
+            "Playing",
+            [
+                (f"←↑→↓ {move}", "Move selection"),
+                ("Enter", "Play / confirm"),
+                ("1-8", "Play that card"),
+                (k("sort"), "Sort hand"),
+                ("Space", "Skip animations"),
+                (k("undo"), "Undo last move"),
+            ],
+        ),
+        (
+            "Bidding",
+            [
+                ("P", "Pass"),
+                ("1-4", "Take / bid that option"),
+                ("X", "Tout Atout (round 2)"),
+                ("N", "Sans Atout (round 2)"),
+                ("C", "Coinche (×2)"),
+                ("S", "Surcoinche (×4)"),
+            ],
+        ),
+    ]
+
+
+def _help_block(title: str, rows: list[tuple[str, str]], key_w: int) -> list[str]:
+    block = [f"{BOLD}{white_fg()}{title}{RESET}"]
+    block += [f"  {gold_fg()}{key.ljust(key_w)}{RESET} {desc}" for key, desc in rows]
+    return block
 
 
 def show_help(reader: KeyReader) -> None:
-    """Display a quick keyboard shortcut reference."""
+    """Display a quick keyboard shortcut reference.
+
+    4.11.0: keys are aligned in one column (each line used to be centred on
+    its own, so the column zig-zagged), the sections sit side by side when the
+    terminal is short (the title used to scroll off at 80×24), and the keys
+    shown are the player's own bindings (Settings → Controls)."""
     term_w, term_h = get_term_size()
+    sections = _help_sections()
+    key_w = max(len(key) for _, rows in sections for key, _ in rows)
+    blocks = [_help_block(t, rows, key_w) for t, rows in sections]
+    block_w = max(visible_len(line) for b in blocks for line in b) + 2
 
+    single = [line for b in blocks for line in [*b, ""]][:-1]
+    if len(single) + 4 <= term_h or term_w < 2 * block_w + 2:
+        body = single
+    else:  # two columns: General + Playing | Bidding
+        left = [*blocks[0], "", *blocks[1]]
+        right = blocks[2]
+        body = [
+            ansi_ljust(left[i] if i < len(left) else "", block_w)
+            + (right[i] if i < len(right) else "")
+            for i in range(max(len(left), len(right)))
+        ]
+    body_w = max(visible_len(line) for line in body)
+    pad = " " * max(0, (term_w - body_w) // 2)
     lines = [
-        f"{BOLD}{gold_fg()}KEYBOARD SHORTCUTS{RESET}",
-        "=" * 20,
+        ansi_center(f"{BOLD}{gold_fg()}KEYBOARD SHORTCUTS{RESET}", term_w),
         "",
-        f"{white_fg()}General:{RESET}",
-        "  [?]         Show this help screen",
-        "  [Q]         Quit to menu / Exit",
-        "  [T]         Cycle Theme",
-        "  [Esc]       Cancel / Back",
+        *(pad + line for line in body),
         "",
-        f"{white_fg()}Gameplay:{RESET}",
-        "  [←↑→↓/WASD] Move selection",
-        "  [Enter]     Confirm selection",
-        "  [1-8]       Quick card select",
-        "  [O]         Sort hand by suit/rank",
-        "  [Space]     Skip animations",
-        "  [H]         View Game History",
-        "  [Z]         Undo last move",
-        "",
-        f"{white_fg()}Bidding:{RESET}",
-        "  [P]         Pass",
-        "  [1-4]       Bid suit (S/H/D/C)",
-        "  [X]         Tout Atout (round 2)",
-        "  [N]         Sans Atout (round 2)",
-        "",
-        f"{white_fg()}Menus:{RESET}",
-        "  [H]         View Game History",
-        "",
-        f"{DIM}Press [Any Key] to Return{RESET}",
+        ansi_center(f"{DIM}Press any key to return{RESET}", term_w),
     ]
-
-    out = clear_screen() + hide_cursor()
-    rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
-    sys.stdout.write("".join([out, rendered]))
+    top = max(0, (term_h - len(lines)) // 2)
+    out = clear_screen() + hide_cursor() + "\r\n" * top
+    sys.stdout.write(out + "\r\n".join(lines[: max(1, term_h - top)]))
     sys.stdout.flush()
     reader.read()
     invalidate_diff()
@@ -522,7 +592,9 @@ def _build_history_lines(state: GameState, term_w: int) -> list[str]:
             lines.append(" │ ".join(row_cells))
     else:
         # Compact two-line-per-round layout for narrow terminals.
-        lines.append(f"{BOLD}{white_fg()}{'RD':<3} {'TAKER':<7} {'CON':<8} {'TRICKS':<7} STATUS{RESET}")
+        lines.append(
+            f"{BOLD}{white_fg()}{'RD':<3} {'TAKER':<7} {'CON':<8} {'TRICKS':<7} STATUS{RESET}"
+        )
         lines.append("─" * 40)
         for i, rs in enumerate(state.score_history):
             rd = f"{i + 1:02d}"
@@ -530,9 +602,7 @@ def _build_history_lines(state: GameState, term_w: int) -> list[str]:
             contract = _hist_contract_label(rs)
             tricks = f"{rs.tricks_ns}/{rs.tricks_ew}"
             status = _hist_status(rs)
-            lines.append(
-                f"{rd:<3} {_ljust_visible(taker, 7)} {contract:<8} {tricks:<7} {status}"
-            )
+            lines.append(f"{rd:<3} {_ljust_visible(taker, 7)} {contract:<8} {tricks:<7} {status}")
             decl_n = _hist_decl_str(rs.decl_summary_ns, 14)
             decl_e = _hist_decl_str(rs.decl_summary_ew, 14)
             lines.append(

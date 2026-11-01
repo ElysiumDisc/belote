@@ -151,11 +151,13 @@ def test_open_navigates_with_arrow_keys() -> None:
     run.jokers.append(TierceCharger())
     run.jokers.append(TierceCharger())
     # Three reads: DOWN moves selection, DOWN again, then ESC closes.
-    reader = _ScriptedReader([
-        KeyEvent(Key.DOWN),
-        KeyEvent(Key.DOWN),
-        KeyEvent(Key.ESC),
-    ])
+    reader = _ScriptedReader(
+        [
+            KeyEvent(Key.DOWN),
+            KeyEvent(Key.DOWN),
+            KeyEvent(Key.ESC),
+        ]
+    )
     InventoryOverlay(run, reader).open()  # exits cleanly
 
 
@@ -165,11 +167,13 @@ def test_open_enter_opens_detail_view_then_esc_returns(capsys) -> None:
 
     run = _make_run()
     run.jokers.append(TierceCharger())
-    reader = _ScriptedReader([
-        KeyEvent(Key.ENTER),  # open detail
-        KeyEvent(Key.ESC),    # back to list
-        KeyEvent(Key.ESC),    # close overlay
-    ])
+    reader = _ScriptedReader(
+        [
+            KeyEvent(Key.ENTER),  # open detail
+            KeyEvent(Key.ESC),  # back to list
+            KeyEvent(Key.ESC),  # close overlay
+        ]
+    )
     InventoryOverlay(run, reader).open()
     out = capsys.readouterr().out
     # Both list and detail headers should have rendered at least once.
@@ -200,3 +204,40 @@ def test_open_invalidates_diff_on_normal_exit() -> None:
     reader = _ScriptedReader([KeyEvent(Key.ESC)])
     InventoryOverlay(run, reader).open()
     assert render_module._last_emitted_lines is None
+
+
+def test_detail_page_typed_a_activates_not_back(monkeypatch, capsys) -> None:
+    """4.11.0: `a` is the WASD LEFT alias and ← means "back" on the detail
+    page, so the advertised "[A] activate" used to leave the page instead.
+    Typed letters now ride along on aliased events (`input.typed`)."""
+    from belote.belatro.items.tarots import LeChariot
+    from belote.input import char_event
+
+    run = _make_run()
+    run.consumables = [LeChariot()]
+    calls: list[int] = []
+
+    def fake_activate(self: InventoryOverlay, idx: int) -> bool:
+        calls.append(idx)
+        return False
+
+    monkeypatch.setattr(InventoryOverlay, "_activate_consumable_at", fake_activate)
+    # Enter the (only) entry's detail page, then type `a` exactly as the real
+    # reader decodes it (Key.LEFT carrying char "a"), then leave.
+    reader = _ScriptedReader([KeyEvent(Key.ENTER), char_event("a"), KeyEvent(Key.ESC)])
+    InventoryOverlay(run, reader).open()
+    assert calls == [0]
+
+
+def test_detail_page_left_arrow_still_goes_back(monkeypatch, capsys) -> None:
+    from belote.belatro.items.tarots import LeChariot
+
+    run = _make_run()
+    run.consumables = [LeChariot()]
+    calls: list[int] = []
+    monkeypatch.setattr(
+        InventoryOverlay, "_activate_consumable_at", lambda self, i: calls.append(i) or False
+    )
+    reader = _ScriptedReader([KeyEvent(Key.ENTER), KeyEvent(Key.LEFT), KeyEvent(Key.ESC)])
+    InventoryOverlay(run, reader).open()
+    assert calls == []

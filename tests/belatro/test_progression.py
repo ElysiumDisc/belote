@@ -27,6 +27,7 @@ def test_planet_level_up():
     # Saturn level 1 reward for spades is +8 chips
     assert run.contract_levels["spades"] == {"add_chips": 8}
 
+
 def test_ante_progression():
     """40. Ante progression - Verify all 8 antes cycle correctly."""
     run = BelAtroRun()
@@ -34,13 +35,13 @@ def test_ante_progression():
     assert run.ante_number == 1
     assert run.blind_index == 0
 
-    run.advance_blind() # -> Big
+    run.advance_blind()  # -> Big
     assert run.blind_index == 1
 
-    run.advance_blind() # -> Boss
+    run.advance_blind()  # -> Boss
     assert run.blind_index == 2
 
-    run.advance_blind() # -> Ante 2, Small
+    run.advance_blind()  # -> Ante 2, Small
     assert run.ante_number == 2
     assert run.blind_index == 0
 
@@ -183,9 +184,7 @@ def test_quinte_declaration_unlocks_quinte_royale() -> None:
     assert not profile.is_unlocked("quinte_royale")
 
     tracker.on_event(
-        DeclarationScoredEvent(
-            seat=Seat.SOUTH, declaration_type="sequence", points=100
-        )
+        DeclarationScoredEvent(seat=Seat.SOUTH, declaration_type="sequence", points=100)
     )
     assert profile.is_unlocked("quinte_royale")
     save.save_profile.assert_called()
@@ -272,8 +271,9 @@ class TestProfile:
         assert "le_courageux" in self.profile.unlocked_ids
         assert "l_econome" in self.profile.unlocked_ids
 
-    def test_stats_has_four_keys(self) -> None:
-        assert len(self.profile.stats) == 4
+    def test_stats_has_five_keys(self) -> None:
+        # 4.11.0: + bosses_defeated (Le Complice deck unlock).
+        assert len(self.profile.stats) == 5
 
     def test_stats_all_zero(self) -> None:
         assert all(v == 0 for v in self.profile.stats.values())

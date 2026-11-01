@@ -31,11 +31,13 @@ class TestScoreAccumulator:
 
     def test_total_chips_times_mult(self) -> None:
         from dataclasses import replace
+
         state = replace(self.state, _chips=10, _mult=2.0)
         assert self.acc.get_total(state) == 20
 
     def test_total_truncates_to_int(self) -> None:
         from dataclasses import replace
+
         state = replace(self.state, _chips=10, _mult=1.5)
         assert self.acc.get_total(state) == 15
         assert isinstance(self.acc.get_total(state), int)
@@ -69,12 +71,14 @@ class TestScoreAccumulator:
 
     def test_popup_lines_contains_summary(self) -> None:
         from dataclasses import replace
+
         state = replace(self.state, _chips=20, _mult=2.0)
         lines = self.acc.get_popup_lines(state)
         assert any("Chips" in ln and "Mult" in ln for ln in lines)
 
     def test_popup_lines_last_line_has_total(self) -> None:
         from dataclasses import replace
+
         state = replace(self.state, _chips=10, _mult=3.0)
         last = self.acc.get_popup_lines(state)[-1]
         assert "30" in last  # 10 * 3.0 = 30

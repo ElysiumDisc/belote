@@ -32,7 +32,10 @@ def _north_to_play(
 
 
 # South leads A♠ (winning), East follows 7♠; North is void in spades.
-_SOUTH_WINNING = (TrickCard(Seat.SOUTH, Card(S, Rank.ACE)), TrickCard(Seat.EAST, Card(S, Rank.SEVEN)))
+_SOUTH_WINNING = (
+    TrickCard(Seat.SOUTH, Card(S, Rank.ACE)),
+    TrickCard(Seat.EAST, Card(S, Rank.SEVEN)),
+)
 
 
 def test_diable_overcuts_partner_with_lowest_winning_trump() -> None:

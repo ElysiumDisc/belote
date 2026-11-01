@@ -94,6 +94,15 @@ BELATRO_RULES: dict[str, RulesPage] = {
                     "Spend wisely — some Jokers are expensive but game-changing."
                 ),
             },
+            {
+                "header": "Boss Rush & Ghost Runs",
+                "text": (
+                    "Boss Rush starts a practice run from any Ante with a chosen boss, deck "
+                    "and seed; it doesn't count toward unlocks. With Ghost run recording on "
+                    "(Settings), every run is saved: Watch Ghost Run replays it round by "
+                    "round (+/- speed, Space pause, N skip round, Esc quit)."
+                ),
+            },
         ],
     },
     "fr": {
@@ -164,6 +173,16 @@ BELATRO_RULES: dict[str, RulesPage] = {
                     "Intérêts: +1€ par tranche de 5€ en fin de manche (max +5€). "
                     "Dépasser largement la cible rapporte un bonus. "
                     "Gérez votre budget — certains Jokers sont chers mais décisifs."
+                ),
+            },
+            {
+                "header": "Boss Rush & Parties fantômes",
+                "text": (
+                    "Le Boss Rush lance une partie d'entraînement depuis n'importe quel Ante, "
+                    "avec le boss, le deck et la graine de votre choix ; elle ne compte pas "
+                    "pour les déblocages. Avec l'enregistrement fantôme activé (Réglages), "
+                    "chaque partie est sauvegardée : « Watch Ghost Run » la rejoue manche par "
+                    "manche (+/- vitesse, Espace pause, N manche suivante, Échap quitter)."
                 ),
             },
         ],

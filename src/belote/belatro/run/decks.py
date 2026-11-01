@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    from ..progression.save import Profile
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,20 @@ class StartingDeck:
     initial_jokers: list[str] = field(default_factory=list)  # Store Joker IDs
     deck_modifications: dict[str, Any] = field(default_factory=dict)
     ascii_art: tuple[str, ...] = field(default_factory=tuple)
+    # 4.11.0: profile unlock id gating the deck (None = always available) and
+    # the hint the deck picker shows while it is locked.
+    unlock_id: str | None = None
+    unlock_hint: str = ""
+
+    def is_unlocked(self, profile: Profile | None) -> bool:
+        if self.unlock_id is None:
+            return True
+        return profile is not None and profile.is_unlocked(self.unlock_id)
+
+
+# 4.11.0: Le Complice unlocks after this many lifetime Boss Blind wins.
+COMPLICE_BOSSES_REQUIRED = 5
+COMPLICE_UNLOCK_ID = "deck_complice"
 
 
 STARTING_DECKS: list[StartingDeck] = [
@@ -178,4 +192,28 @@ STARTING_DECKS: list[StartingDeck] = [
             "   Annonce tricks +$2   ",
         ),
     ),
+    StartingDeck(
+        id="complice",
+        name="Le Complice",
+        description=(
+            "Your partner starts at Trust 7 (plays at Hard) with a random Partner Joker "
+            "in its own slot. Start with only $2."
+        ),
+        initial_money=2,
+        deck_modifications={"partner_trust": 7, "partner_joker": True},
+        unlock_id=COMPLICE_UNLOCK_ID,
+        unlock_hint=f"Defeat {COMPLICE_BOSSES_REQUIRED} Boss Blinds to unlock.",
+        ascii_art=(
+            "   ┌──┐  ♥  ♥  ┌──┐    ",
+            "   │S │ ═════ │N │    ",
+            "   └──┘  pact  └──┘    ",
+            "  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  ",
+            "  Trust 7 + P. Joker   ",
+        ),
+    ),
 ]
+
+
+def unlocked_decks(profile: Profile | None) -> list[StartingDeck]:
+    """The decks `profile` may start a run with, in picker order."""
+    return [d for d in STARTING_DECKS if d.is_unlocked(profile)]

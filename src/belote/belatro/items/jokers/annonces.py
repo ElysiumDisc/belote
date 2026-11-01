@@ -54,9 +54,7 @@ class RebeloteEcho(Joker):
     cost = 8
     rarity = Rarity.UNCOMMON
 
-    def on_belote(
-        self, event: BeloteAnnouncedEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_belote(self, event: BeloteAnnouncedEvent, state: dict[str, Any]) -> JokerResult | None:
         # Re-emit short-circuit (4.1.0 defensive): if a future replay path
         # re-emits the belote/rebelote event, the ×3 mult must not double.
         if getattr(event, "re_emit", False):
@@ -88,9 +86,7 @@ class QuinteRoyale(Joker):
             state[f"{self.id}_armed"] = True
         return None
 
-    def on_round_end(
-        self, event: RoundEndEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         # Re-emit short-circuit (4.1.0): state.pop() consumes the armed flag,
         # so a re-emit would silently disarm without paying out. Skip entirely.
         if getattr(event, "re_emit", False):
@@ -120,9 +116,7 @@ class LeCollectionneur(Joker):
     cost = 8
     rarity = Rarity.UNCOMMON
 
-    def on_trick_won(
-        self, event: TrickWonEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         # Pay-out is per qualifying card; guard against TrickWonEvent re-emits
         # so a replay can't double-credit. Matches the 4.1.0 convention applied
         # to every other state-mutating on_trick_won handler.
@@ -130,9 +124,7 @@ class LeCollectionneur(Joker):
             return None
         if event.trick_number == 1 or not event.cards:
             return None
-        annonce_cards: frozenset[tuple[str, str]] = state.get(
-            "_ns_annonce_cards", frozenset()
-        )
+        annonce_cards: frozenset[tuple[str, str]] = state.get("_ns_annonce_cards", frozenset())
         if not annonce_cards:
             return None
         # Count cards in this trick that are from an NS-declared Annonce AND
@@ -174,14 +166,11 @@ class LEclat(Joker):
     cost = 9
     rarity = Rarity.RARE
 
-    def on_trick_won(
-        self, event: TrickWonEvent, state: dict[str, Any]
-    ) -> JokerResult | None:
+    def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) != 0 or event.trump is None or not event.cards:
             return None
         belote_in_trick = any(
-            c.suit == event.trump and c.rank in (Rank.KING, Rank.QUEEN)
-            for c in event.cards
+            c.suit == event.trump and c.rank in (Rank.KING, Rank.QUEEN) for c in event.cards
         )
         if belote_in_trick:
             # JokerResult has no times_chips field — base chips for this trick

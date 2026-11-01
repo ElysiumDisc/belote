@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from ..input import Key
 from ..ui.fit_guard import FitAbortedError
 from ..ui.prompts import ExtensionKey, register_extension_keys, unregister_extension_keys
-from ..ui.render import set_bid_hint_provider
+from ..ui.render import set_bid_hint_provider, set_overlay_provider
 from .core.run_state import BelAtroRun
 from .core.scoring import ScoreAccumulator
 from .engine.event_bus import EventBus
@@ -45,6 +45,30 @@ def _legal_bids(state: BelatroState) -> list[BidValue]:
     from belote.game import legal_bids
 
     return [b for b in legal_bids(state) if b is not None]
+
+
+def toast_cosmetic_unlocks(reader: KeyReader | None) -> None:
+    """4.11.0: toast card backs / frames earned in BelAtro (L'Insider, the
+    Daily calendar back) right away instead of at the next classic round."""
+    if reader is None:
+        return
+    from ..cosmetics import unlock_toasts
+    from ..ui.announce import achievement_toast
+
+    for toast in unlock_toasts():
+        achievement_toast(toast, reader)
+
+
+def _overlay_rows() -> tuple[int, int]:
+    """Rows the in-round HUD paints over the classic table (top, bottom),
+    for the core's vertical budget (4.11.0). The bottom tally ends at
+    term_h - 1, so it keeps the last row free too: +1. Hidden HUD (I) → 0."""
+    from .ui.announce import is_top_hud_visible
+    from .ui.hud import BOTTOM_OVERLAY_ROWS, TOP_OVERLAY_ROWS
+
+    if not is_top_hud_visible():
+        return (0, 0)
+    return (TOP_OVERLAY_ROWS, BOTTOM_OVERLAY_ROWS + 1)
 
 
 def _partner_bid_hint(state: GameState) -> str | None:
@@ -134,9 +158,7 @@ class UICallbacks(RoundUICallbacks):
         if (
             self.run.card_enhancements.get("buy_contract")
             and self.run.economy.money >= 10
-            and BelAtroAnnounce.yes_no(
-                "L'Architecte: buy the contract for $10?", self.reader
-            )
+            and BelAtroAnnounce.yes_no("L'Architecte: buy the contract for $10?", self.reader)
         ):
             # Offer only bids legal this bidding round — round 1: the up-card
             # suit only; round 2: any other suit, or TA/SA. Money is taken only
@@ -241,9 +263,7 @@ class UICallbacks(RoundUICallbacks):
         # log breakdown.
         from .ui.announce import BelAtroAnnounce
 
-        BelAtroAnnounce.slot_machine_tally(
-            self.acc, state, self.reader, points=points
-        )
+        BelAtroAnnounce.slot_machine_tally(self.acc, state, self.reader, points=points)
 
     def on_round_end(self, breakdown: object) -> None:
         pass
@@ -365,12 +385,16 @@ class BelAtroGame:
                 self.save_manager.save_profile(self.profile)
                 if self._ghost_enabled:
                     from .ghost_run import GhostRecorder
+
                     # BelAtroRun picks a seed at creation when none is given,
                     # so this is the real seed the run's RNG uses.
                     self._ghost_recorder = GhostRecorder(
                         seed=self.run.seed if self.run.seed is not None else 0,
                         deck_id=self.run.deck_id,
                     )
+                    self._ghost_recorder.note_run_start(self.run)
+                    # Shop + consumable events report through the run.
+                    self.run.recorder = self._ghost_recorder
                 # 3.3.0: route the in-game [H] key to the BelAtro history
                 # overlay (reading `self.run.history`) for the duration of
                 # the run. Cleared in the finally block so the classic
@@ -378,11 +402,11 @@ class BelAtroGame:
                 # path on exit.
                 from ..ui.prompts import set_history_override
                 from .ui.history import show_belatro_history
+
                 run = self.run  # capture for the closure (mypy: narrowed)
-                set_history_override(
-                    lambda reader: show_belatro_history(reader, run.history)
-                )
+                set_history_override(lambda reader: show_belatro_history(reader, run.history))
                 set_bid_hint_provider(_partner_bid_hint)
+                set_overlay_provider(_overlay_rows)
                 register_extension_keys(*_RUN_KEYS)
                 self._run_loop()
         except (KeyboardInterrupt, FitAbortedError):
@@ -391,20 +415,27 @@ class BelAtroGame:
             return
         finally:
             from ..ui.prompts import set_history_override
+
             set_history_override(None)
             set_bid_hint_provider(None)
+            set_overlay_provider(None)
             unregister_extension_keys(*_RUN_KEYS)
             # 3.0.0: append a one-line summary of the just-ended run for the
             # player's own analysis. Best-effort; swallowed on failure.
             if self.run is not None:
                 from .run_summary import append_summary
+
                 # enter_endless() clears run_won to re-open the run, but being
                 # in endless at all means ante 8 was beaten — still a victory.
                 won = self.run.run_won or self.run.endless
                 append_summary(self.run, won=won)
-                if self._ghost_recorder is not None:
+                if self._ghost_recorder is not None and self._ghost_recorder.rounds_played:
+                    # Winning AND losing runs are kept (the toggle gates both);
+                    # a run quit before its first blind has nothing to watch.
                     label = "won" if won else f"ante{self.run.ante_number}"
+                    self._ghost_recorder.note_run_end(self.run, won=won)
                     self._ghost_recorder.save(label=label)
+                toast_cosmetic_unlocks(self.reader)
 
     def _drain_unlock_announcements(self) -> None:
         """Render any queued unlock notices through the TUI banner.
@@ -416,6 +447,7 @@ class BelAtroGame:
             self.unlock_tracker.drain_announcements()
             return
         from .ui.announce import BelAtroAnnounce
+
         for msg in self.unlock_tracker.drain_announcements():
             BelAtroAnnounce.banner(msg, self.reader, hold=1.5)
 
@@ -433,13 +465,16 @@ class BelAtroGame:
         if bonus_money > 0:
             self.run.economy.add_money(bonus_money)
         elif bonus_money < 0:
-            self.run.economy.spend_money(-bonus_money)
+            # 4.11.0: a debit larger than the wallet takes what is there
+            # (Le Contre-Attaquant's steals) instead of silently no-oping.
+            self.run.economy.spend_money(min(-bonus_money, self.run.economy.money))
 
     def _run_loop(self) -> None:
         """Main game loop: Blind -> Shop -> Next."""
         if self.run is None:
             return
         from .ui.announce import BelAtroAnnounce
+
         try:
             while not self.run.run_over:
                 # 1. Round (Blind)
@@ -461,10 +496,13 @@ class BelAtroGame:
 
                 # 3. Advance
                 self.run.advance_blind()
-                self.unlock_tracker.check_ante_unlocks(self.run.ante_number)
+                # Boss Rush runs (4.11.0) don't count toward run milestones.
+                if not self.run.challenge:
+                    self.unlock_tracker.check_ante_unlocks(self.run.ante_number)
                 self._drain_unlock_announcements()
                 if self.run.run_won:
-                    self.unlock_tracker.notify_run_won()
+                    if not self.run.challenge:
+                        self.unlock_tracker.notify_run_won()
                     self._drain_unlock_announcements()
                     if self.reader is not None:
                         BelAtroAnnounce.banner("YOU WON!", self.reader, hold=2.5)
@@ -472,9 +510,14 @@ class BelAtroGame:
                         # Skip the prompt when already in endless to avoid a
                         # double-offer if a future endless-victory state is
                         # added.
-                        if not self.run.endless and not self.run.daily and BelAtroAnnounce.yes_no(
-                            "Continue into Endless Mode? (Ante 9+ scales ×2.2)",
-                            self.reader,
+                        if (
+                            not self.run.endless
+                            and not self.run.daily
+                            and not self.run.challenge
+                            and BelAtroAnnounce.yes_no(
+                                "Continue into Endless Mode? (Ante 9+ scales ×2.2)",
+                                self.reader,
+                            )
                         ):
                             self.run.enter_endless()
                             self.save_manager.save_profile(self.profile)
@@ -544,13 +587,16 @@ class BelAtroGame:
         # Per-round deal seed drawn from the run's seeded RNG so a whole run
         # (deals + AI play) replays from run.seed — ghost runs depend on it.
         round_seed = run._get_rng().getrandbits(32)
+        if self._ghost_recorder is not None:
+            self._ghost_recorder.note_round_start(
+                run, boss=boss, round_seed=round_seed, target=effective_target
+            )
         try:
             final_state = drive_round(
                 bus=bus,
                 seed=round_seed,
                 partner=run.partner,
                 boss=boss,
-                target_score=effective_target,
                 ui_callbacks=UICallbacks(
                     reader,
                     run,
@@ -593,6 +639,8 @@ class BelAtroGame:
             self._settle_won_blind(
                 run, final_state, total, effective_target, auto_coinche_active, lock_trust
             )
+        if boss is not None and total >= effective_target and not run.challenge:
+            self.unlock_tracker.notify_boss_defeated()
         # Partner-specific trust events (skipped under Le Divorce)
         if not lock_trust:
             if bd.taker_team == 0 and bd.is_failed:
@@ -618,6 +666,8 @@ class BelAtroGame:
             money_delta=run.economy.money - money_before,
             survived_via_insurance=survived_via_insurance,
         )
+        if self._ghost_recorder is not None and run.history:
+            self._ghost_recorder.note_round_result(run, run.history[-1], final_state)
 
     # ── _play_blind phases ──────────────────────────────────────────────
 
@@ -665,11 +715,16 @@ class BelAtroGame:
     def _pick_boss(run: BelAtroRun, reader: KeyReader) -> BossModifier | None:
         """Pick (and reveal) this blind's boss, or None for a plain blind."""
         # Le Joueur deck (`boss_every_2`) adds an extra boss blind on the Big
-        # Blind of even-numbered antes — see decks.py.
-        is_boss_blind = run.blind_index == 2 or (
-            bool(run.card_enhancements.get("boss_every_2"))
-            and run.blind_index == 1
-            and run.ante_number % 2 == 0
+        # Blind of even-numbered antes — see decks.py. Boss Rush (4.11.0)
+        # makes every blind a boss blind.
+        is_boss_blind = (
+            run.blind_index == 2
+            or run.boss_rush
+            or (
+                bool(run.card_enhancements.get("boss_every_2"))
+                and run.blind_index == 1
+                and run.ante_number % 2 == 0
+            )
         )
         if not is_boss_blind:
             return None
@@ -679,25 +734,15 @@ class BelAtroGame:
         if run.card_enhancements.pop("disable_next_boss", False):
             return None
 
-        from .run.boss import ALL_BOSS_MODIFIERS
+        from .run.boss import take_upcoming_boss
         from .ui.announce import BelAtroAnnounce
 
-        # Seeded run RNG (boss assignment was the last unseeded RNG site in
-        # the round flow). 3.9.3: in endless mode, reject a pick from the
-        # last-2 window, with capped rerolls so a degenerate pool (tests that
-        # monkeypatch a single boss) can't loop.
-        rng = run._get_rng()
-        recent = run._recent_boss_ids
-        boss_cls = rng.choice(ALL_BOSS_MODIFIERS)
-        if run.endless and len(ALL_BOSS_MODIFIERS) > 3:
-            attempts = 0
-            while boss_cls().id in recent and attempts < 8:
-                boss_cls = rng.choice(ALL_BOSS_MODIFIERS)
-                attempts += 1
-        boss: BossModifier = boss_cls()
-        recent.append(boss.id)
-        if len(recent) > 2:
-            del recent[: len(recent) - 2]
+        # Seeded run RNG; endless mode rejects a pick from the last-2 window
+        # (see run/boss.py::roll_boss). 4.11.0: Le Juge may already have
+        # rolled — and rerolled — this boss from the shop.
+        boss = take_upcoming_boss(run)
+        if run.profile is not None:
+            run.profile.discover(boss.id)  # Collection → Bosses tab
         BelAtroAnnounce.boss_reveal(boss, reader)
         return boss
 
@@ -765,6 +810,14 @@ class BelAtroGame:
         streak = final_state._joker_state.get("tout_streak_streak", 0)
         if isinstance(streak, int):
             run.card_enhancements["tout_streak_streak"] = streak
+        # 4.11.0: run-scoped joker counters (L'Horloger, ...) ride on
+        # card_enhancements between rounds, like the Tout Atout streak.
+        from .items.jokers.tempo import PERSISTENT_JOKER_KEYS
+
+        for key in PERSISTENT_JOKER_KEYS:
+            value = final_state._joker_state.get(key)
+            if isinstance(value, int):
+                run.card_enhancements[key] = value
         # Phase 2.3: refresh partner_mood for HUD display.
         run.partner_mood = run.partner.trust.mood()
 

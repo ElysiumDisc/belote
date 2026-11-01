@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from ..items.base import Joker, Voucher
@@ -77,6 +77,7 @@ class BelAtroRun:
     gold_seal_aces: bool = False  # L'Aristocrate: Aces won → +$1 each
     corrupted_pool_visible: bool = False  # L'Anarchiste: corrupted shop pool revealed
     surcoinche_unlocked: bool = False  # La Surcoinche voucher: enables AI surcoinche
+    partner_joker_offers: bool = False  # Le Téléphone voucher: shop may stock a partner joker
 
     # ── Last consumable used (read by LeFou tarot) ─────────
     last_consumable_id: str | None = None
@@ -99,6 +100,27 @@ class BelAtroRun:
     # starter shop pool, no endless offer.
     daily: str | None = None
     _rng: Any = None
+
+    # ── 4.11.0: Boss Rush / Challenge Seed ─────────────────
+    # `challenge` marks a run started from the Boss Rush screen: it plays the
+    # normal run loop but doesn't count toward run-level milestones (runs
+    # won, ante unlocks, bosses defeated) — starting at Ante 8 would farm them.
+    challenge: bool = False
+    boss_rush: bool = False  # every blind is a boss blind
+    challenge_boss_id: str | None = None  # pin every boss blind to this boss
+
+    # ── 4.11.0: upcoming boss (Le Juge tarot) ──────────────
+    # The next boss blind's boss, rolled lazily: `_pick_boss` rolls it at the
+    # boss blind exactly as before (same RNG draw), unless Le Juge already
+    # rolled — and rerolled — it from the shop. `boss_reroll_ante` remembers
+    # the ante (+ endless cycle) Le Juge was last used in: once per ante.
+    upcoming_boss_id: str | None = None
+    boss_reroll_ante: tuple[int, int] | None = None
+
+    # ── 4.11.0: ghost-run recorder ─────────────────────────
+    # Set by BelAtroGame when ghost recording is on; the shop and `consume()`
+    # report purchases / sells / rerolls / uses through it. Never serialised.
+    recorder: Any = field(default=None, repr=False, compare=False)
 
     # ── Idempotency guard for voucher.apply() ──────────────
     # Several vouchers (LaTelescope, LaDoubleDonne, LesCartesDorees, LeCouteau)
@@ -124,7 +146,7 @@ class BelAtroRun:
     # the run-state JSON snapshot stays small.
     _recent_boss_ids: list[str] = field(default_factory=list)
 
-    def consume(self, item: Any, context: object = None) -> None:
+    def consume(self, item: Any, context: object = None) -> bool:
         """Centralised consumable activation.
 
         Removes the item from `consumables` if present, dispatches to the right
@@ -138,11 +160,23 @@ class BelAtroRun:
         treated as transparent: the bookmark stays pointed at the source it
         copied, so a second Le Fou keeps copying the same source rather than
         copying itself.
+
+        4.11.0: returns False — leaving the card in the tray — when a tarot's
+        `refusal()` says it can't be used right now (the reason lands in
+        `last_tarot_message`). Uses and any joker they grant (Le Jugement)
+        are reported to the ghost recorder.
         """
         import contextlib
 
         from ..items.base import Planet, Tarot
 
+        self.last_tarot_message = None
+        if isinstance(item, Tarot):
+            reason = item.refusal(self)
+            if reason is not None:
+                self.last_tarot_message = reason
+                return False
+        jokers_before = list(self.jokers)
         with contextlib.suppress(ValueError):
             self.consumables.remove(item)
         if isinstance(item, Tarot):
@@ -153,6 +187,12 @@ class BelAtroRun:
         # Every other consumable advances the bookmark to its own id.
         if getattr(item, "id", None) != "le_fou":
             self.last_consumable_id = getattr(item, "id", None)
+        if self.recorder is not None:
+            self.recorder.note_use(item)
+            for joker in self.jokers:
+                if all(joker is not j for j in jokers_before):
+                    self.recorder.note_acquire(joker, source=getattr(item, "id", "?"))
+        return True
 
     def _get_rng(self) -> Any:
         """Per-run random.Random instance, seeded from `seed` when given."""
@@ -180,59 +220,86 @@ class BelAtroRun:
 
         deck = next((d for d in STARTING_DECKS if d.id == self.deck_id), None)
         if deck is not None:
-            self.economy.money = deck.initial_money
-            for joker_id in deck.initial_jokers:
-                joker_cls = registry.get_joker(joker_id)
-                if joker_cls:
-                    self.jokers.append(joker_cls())
-                    if self.profile:
-                        self.profile.discover(joker_id)
+            self._apply_starting_deck(deck, registry)
 
-            if deck.deck_modifications.get("free_planet"):
-                planet_ids = list(registry.planets.keys())
-                if planet_ids:
-                    p_id = self._get_rng().choice(planet_ids)
-                    planet_cls = registry.get_planet(p_id)
-                    if planet_cls:
-                        if self.profile:
-                            self.profile.discover(p_id)
-                        planet_instance = planet_cls()
-                        self.contract_levels[planet_instance.contract_id] = planet_instance.level_up_reward()
+    # Deck modifications copied verbatim into `card_enhancements` (read by the
+    # round driver / scoring / main). Two groups so the dict keeps its
+    # historical insertion order around `republicain_wild`.
+    #   start_coinched / announce_x2 / no_belote_rebelote: Phase 2.4 decks.
+    #   boss_every_2: Le Joueur also rolls a boss on even antes' Big Blind.
+    #   ghost_lead: L'Infiltré pays +2 mult / +$1 for a void-trump trick win.
+    #   buy_contract / annonce_cash_x2: L'Architecte's $10 contract purchase
+    #   and +$2 per NS trick holding a declared-annonce card.
+    _DECK_FLAGS_EARLY: ClassVar[tuple[str, ...]] = (
+        "start_coinched",
+        "announce_x2",
+        "no_belote_rebelote",
+        "boss_every_2",
+    )
+    _DECK_FLAGS_LATE: ClassVar[tuple[str, ...]] = ("ghost_lead", "buy_contract", "annonce_cash_x2")
 
-            # Phase 2.4 deck mods
-            if deck.deck_modifications.get("start_chips_bonus"):
-                self.permanent_chips += int(deck.deck_modifications["start_chips_bonus"])
-            if deck.deck_modifications.get("start_coinched"):
-                self.card_enhancements["start_coinched"] = True
-            if deck.deck_modifications.get("announce_x2"):
-                self.card_enhancements["announce_x2"] = True
-            if deck.deck_modifications.get("no_belote_rebelote"):
-                self.card_enhancements["no_belote_rebelote"] = True
-            if deck.deck_modifications.get("boss_every_2"):
-                # Le Joueur: also rolls a boss on the Big Blind of even-numbered
-                # antes (2, 4, 6, 8). Read by main.py when picking the round's boss.
-                self.card_enhancements["boss_every_2"] = True
-            if deck.deck_modifications.get("gold_seal_aces"):
-                self.gold_seal_aces = True
-            if deck.deck_modifications.get("corrupted_pool_visible"):
-                self.corrupted_pool_visible = True
-            if self.deck_id == "republicain":
-                # 7s/8s are wild; legal_cards reads this flag from _joker_state.
-                self.card_enhancements["republicain_wild"] = True
-            # 4.5.0 decks
-            if deck.deck_modifications.get("ghost_lead"):
-                # L'Infiltré: scoring.py reads this on TrickWonEvent and pays
-                # +2 mult / +$1 when NS wins a trick with a trump played by a
-                # seat that was void of the lead suit.
-                self.card_enhancements["ghost_lead"] = True
-            if deck.deck_modifications.get("buy_contract"):
-                # L'Architecte: BelAtro's bid UI offers a "buy contract for
-                # $10" option when this flag is set and run.money >= 10.
-                self.card_enhancements["buy_contract"] = True
-            if deck.deck_modifications.get("annonce_cash_x2"):
-                # L'Architecte: scoring.py pays +$2 on each NS-won trick that
-                # contains a card from a declared NS Annonce.
-                self.card_enhancements["annonce_cash_x2"] = True
+    def boss_reroll_key(self) -> tuple[int, int]:
+        """The (ante, endless cycle) Le Juge's once-per-ante limit keys on."""
+        return (self.ante_number, self.endless_ante_offset)
+
+    def _apply_starting_deck(self, deck: Any, registry: Any) -> None:
+        """Starting money, jokers, a free planet, and the deck's rule flags."""
+        mods = deck.deck_modifications
+        self.economy.money = deck.initial_money
+        for joker_id in deck.initial_jokers:
+            joker_cls = registry.get_joker(joker_id)
+            if joker_cls:
+                self.jokers.append(joker_cls())
+                if self.profile:
+                    self.profile.discover(joker_id)
+
+        if mods.get("free_planet"):
+            self._grant_free_planet(registry)
+
+        if mods.get("start_chips_bonus"):
+            self.permanent_chips += int(mods["start_chips_bonus"])
+        for flag in self._DECK_FLAGS_EARLY:
+            if mods.get(flag):
+                self.card_enhancements[flag] = True
+        if mods.get("gold_seal_aces"):
+            self.gold_seal_aces = True
+        if mods.get("corrupted_pool_visible"):
+            self.corrupted_pool_visible = True
+        if self.deck_id == "republicain":
+            # 7s/8s are wild; legal_cards reads this flag from _joker_state.
+            self.card_enhancements["republicain_wild"] = True
+        for flag in self._DECK_FLAGS_LATE:
+            if mods.get(flag):
+                self.card_enhancements[flag] = True
+        # 4.11.0 Le Complice: partner starts trusted, with a partner joker
+        # in its own slot (drawn from the seeded run RNG).
+        if mods.get("partner_trust"):
+            self.partner.trust.value = int(mods["partner_trust"])
+        if mods.get("partner_joker"):
+            self._grant_partner_joker(registry)
+
+    def _grant_partner_joker(self, registry: Any) -> None:
+        """Equip one random partner joker on the partner's own slots."""
+        pool = sorted(j_id for j_id, cls in registry.jokers.items() if cls.is_partner_joker)
+        if not pool:
+            return
+        j_id = self._get_rng().choice(pool)
+        self.partner.equip_joker(registry.jokers[j_id](), self)
+        if self.profile:
+            self.profile.discover(j_id)
+
+    def _grant_free_planet(self, registry: Any) -> None:
+        """One random contract level-up at run start (seeded run RNG)."""
+        planet_ids = list(registry.planets.keys())
+        if not planet_ids:
+            return
+        p_id = self._get_rng().choice(planet_ids)
+        planet_cls = registry.get_planet(p_id)
+        if planet_cls:
+            if self.profile:
+                self.profile.discover(p_id)
+            planet_instance = planet_cls()
+            self.contract_levels[planet_instance.contract_id] = planet_instance.level_up_reward()
 
     # ── Current blind target ───────────────────────────────
     @property
@@ -252,7 +319,8 @@ class BelAtroRun:
         # Soft target adjustments (e.g. Café reduces boss target by 5%).
         # Round to int after the float multiply so downstream scoring
         # comparisons stay integral.
-        return max(1, int(round(base * theme.target_multiplier(self.blind_index))))
+        mult: float = theme.target_multiplier(self.blind_index)
+        return max(1, round(base * mult))
 
     def get_ante_theme(self) -> Any:
         """Resolve `ante_theme` (id) back to an AnteTheme instance, or None."""

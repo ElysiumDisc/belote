@@ -4,6 +4,7 @@ When the hard AI is forced to discard off-suit and non-trump, it swaps to
 a high (9) or low (7) 0-point card to signal partner. Partner reads the
 signal via `_process_trick_signals` and biases `_hard_lead`.
 """
+
 from __future__ import annotations
 
 import random
@@ -28,7 +29,7 @@ def test_partner_nine_signal_is_positive() -> None:
     """Partner (NORTH) playing 9♦ off-suit on a ♥ lead signals 'lead diamonds'."""
     p = _player()
     trick = (
-        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),     # lead
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),  # lead
         TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.SEVEN)),  # follows
         TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
         TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.NINE)),  # signal: like ♦
@@ -98,6 +99,7 @@ def test_lead_bias_prefers_signaled_suit() -> None:
     # Build a minimal state — _hard_lead reads state.turn / variants
     # via memory, none of which need to be populated for this branch.
     from belote.game import new_game, start_round
+
     s = new_game()
     s = start_round(s, random.Random(0))
     chosen = p._hard_lead(legal, trump=Suit.SPADES, state=s)
@@ -112,18 +114,18 @@ def test_emit_cap_prevents_more_than_two_signals() -> None:
         Card(Suit.DIAMONDS, Rank.NINE),
     )
     from belote.game import new_game, start_round
+
     s = new_game()
     s = start_round(s, random.Random(0))
     # Inject a state with a heart-led trick so 'best=DIAMONDS' is a discard.
     import dataclasses
+
     s = dataclasses.replace(
         s,
         current_trick=(TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),),
     )
     # Pick best as the SEVEN (low) — emit_swap should leave it alone (cap).
-    chosen = p._maybe_signal_swap(
-        Card(Suit.DIAMONDS, Rank.SEVEN), legal, s, trump=Suit.SPADES
-    )
+    chosen = p._maybe_signal_swap(Card(Suit.DIAMONDS, Rank.SEVEN), legal, s, trump=Suit.SPADES)
     # Past the cap, no swap happens — returns input unchanged.
     assert chosen == Card(Suit.DIAMONDS, Rank.SEVEN)
 
@@ -142,7 +144,7 @@ def test_undo_does_not_double_count_partner_signals() -> None:
 
     # Trick where partner (NORTH) signals diamonds with an off-suit 9.
     signal_trick = (
-        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),     # lead ♥
+        TrickCard(Seat.EAST, Card(Suit.HEARTS, Rank.ACE)),  # lead ♥
         TrickCard(Seat.SOUTH, Card(Suit.HEARTS, Rank.SEVEN)),
         TrickCard(Seat.WEST, Card(Suit.HEARTS, Rank.KING)),
         TrickCard(Seat.NORTH, Card(Suit.DIAMONDS, Rank.NINE)),  # signal: like ♦
@@ -151,7 +153,7 @@ def test_undo_does_not_double_count_partner_signals() -> None:
         TrickCard(Seat.EAST, Card(Suit.CLUBS, Rank.ACE)),
         TrickCard(Seat.SOUTH, Card(Suit.CLUBS, Rank.SEVEN)),
         TrickCard(Seat.WEST, Card(Suit.CLUBS, Rank.KING)),
-        TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.QUEEN)),    # no signal
+        TrickCard(Seat.NORTH, Card(Suit.CLUBS, Rank.QUEEN)),  # no signal
     )
 
     two_tricks = dataclasses.replace(
@@ -169,8 +171,8 @@ def test_undo_does_not_double_count_partner_signals() -> None:
 
     # Undo back to a state holding only the first (signal) trick.
     one_trick = dataclasses.replace(two_tricks, completed_tricks=(signal_trick,))
-    p.update_memory(one_trick)   # triggers the mid-round-undo reset
-    p._update_voids(one_trick)   # re-walks the surviving signal trick
+    p.update_memory(one_trick)  # triggers the mid-round-undo reset
+    p._update_voids(one_trick)  # re-walks the surviving signal trick
 
     assert p.memory.signals[Suit.DIAMONDS] == 1, (
         "partner signal double-counted after undo — undo reset must clear signals"
