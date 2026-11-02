@@ -10,11 +10,10 @@ from belote.game import Seat, team_of
 from ...engine.event_bus import DeclarationScoredEvent, RoundEndEvent, TrickWonEvent
 from ..base import Joker, JokerResult, Rarity, is_trump_card
 
-# joker_state keys that outlive a round: `BelAtroGame._harvest_round_state`
-# copies them into `run.card_enhancements`, which seeds the next round's
-# joker_state (the same path the Tout Atout streak takes).
+# L'Horloger's run-scoped counter (its first copy's `state_key("rounds")`):
+# outlives the round via `Joker.persistent_keys` — `_harvest_round_state`
+# copies it into `run.card_enhancements`, which seeds the next round.
 HORLOGER_KEY = "l_horloger_rounds"
-PERSISTENT_JOKER_KEYS: tuple[str, ...] = (HORLOGER_KEY,)
 
 
 class LeMarechal(Joker):
@@ -48,15 +47,15 @@ class LeMetronome(Joker):
     rarity = Rarity.UNCOMMON
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_tempo"] = 0
+        state[self.state_key("tempo")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) != 0:
-            state[f"{self.id}_tempo"] = 0
+            state[self.state_key("tempo")] = 0
             return None
-        tempo = int(state.get(f"{self.id}_tempo", 0)) + 1
-        state[f"{self.id}_tempo"] = tempo
+        tempo = int(state.get(self.state_key("tempo"), 0)) + 1
+        state[self.state_key("tempo")] = tempo
         beat = min(tempo - 1, _METRONOME_MAX)  # the first win only starts the tempo
         return JokerResult(add_mult=float(beat)) if beat > 0 else None
 
@@ -76,9 +75,10 @@ class LHorloger(Joker):
     )
     cost = 7
     rarity = Rarity.UNCOMMON
+    persistent_keys = ("rounds",)
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        rounds = min(int(state.get(HORLOGER_KEY, 0)), _HORLOGER_CAP_ROUNDS)
+        rounds = min(int(state.get(self.state_key("rounds"), 0)), _HORLOGER_CAP_ROUNDS)
         if rounds <= 0:
             return None
         return JokerResult(add_mult=_HORLOGER_STEP * rounds)
@@ -87,9 +87,10 @@ class LHorloger(Joker):
         if getattr(event, "re_emit", False) or event.taker_seat is None:
             return None  # no contract played: the clock neither ticks nor stops
         if event.taker_seat in (Seat.SOUTH, Seat.NORTH) and event.breakdown.is_failed:
-            state[HORLOGER_KEY] = 0
+            state[self.state_key("rounds")] = 0
         else:
-            state[HORLOGER_KEY] = int(state.get(HORLOGER_KEY, 0)) + 1
+            key = self.state_key("rounds")
+            state[key] = int(state.get(key, 0)) + 1
         return None
 
 

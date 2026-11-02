@@ -16,6 +16,7 @@ from belote.game import GameState, Seat
 from ..engine.event_bus import (
     BeloteAnnouncedEvent,
     BidMadeEvent,
+    CardCapturedEvent,
     DeclarationScoredEvent,
     RoundEndEvent,
     TrickWonEvent,
@@ -123,6 +124,18 @@ class ScoreAccumulator:
     # 4.11.0 L'Huissier: id() of the joker seized (silenced) this round, or
     # None. Resolved at trigger_round_start from the boss flag.
     _seized_joker_id: int | None = field(default=None, compare=False, repr=False)
+    # 5.0.0 L'Atelier: the run's per-card mods (card_key → CardMod, see
+    # core/card_mods.py), the round seed their dice roll from, and the keys
+    # of the Verres that shattered this round (harvested back into the run).
+    card_mods: dict[str, Any] = field(default_factory=dict)
+    mod_seed: int = 0
+    shattered: list[str] = field(default_factory=list)
+    # 5.0.0 Médailles: the trick on which the running total first reached
+    # the target (None = not yet) — crushing a Boss Blind earns a medal.
+    target_reached_at: int | None = None
+    # 5.0.0 partner story beats: the one-shot buff the last beat granted
+    # ({"chips", "mult", "times_mult"}), applied at round start.
+    story_buff: dict[str, float] = field(default_factory=dict)
 
     _HANDLER_METHODS: tuple[str, ...] = (
         "on_trick_won",
@@ -130,10 +143,15 @@ class ScoreAccumulator:
         "on_declaration",
         "on_round_end",
         "on_bid",
+        "on_card_captured",
     )
 
     def attach_jokers(self, jokers: list[Joker]) -> None:
+        from ..items.base import assign_copy_indices
+
         self._jokers = jokers
+        # 5.0.0: copies of one joker key distinct joker_state namespaces.
+        assign_copy_indices(jokers)
         # Build per-method registry once. Skip handlers that the joker
         # didn't override (i.e. inherits the base Joker.on_X returning
         # None) — `getattr` returns the base-class bound method, but its
@@ -169,6 +187,8 @@ class ScoreAccumulator:
         Accepts a plain GameState too (upgraded via `as_belatro`)."""
         state = as_belatro(state)
         self._log.clear()
+        self.shattered = []
+        self.target_reached_at = None
         # 4.6.2: build the ledger; its joker_state dict will be installed
         # AS state._joker_state below so further mutations need no replace.
         ledger = self._make_ledger(state)
@@ -198,6 +218,8 @@ class ScoreAccumulator:
         joker_state["heist_ns_trick_chips"] = 0
         joker_state["heist_outcome"] = None
 
+        from ..items.base import doubled_result
+
         # 4.11.0 L'Huissier: the leftmost joker is seized for the round.
         seized = self._jokers[0] if joker_state.get(SEIZE_JOKER_FLAG) and self._jokers else None
         self._seized_joker_id = id(seized) if seized is not None else None
@@ -211,6 +233,8 @@ class ScoreAccumulator:
         else:
             ledger.mult = state._mult
         ledger.money = state._bonus_money
+        if self.story_buff:
+            self._apply_story_buff(ledger)
 
         # 4.5.0: on_round_start jokers can now return a JokerResult that
         # adjusts chips/mult/money at round-start. LePrêteur is the first
@@ -221,6 +245,8 @@ class ScoreAccumulator:
             result = joker.on_round_start(joker_state)
             if result is None:
                 continue
+            if joker.sworn:
+                result = doubled_result(result)  # Le Serment: Arc-en-ciel
             if result.add_chips:
                 ledger.chips += result.add_chips
                 self._log.append(f"{joker.name}: +{result.add_chips} chips")
@@ -245,6 +271,21 @@ class ScoreAccumulator:
             _mult=ledger.mult,
             _bonus_money=ledger.money,
         )
+
+    def _apply_story_buff(self, ledger: RoundLedger) -> None:
+        buff = self.story_buff
+        chips = int(buff.get("chips", 0))
+        mult = float(buff.get("mult", 0.0))
+        times = float(buff.get("times_mult", 1.0))
+        if chips:
+            ledger.chips += chips
+            self._log.append(f"Café: +{chips} chips")
+        if mult:
+            ledger.mult += mult
+            self._log.append(f"Café: +{mult:g} Mult")
+        if times != 1.0:
+            ledger.mult *= times
+            self._log.append(f"Café: ×{times:g} Mult")
 
     def update_state(self, state: GameState, event: object) -> BelatroState:
         """Process an event and return an updated BelatroState with new score/joker state.
@@ -342,7 +383,13 @@ class ScoreAccumulator:
         elif ed == Edition.POLYCHROME:
             self._apply(ledger, JokerResult(times_mult=1.5), source=f"{joker.name} (Polychrome)")
 
-    def _fire_jokers(self, ledger: RoundLedger, method_name: str, event_obj: Any) -> None:
+    def _fire_jokers(
+        self,
+        ledger: RoundLedger,
+        method_name: str,
+        event_obj: Any,
+        collect: list[tuple[Joker, JokerResult]] | None = None,
+    ) -> None:
         # 4.6.2: read pre-resolved (joker, method) pairs from the registry so
         # the per-event getattr cascade is gone. Lazy build on first use if a
         # caller forgot to call `attach_jokers`.
@@ -356,6 +403,8 @@ class ScoreAccumulator:
                 self.attach_jokers(self._jokers)
         elif self._attached_joker_ids != {id(j) for j in self._jokers}:
             self.attach_jokers(self._jokers)
+        from ..items.base import doubled_result
+
         joker_state = ledger.joker_state
         seized = self._seized_joker_id
         for joker, method in self._handler_index.get(method_name, ()):
@@ -371,8 +420,12 @@ class ScoreAccumulator:
                     result = method(event_obj, joker_state)
                     if not result:
                         continue
+                    if joker.sworn:
+                        result = doubled_result(result)  # Le Serment: Arc-en-ciel
                     self._apply(ledger, result, source=joker.name)
                     self._apply_edition(ledger, joker)
+                    if collect is not None:
+                        collect.append((joker, result))  # Acier / Sceau Bleu retrigger
                     # Phase 2.3: partner-joker tier scaling.
                     # tier 0 (degraded) / 1 (base) → just the baseline apply.
                     # tier 2 (boost) / 3 (strong) → +1 apply (≈ ×2 effect, trust 5–8).
@@ -426,11 +479,108 @@ class ScoreAccumulator:
             # empty on a fresh run, so these can't share the gate above).
             self._trick_infiltre(ledger, state, event)
             self._trick_architecte(ledger, event)
+        # 5.0.0 L'Atelier: enhanced / sealed cards pay out on capture.
+        steel = self._trick_card_mods(ledger, state, event) if self.card_mods else False
         # Heist runs BEFORE on_trick_won jokers so trick-8 jokers (LeDernierMot
         # ×2, LExecuteur ×1.5, ...) layer on top of the heisted base. The heist
         # is the player's contract; jokers compose on the realized outcome.
         self._trick_heist(ledger, event)
-        self._fire_jokers(ledger, "on_trick_won", event)
+        fired: list[tuple[Joker, JokerResult]] | None = [] if steel else None
+        self._fire_jokers(ledger, "on_trick_won", event, collect=fired)
+        if fired:
+            self._retrigger(ledger, fired, "Acier")
+        if self.target_reached_at is None and self.get_total(state) >= self.target_score:
+            self.target_reached_at = event.trick_number
+
+    def _retrigger(
+        self, ledger: RoundLedger, fired: list[tuple[Joker, JokerResult]], why: str
+    ) -> None:
+        """Pay each joker's result (and its edition) once more."""
+        for joker, result in fired:
+            self._apply(ledger, result, source=f"{joker.name} ({why})")
+            self._apply_edition(ledger, joker)
+
+    def _trick_card_mods(
+        self, ledger: RoundLedger, state: BelatroState, event: TrickWonEvent
+    ) -> bool:
+        """5.0.0 L'Atelier: enhanced / sealed cards your team captures in this
+        trick pay out (see `core/card_mods.py`). Returns True when an Acier
+        was captured (the trick jokers then trigger again)."""
+        from belote.deck import card_points
+
+        from .card_mods import ROUGE_MULT, VERRE_SHATTER_CHANCE, card_key, mod_name, mod_rng
+
+        if event.winner not in _NS_TEAM:
+            return False
+        steel = False
+        zeroed = False
+        winning = event.winning_card
+        se = state.variants.seven_eight_trump
+        for card in event.cards:
+            key = card_key(card)
+            mod = self.card_mods.get(key)
+            if mod is None or mod.is_empty():
+                continue
+            shattered = False
+            enh = mod.enhancement
+            if enh == "verre":
+                if mod_rng(self.mod_seed, event.trick_number, key).random() < VERRE_SHATTER_CHANCE:
+                    shattered = True
+                    self.shattered.append(key)
+                    if not zeroed:
+                        zeroed = True
+                        ledger.chips -= event.card_points
+                    self._log.append(f"Verre {card!r} shatters: the trick scores 0")
+                else:
+                    pts = card_points(card, event.trump, se)
+                    if pts:
+                        ledger.chips += pts
+                        self._log.append(f"Verre {card!r}: +{pts} chips")
+            elif enh == "acier":
+                steel = True
+                self._log.append(f"Acier {card!r}: jokers trigger again")
+            elif enh == "chance":
+                self._chance(ledger, card, key, event.trick_number)
+            if mod.seal == "rouge" and card == winning:
+                ledger.mult += ROUGE_MULT
+                self._log.append(f"{mod_name('rouge')} {card!r}: +{ROUGE_MULT} Mult")
+            elif mod.seal == "bleu" and not ledger.joker_state.get("_bleu_armed"):
+                ledger.joker_state["_bleu_armed"] = True
+                self._log.append(
+                    f"{mod_name('bleu')} {card!r}: round-end jokers will trigger twice"
+                )
+            self._fire_jokers(
+                ledger,
+                "on_card_captured",
+                CardCapturedEvent(
+                    card=card,
+                    enhancement=enh,
+                    seal=mod.seal,
+                    trick_number=event.trick_number,
+                    winner=event.winner,
+                    shattered=shattered,
+                ),
+            )
+        return steel
+
+    def _chance(self, ledger: RoundLedger, card: Any, key: str, trick_number: int) -> None:
+        from .card_mods import mod_rng
+
+        roll = mod_rng(self.mod_seed, trick_number, key, "chance").randint(1, 6)
+        if roll <= 2:
+            ledger.chips += 20
+            self._log.append(f"Chance {card!r}: +20 chips")
+        elif roll == 3:
+            ledger.mult += 2.0
+            self._log.append(f"Chance {card!r}: +2 Mult")
+        elif roll == 4:
+            ledger.money += 2
+            self._log.append(f"Chance {card!r}: +$2")
+        elif roll == 5:
+            ledger.mult *= 1.25
+            self._log.append(f"Chance {card!r}: ×1.25 Mult")
+        else:
+            self._log.append(f"Chance {card!r}: nothing this time")
 
     def _trick_deck_bonuses(self, ledger: RoundLedger, event: TrickWonEvent) -> None:
         # Le Républicain: +5 chips per 7 or 8 in any trick (regardless of winner).
@@ -614,7 +764,13 @@ class ScoreAccumulator:
                     self._log.append(
                         f"Balance: +{libra_bonus} Mult (coinche×{event.coinche_level})"
                     )
-        self._fire_jokers(ledger, "on_round_end", event)
+        # 5.0.0 Sceau Bleu: a blue-sealed card captured this round makes the
+        # round-end jokers trigger once more.
+        bleu = bool(ledger.joker_state.pop("_bleu_armed", False))
+        fired: list[tuple[Joker, JokerResult]] | None = [] if bleu else None
+        self._fire_jokers(ledger, "on_round_end", event, collect=fired)
+        if fired:
+            self._retrigger(ledger, fired, "Sceau Bleu")
 
     def materialize(self, state: BelatroState) -> BelatroState:
         """Return a sealed BelatroState with ledger values stamped in.

@@ -29,7 +29,7 @@ class LaSentinelleP(Joker):
     is_partner_joker = True
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_trump_led"] = False
+        state[self.state_key("trump_led")] = False
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
@@ -40,11 +40,11 @@ class LaSentinelleP(Joker):
             and event.cards
             and is_trump_card(event.cards[0], event.trump)
         ):
-            state[f"{self.id}_trump_led"] = True
+            state[self.state_key("trump_led")] = True
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        if not state.get(f"{self.id}_trump_led", False):
+        if not state.get(self.state_key("trump_led"), False):
             return JokerResult(times_mult=1.5)
         return None
 
@@ -57,12 +57,12 @@ class LeCalculateur(Joker):
     is_partner_joker = True
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_north_wins"] = 0
+        state[self.state_key("north_wins")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.winner == Seat.NORTH:
-            nwins = state.get(f"{self.id}_north_wins", 0) + 1
-            state[f"{self.id}_north_wins"] = nwins
+            nwins = state.get(self.state_key("north_wins"), 0) + 1
+            state[self.state_key("north_wins")] = nwins
             return JokerResult(add_mult=0.3)
         return None

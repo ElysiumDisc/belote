@@ -21,8 +21,9 @@ from ..ansi import (
     white_fg,
 )
 from ..game import GameState, Seat
-from ..input import Key, KeyReader, key_label
+from ..input import Key, KeyEvent, KeyReader, key_label
 from ..themes import THEMES, theme_manager
+from . import hitmap
 from .prompts import show_help
 from .render import get_term_size, invalidate_diff
 
@@ -172,11 +173,21 @@ def show_theme_selector(reader: KeyReader) -> None:
         lines.append(f"{DIM}↑/↓: Navigate  Enter/ESC: Back{RESET}")
 
         out = clear_screen() + hide_cursor()
-        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
-        sys.stdout.write("".join([out, rendered]))
+        centered = [ansi_center(line, term_w) for line in lines]
+        sys.stdout.write("".join([out, "\r\n".join(centered)]))
         sys.stdout.flush()
+        names = [(THEMES[t].name, i) for i, t in enumerate(themes_list)]
+        hitmap.targets_from_lines("menu", centered, names, first_row=1)
 
         event = reader.read()
+        # 5.0.0: click a theme to preview it, click it again to keep it.
+        clicked = hitmap.hit("menu", event.pos) if event.key == Key.MOUSE else None
+        if isinstance(clicked, int):
+            if clicked == sel:
+                invalidate_diff()
+                return
+            sel = clicked
+            continue
         match event.key:
             case Key.QUIT | Key.ESC | Key.ENTER | Key.EOF:
                 invalidate_diff()
@@ -209,11 +220,23 @@ def show_ai_config(reader: KeyReader, current_diffs: dict[Seat, str]) -> dict[Se
         lines.append(f"{DIM}↑/↓: Navigate  ←/→: Change  Enter/ESC: Back{RESET}")
 
         out = clear_screen() + hide_cursor()
-        rendered = "\r\n".join(ansi_center(line, term_w) for line in lines)
-        sys.stdout.write("".join([out, rendered]))
+        centered = [ansi_center(line, term_w) for line in lines]
+        sys.stdout.write("".join([out, "\r\n".join(centered)]))
         sys.stdout.flush()
+        hitmap.targets_from_lines(
+            "menu", centered, [(f"{s.name}:", i) for i, s in enumerate(seats)], full_row=True
+        )
 
         event = reader.read()
+        if event.key == Key.MOUSE:
+            # 5.0.0: click a seat to select it, click it again to step it (→).
+            clicked = hitmap.hit("menu", event.pos)
+            if not isinstance(clicked, int):
+                continue
+            if clicked != sel:
+                sel = clicked
+                continue
+            event = KeyEvent(Key.RIGHT)
         match event.key:
             case Key.QUIT | Key.ESC | Key.EOF:
                 invalidate_diff()
@@ -285,11 +308,16 @@ def show_main_menu(reader: KeyReader, modes: Sequence[str] = ()) -> str:
 
         sys.stdout.write(out + "\r\n".join(line + clear_to_eol() for line in lines) + clear_below())
         sys.stdout.flush()
+        hitmap.targets_from_lines("menu", lines, [(o, i) for i, o in enumerate(options)])
 
         event = reader.read_timeout(0.3)
         if event is None:
             frame += 1
             continue
+        clicked = hitmap.hit("menu", event.pos) if event.key == Key.MOUSE else None
+        if isinstance(clicked, int):  # 5.0.0: a click picks the entry
+            invalidate_diff()
+            return options[clicked]
 
         match event.key:
             case Key.QUIT | Key.EOF:

@@ -46,9 +46,10 @@ class LeDemon(Joker):
         # guard — without it, a save/load round-trip or replay-resume tool
         # that re-runs on_purchase on already-owned jokers would compound
         # the cost. Voucher.apply() solved the same problem in 3.9.3.
-        if self.id in run._applied_purchase_ids:
+        # 5.0.0: keyed per copy, so a second Le Démon pays its own cost.
+        if self.state_prefix in run._applied_purchase_ids:
             return
-        run._applied_purchase_ids.add(self.id)
+        run._applied_purchase_ids.add(self.state_prefix)
         run.partner.trust.value = max(0, run.partner.trust.value - 3)
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:

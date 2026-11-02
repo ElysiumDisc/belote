@@ -50,12 +50,58 @@ class Key(Enum):
     # keystrokes, and distinct from ESC because ESC means "back" in most
     # screens. Prompt loops ignore it; "[Any Key]" screens treat it as a key.
     UNKNOWN = "UNKNOWN"
+    # 5.0.0: a left-button click (SGR mouse mode); `KeyEvent.pos` holds the
+    # 1-based (col, row). Screens hit-test it via `ui.hitmap`; the wheel
+    # arrives as UP / DOWN.
+    MOUSE = "MOUSE"
 
 
 @dataclass(frozen=True, slots=True)
 class KeyEvent:
     key: Key
     char: str | None = None
+    pos: tuple[int, int] | None = None  # (col, row) of a Key.MOUSE click
+
+
+# ── 5.0.0: mouse ──────────────────────────────────────────────────────────
+# Settings → Mouse (BELOTE_NO_MOUSE=1 forces off). The Unix reader turns
+# terminal mouse reporting on while it is active and off on restore;
+# `set_mouse_enabled` flips it live from the Settings screen.
+_mouse_wanted = True
+_active_unix_reader: _UnixKeyReader | None = None
+
+
+def set_mouse_enabled(on: bool) -> None:
+    global _mouse_wanted
+    _mouse_wanted = on
+    if _active_unix_reader is not None:
+        _active_unix_reader.set_mouse(on)
+
+
+def mouse_enabled() -> bool:
+    return _mouse_wanted
+
+
+_MOUSE_WHEEL: dict[int, Key] = {64: Key.UP, 65: Key.DOWN}
+
+
+def parse_sgr_mouse(params: bytes, final: bytes) -> KeyEvent | None:
+    """An SGR mouse report (`ESC [ < b ; col ; row M|m`, params without the
+    leading `<`) → a click / wheel event, or None for reports screens ignore
+    (releases, motion, right / middle buttons, malformed)."""
+    try:
+        button, col, row = (int(p) for p in params.decode("ascii").split(";"))
+    except ValueError:
+        return None
+    if final != b"M" or button & 32:  # a release, or motion
+        return None
+    base = button & ~(4 | 8 | 16)  # drop the Shift / Alt / Ctrl bits
+    wheel = _MOUSE_WHEEL.get(base)
+    if wheel is not None:
+        return KeyEvent(wheel)
+    if base == 0 and col > 0 and row > 0:
+        return KeyEvent(Key.MOUSE, pos=(col, row))
+    return None
 
 
 # Single-character shortcuts shared by the Unix and Windows readers (they used
@@ -287,19 +333,40 @@ class _UnixKeyReader:
         self._old_termios: list[Any] | None = None
         self._stdin_fd: int = sys.stdin.fileno()
         self._restored: bool = False
+        self._mouse_on: bool = False
 
     def __enter__(self) -> _UnixKeyReader:
+        global _active_unix_reader
         try:
             self._old_termios = termios.tcgetattr(self._stdin_fd)
             tty.setraw(self._stdin_fd)
         except termios.error:
             self._old_termios = None
+        _active_unix_reader = self
+        self.set_mouse(_mouse_wanted)
         return self
 
     def __exit__(self, *args: Any) -> None:
         self.restore()
 
+    def set_mouse(self, on: bool) -> None:
+        """Switch terminal mouse reporting (only on a real terminal)."""
+        from .ansi import mouse_off, mouse_on
+
+        if on == getattr(self, "_mouse_on", False) or self._old_termios is None:
+            return
+        import contextlib
+
+        with contextlib.suppress(OSError, ValueError):
+            sys.stdout.write(mouse_on() if on else mouse_off())
+            sys.stdout.flush()
+            self._mouse_on = on
+
     def restore(self) -> None:
+        global _active_unix_reader
+        self.set_mouse(False)
+        if _active_unix_reader is self:
+            _active_unix_reader = None
         if self._old_termios and not self._restored:
             # A dropped SSH session / broken pipe can make tcsetattr raise.
             # We swallow the error and mark restored anyway so a re-entrant
@@ -312,7 +379,14 @@ class _UnixKeyReader:
             self._restored = True
 
     def read(self) -> KeyEvent:
-        """Read a single key (handling escape sequences and multi-byte UTF-8)."""
+        """Read a single key (handling escape sequences and multi-byte UTF-8).
+        Mouse reports screens ignore (button releases, motion) are skipped."""
+        while True:
+            event = self._read_one()
+            if event is not None:
+                return event
+
+    def _read_one(self) -> KeyEvent | None:
         buf = os.read(self._stdin_fd, 1)
         if not buf:
             # EOF — stdin is closed (broken pipe, headless harness, Ctrl-D).
@@ -333,7 +407,7 @@ class _UnixKeyReader:
         except (ValueError, UnicodeDecodeError):
             return KeyEvent(Key.ESC)
 
-    def _read_escape(self) -> KeyEvent:
+    def _read_escape(self) -> KeyEvent | None:
         """After ESC: a bare ESC, a CSI / SS3 sequence, or ESC + junk."""
         # 50ms is the conventional ESC vs. arrow-key disambiguation window.
         # 10ms (the previous value) was tight enough that arrow keys over SSH
@@ -352,7 +426,7 @@ class _UnixKeyReader:
             return KeyEvent(arrow) if arrow is not None else KeyEvent(Key.UNKNOWN)
         return KeyEvent(Key.ESC)
 
-    def _read_csi(self) -> KeyEvent:
+    def _read_csi(self) -> KeyEvent | None:
         """CSI: ESC [ <params 0x30-0x3F>* <intermediates 0x20-0x2F>* <final
         0x40-0x7E>. Consumed whole so e.g. Ctrl+Right (ESC [ 1 ; 5 C) doesn't
         leak ';', '5', 'C' as keystrokes. Every byte read is bounded by the
@@ -369,6 +443,9 @@ class _UnixKeyReader:
                 arrow = _ARROW_FINALS.get(b)
                 if arrow is not None:
                     return KeyEvent(arrow)
+            if params.startswith(b"<") and b in (b"M", b"m"):
+                # 5.0.0 SGR mouse report; None = an ignored release / motion.
+                return parse_sgr_mouse(params[1:], b)
             # A non-arrow final, or not a valid CSI byte: give up on it.
             return KeyEvent(Key.UNKNOWN)
 
@@ -404,11 +481,20 @@ class _UnixKeyReader:
         return b or None
 
     def read_timeout(self, timeout: float) -> KeyEvent | None:
-        """Read a key with a timeout. Returns None if no key is pressed."""
-        r, _, _ = select.select([sys.stdin], [], [], timeout)
-        if r:
-            return self.read()
-        return None
+        """Read a key with a timeout. Returns None if no key is pressed (an
+        ignored mouse report doesn't count as one)."""
+        deadline = time.monotonic() + timeout
+        remaining = timeout
+        while True:
+            r, _, _ = select.select([sys.stdin], [], [], remaining)
+            if not r:
+                return None
+            event = self._read_one()
+            if event is not None:
+                return event
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
 
 
 def interruptible_sleep(

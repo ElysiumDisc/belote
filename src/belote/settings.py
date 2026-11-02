@@ -41,6 +41,7 @@ class Settings:
     animations: bool = True  # BELOTE_NO_ANIM=1 forces off
     fast_redraw: bool = True  # BELOTE_NO_DIFF=1 forces off (diff renderer)
     screen_reader: bool = False  # BELOTE_A11Y=1 forces on
+    mouse: bool = True  # 5.0.0: click cards / shop entries; BELOTE_NO_MOUSE=1 forces off
     # Extras (previously env vars).
     replay_analysis: bool = False  # BELOTE_REPLAY forces on
     # On/off settings contributed by expansions (see `register_toggle`).
@@ -59,6 +60,9 @@ class Settings:
 
     def fast_redraw_on(self) -> bool:
         return self.fast_redraw and os.environ.get("BELOTE_NO_DIFF") != "1"
+
+    def mouse_on(self) -> bool:
+        return self.mouse and os.environ.get("BELOTE_NO_MOUSE") != "1"
 
     def screen_reader_on(self) -> bool:
         return self.screen_reader or os.environ.get("BELOTE_A11Y", "").lower() in _TRUTHY
@@ -183,6 +187,7 @@ def apply(s: Settings) -> None:
     from .ui.render import set_diff_enabled
 
     set_animations_enabled(s.animations_on())
+    input_mod.set_mouse_enabled(s.mouse_on())
     set_diff_enabled(s.fast_redraw_on())
     a11y.set_enabled(s.screen_reader_on())
     cosmetics.set_active(back=s.card_back, frame=s.table_frame)

@@ -47,15 +47,15 @@ class LeRelais(Joker):
     is_partner_joker = True
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_triggered"] = False
+        state[self.state_key("triggered")] = False
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if (
             event.trick_number == 1
             and event.winner == Seat.NORTH
-            and not state.get(f"{self.id}_triggered", False)
+            and not state.get(self.state_key("triggered"), False)
         ):
-            state[f"{self.id}_triggered"] = True
+            state[self.state_key("triggered")] = True
             return JokerResult(add_chips=15)
         return None

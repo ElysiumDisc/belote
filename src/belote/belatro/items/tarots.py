@@ -39,8 +39,8 @@ class LeJugement(Tarot):
         # Description promises a Common joker — pre-3.3.3 the pool was the
         # full unlocked set, so late-run players could roll Rare/Legendary
         # off this tarot and mis-price it. Filter to Rarity.COMMON only.
-        # Skip jokers already owned: two copies share `f"{id}_..."` joker_state
-        # keys and corrupt each other's counters/flags.
+        # Prefer a joker not already owned (5.0.0: copies are safe now — see
+        # `Joker.state_key` — but a gift should be something new).
         owned = {j.id for j in run.jokers}
         avail = {
             k: v
@@ -55,7 +55,9 @@ class LeJugement(Tarot):
             return
         rng = run._get_rng()
         j_id = rng.choice(list(avail.keys()))
-        run.jokers.append(avail[j_id]())
+        # 5.0.0: through add_joker, so a granted joker gets its copy index
+        # and its purchase hook (a granted Le Traître used to skip its curse).
+        run.add_joker(avail[j_id]())
 
 
 class LeMonde(Tarot):

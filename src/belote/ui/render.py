@@ -71,7 +71,7 @@ from .hud_classic import (
 from .hud_classic import (
     set_bid_hint_provider as set_bid_hint_provider,
 )
-from .layout import TableFit, choose_layout, fit_table, vcenter_lines
+from .layout import LayoutPreset, TableFit, choose_layout, fit_table, vcenter_lines
 from .table import (
     _BRAILLE_DOTS as _BRAILLE_DOTS,
 )
@@ -365,6 +365,59 @@ def pulse_winner_glow(winner: Seat, reader: object | None = None) -> None:
         invalidate_diff()
 
 
+def _record_hand_regions(
+    state: GameState,
+    lines: list[str],
+    marker: str | None,
+    selection: int | None,
+    term_w: int,
+    layout: LayoutPreset,
+) -> None:
+    """5.0.0 mouse: South's cards as click targets (namespace "hand",
+    target = index in the hand). Each card's slot includes the gap to its
+    right, so there are no dead cells between cards."""
+    from . import hitmap
+
+    row = next((i for i, line in enumerate(lines) if line is marker), None)
+    hand = state.hand_of(Seat.SOUTH)
+    if marker is None or row is None or not hand:
+        hitmap.clear("hand")
+        return
+    slot_w = layout.card_w + layout.card_gap
+    total = len(hand) * slot_w - layout.card_gap
+    left = max(0, (term_w - total) // 2)
+    lifted = selection is not None and 0 <= selection < len(hand)
+    height = layout.card_h + (1 if lifted else 0)
+    hitmap.set_regions(
+        "hand",
+        (
+            hitmap.Region(
+                row=row + 1, col=left + 1 + i * slot_w, height=height, width=slot_w, target=i
+            )
+            for i in range(len(hand))
+        ),
+    )
+
+
+def _record_bid_regions(lines: list[str]) -> None:
+    """5.0.0 mouse: the bid selector's options (namespace "bid", target =
+    index in `legal_bids`), from the spans `_build_bid_prompt_lines` noted."""
+    from . import hitmap, hud_classic
+
+    spans = hud_classic._last_bid_spans
+    row = (
+        None
+        if spans is None
+        else next((i for i, line in enumerate(lines) if line is spans[0]), None)
+    )
+    if spans is None or row is None:
+        hitmap.clear("bid")
+        return
+    hitmap.set_regions(
+        "bid", (hitmap.Region(row + 1, col + 1, 1, width, idx) for col, width, idx in spans[1])
+    )
+
+
 def render(
     state: GameState,
     selection: int | None = None,
@@ -444,26 +497,33 @@ def render(
         lines.append("")
 
     # ── SOUTH hand ────────────────────────────────────────────────────────────
-    lines.extend(
-        _south_lines(
-            state,
-            selection,
-            term_w,
-            term_h,
-            layout,
-            readout=fit.readout,
-            bar=fit.hand_bar,
-            hints=fit.hints,
-        )
+    south = _south_lines(
+        state,
+        selection,
+        term_w,
+        term_h,
+        layout,
+        readout=fit.readout,
+        bar=fit.hand_bar,
+        hints=fit.hints,
     )
+    lines.extend(south)
+    # 5.0.0 mouse: the hand's first card row, found again by identity once
+    # the padding / centring below has moved it (see `_record_hand_regions`).
+    hand_marker = south[1 if fit.hints else 0] if state.hand_of(Seat.SOUTH) else None
 
     # ── BIDDING PROMPT ────────────────────────────────────────────────────────
     # Bidding never shows the lifted card / bar / readout, so this row (and a
     # spacer above it when there was room for any) always fits.
+    from . import hud_classic
+
+    hud_classic._last_bid_spans = None
     if state.phase == Phase.BIDDING and state.turn == Seat.SOUTH:
-        if fit.spacers:
+        room = term_h - bottom_extra - len(lines)
+        bid = _bid_lines(state, term_w, bid_selection, room=max(1, room - 1))
+        if fit.spacers and len(bid) < room:
             lines.append("")
-        lines.extend(_bid_lines(state, term_w, bid_selection))
+        lines.extend(bid)
 
     # ── Vertical centering ──────────────────────────────────────────────────
     # If the terminal is taller than the rendered content, pad top + bottom so
@@ -489,6 +549,8 @@ def render(
     global _last_rendered_unpadded_h
     _last_rendered_unpadded_h = rendered_h
     lines = vcenter_lines(lines, term_h)
+    _record_hand_regions(state, lines, hand_marker, selection, term_w, layout)
+    _record_bid_regions(lines)
 
     # Always emit clear_to_eol on every row, including blank padding. Konsole
     # (and other strict emulators) don't auto-blank cells when an empty string

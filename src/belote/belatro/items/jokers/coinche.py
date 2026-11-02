@@ -48,13 +48,14 @@ class ToutStreak(Joker):
     description = "Each consecutive Tout Atout you win adds ×0.5 Mult permanently this run."
     cost = 9
     rarity = Rarity.UNCOMMON
+    persistent_keys = ("streak",)
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         # Re-emit short-circuit (4.1.0): streak counter must not double-advance
         # if a future replay path re-emits the round-end event.
         if getattr(event, "re_emit", False):
             return None
-        streak_key = f"{self.id}_streak"
+        streak_key = self.state_key("streak")
         streak: int = int(state.get(streak_key, 0))
 
         is_tout = event.trump == Suit.TOUT_ATOUT

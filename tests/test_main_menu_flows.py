@@ -228,6 +228,7 @@ class App:
         self.toasts: list[Any] = []
         self.unlocked: list[Any] = []
         self.stats_games: list[dict[str, Any]] = []
+        self.carnet: list[dict[str, Any]] = []
         mp = monkeypatch
         mp.setattr(main_mod, "KeyReader", lambda: reader)
         mp.setattr(main_mod.signal, "signal", lambda sig, h: self.handlers.__setitem__(sig, h))
@@ -239,6 +240,7 @@ class App:
         mp.setattr(main_mod, "run_round", self._run_round)
         mp.setattr(main_mod, "achievement_toast", lambda a, r: self.toasts.append(a))
         mp.setattr(main_mod, "update_stats_game", self._update_stats)
+        mp.setattr(main_mod, "add_recent_game", self.carnet.append)  # 5.0.0
         real_create = main_mod.create_ai_players
 
         def create(diffs: dict[Seat, str]) -> Any:

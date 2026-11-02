@@ -56,6 +56,12 @@ class BossModifier(ABC):
         current = getattr(state, "_joker_state", None) or {}
         state.patch("_joker_state", {**current, key: value})
 
+    def on_reveal(self, run: BelAtroRun) -> str | None:
+        """5.0.0: a run-level effect when this boss is revealed (after the
+        reveal animation, before the round). Returns a banner line, or None.
+        Pure in-round bosses leave it alone."""
+        return None
+
     def joker_flags(self) -> dict[str, object]:
         """The joker_state flags this boss's apply() switches on (may be {})."""
         from ..core.state import BelatroState
@@ -361,6 +367,67 @@ class LHuissier(BossModifier):
         return state
 
 
+# ── 5.0.0: La Gangrène — the rot outlives the blind ──────────────────────
+
+GANGRENE_FLAG = "boss_gangrene"
+
+
+class LaGangrene(BossModifier):
+    """Corrupts a joker for good, then keeps spreading every ante."""
+
+    id = "la_gangrene"
+    name = "La Gangrène"
+    description = (
+        "Rots one of your Jokers into a corrupted one — for good. The rot spreads to "
+        "another Joker every ante, until your team wins a round by capot."
+    )
+
+    def apply(self, state: PatchedGameState) -> PatchedGameState:
+        self.set_joker_flag(state, GANGRENE_FLAG)
+        return state
+
+    def on_reveal(self, run: BelAtroRun) -> str | None:
+        run.gangrene_active = True
+        rotted = rot_joker(run)
+        if rotted is None:
+            return "La Gangrène finds nothing to rot… yet. It will spread each ante."
+        return f"La Gangrène rots {rotted}. Capot to stop it spreading!"
+
+
+def rot_joker(run: BelAtroRun) -> str | None:
+    """Turn one random uncorrupted joker of the player's into a random
+    corrupted one (keeping its slot and edition). Returns a "Old → New" line,
+    or None when there is nothing left to rot. Draws from a string-seeded RNG
+    (seed, ante, cycle, count), so the run's main RNG stream is untouched."""
+    import random
+
+    from ..items.base import assign_copy_indices
+    from ..items.registry import registry
+
+    victims = [i for i, j in enumerate(run.jokers) if not j.is_corrupted]
+    pool = sorted(
+        j_id for j_id, cls in registry.jokers.items() if cls.is_corrupted and not cls.shop_excluded
+    )
+    if not victims or not pool:
+        return None
+    rng = random.Random(
+        f"{run.seed}:gangrene:{run.ante_number}:{run.endless_ante_offset}:{run.gangrene_rotted}"
+    )
+    index = rng.choice(victims)
+    old = run.jokers[index]
+    new = registry.jokers[rng.choice(pool)]()
+    new.edition = old.edition  # a Negative's slot was granted at purchase and stays
+    run.jokers[index] = new
+    assign_copy_indices([*run.jokers, *run.partner.jokers])
+    new.on_purchase(run)  # the curse comes with it (Le Traître's sabotage...)
+    run.gangrene_rotted += 1
+    if run.profile is not None:
+        run.profile.discover(new.id)
+    if run.recorder is not None:
+        run.recorder.note_acquire(new, source="la_gangrene")
+    return f"{old.display_name} → {new.name}"
+
+
 # ── Registry ───────────────────────────────────────────────────────────────
 
 ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
@@ -388,6 +455,8 @@ ALL_BOSS_MODIFIERS: list[type[BossModifier]] = [
     LeContreAttaquant,
     LHuissier,
     LeBalMasque,
+    # 5.0.0
+    LaGangrene,
 ]
 
 BOSS_BY_ID: dict[str, type[BossModifier]] = {cls.id: cls for cls in ALL_BOSS_MODIFIERS}

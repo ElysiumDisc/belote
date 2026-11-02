@@ -206,6 +206,17 @@ class GhostRecorder:
     def note_acquire(self, item: object, source: str) -> None:
         self.events.append({"type": "acquire", **_item_fields(item), "source": source})
 
+    def note_loan(self, amount: int) -> None:
+        """5.0.0: L'Usurier's loan taken."""
+        self.events.append({"type": "loan", "amount": amount})
+
+    def note_repay(self, amount: int) -> None:
+        self.events.append({"type": "repay", "amount": amount})
+
+    def note_skip(self, ante: int, blind: int, medal: str | None) -> None:
+        """5.0.0: a blind skipped from the shop for a Médaille."""
+        self.events.append({"type": "skip", "ante": ante, "blind": blind, "medal": medal})
+
     # ── persistence ────────────────────────────────────────────────────
 
     def to_record(self, label: str = "run") -> dict[str, Any]:
@@ -274,7 +285,7 @@ def list_ghosts() -> list[Path]:
 # ── reading (4.11.0) ───────────────────────────────────────────────────────
 
 
-_SHOP_EVENTS = frozenset({"buy", "sell", "reroll", "use", "acquire"})
+_SHOP_EVENTS = frozenset({"buy", "sell", "reroll", "use", "acquire", "skip", "loan", "repay"})
 
 
 def parse_card(text: str) -> Card | None:

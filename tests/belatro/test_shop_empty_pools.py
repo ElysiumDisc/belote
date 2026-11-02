@@ -37,7 +37,8 @@ def test_generate_inventory_empty_pools_returns_empty_list(
     shop = Shop(run)
     _empty_pools(monkeypatch)
     shop.generate_inventory()
-    assert shop.inventory == []
+    # 5.0.0: only L'Atelier's card-mod offer is left (it needs no registry).
+    assert [type(i).__name__ for i in shop.inventory] == ["CardModOffer"]
 
 
 def test_buy_index_oob_on_empty_inventory_returns_false(
@@ -50,7 +51,7 @@ def test_buy_index_oob_on_empty_inventory_returns_false(
     shop = Shop(run)
     _empty_pools(monkeypatch)
     shop.generate_inventory()
-    assert shop.buy_item(0) is False
+    assert shop.buy_item(len(shop.inventory)) is False
     assert run.economy.money == 100  # no money consumed
 
 
@@ -65,7 +66,7 @@ def test_reroll_on_empty_pools_stays_empty(monkeypatch: pytest.MonkeyPatch) -> N
     shop.generate_inventory()
     cost_before = shop.reroll_cost
     shop.reroll()
-    assert shop.inventory == []
+    assert [type(i).__name__ for i in shop.inventory] == ["CardModOffer"]  # 5.0.0 Atelier
     # Reroll still charged the player (the pool was empty regardless of
     # whether they could see new items).
     assert run.economy.money < 100
@@ -82,8 +83,9 @@ def test_partial_empty_pools_produces_what_it_can(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(registry, "vouchers", {})
     registry._bump()
     shop.generate_inventory()
-    # Should produce 0-3 items (up to 2 jokers + 1 tarot/planet, no voucher).
-    assert 0 <= len(shop.inventory) <= 3
+    # Should produce 0-4 items (up to 2 jokers + 1 tarot/planet + the 5.0.0
+    # Atelier card-mod offer, no voucher).
+    assert 0 <= len(shop.inventory) <= 4
     from belote.belatro.items.base import Voucher
 
     assert not any(isinstance(it, Voucher) for it in shop.inventory)

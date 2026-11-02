@@ -83,11 +83,16 @@ class ItemRegistry:
         cached = self._jokers_cache.get(key)
         if cached is not None:
             return cached
+        # 5.0.0: fusion results (`shop_excluded`) are only ever made by Le
+        # Serment — never stocked, granted or rolled.
         result = {
             k: v
             for k, v in self.jokers.items()
-            if not getattr(v, "is_unlockable", False)
-            or (profile is not None and profile.is_unlocked(k))
+            if not v.shop_excluded
+            and (
+                not getattr(v, "is_unlockable", False)
+                or (profile is not None and profile.is_unlocked(k))
+            )
         }
         self._jokers_cache[key] = result
         return result
@@ -129,10 +134,12 @@ def register_all_items() -> None:
     from . import planets, tarots, vouchers
     from .jokers import (
         annonces,
+        atelier,
         coinche,
         contract,
         corrupted,
         economy,
+        fusions,
         hand_comp,
         rivals,
         tempo,
@@ -155,6 +162,9 @@ def register_all_items() -> None:
         # 4.11.0 — appended last so the older pool keeps its order.
         rivals,
         tempo,
+        # 5.0.0
+        fusions,
+        atelier,
     ]:
         for attr_name in dir(mod):
             attr = getattr(mod, attr_name)
@@ -163,6 +173,7 @@ def register_all_items() -> None:
                 and issubclass(attr, Joker)
                 and attr is not Joker
                 and attr.__module__ == mod.__name__  # skip re-exported classes
+                and hasattr(attr, "id")  # skip shared bases (fusions._FusionJoker)
             ):
                 registry.register_joker(attr)
 

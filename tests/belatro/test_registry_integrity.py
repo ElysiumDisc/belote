@@ -22,10 +22,11 @@ from belote.belatro.items.registry import register_all_items, registry
 if TYPE_CHECKING:
     pass
 
-# Audited census (4.9.6; 4.11.0: +12 jokers, +1 planet, +2 tarots, +1 voucher).
+# Audited census (4.9.6; 4.11.0: +12 jokers, +1 planet, +2 tarots, +1 voucher;
+# 5.0.0: +6 fusion jokers, +4 Atelier jokers).
 # Bump deliberately when items are intentionally added.
 _EXPECTED_COUNTS = {
-    "jokers": 54,
+    "jokers": 64,
     "planets": 9,
     "tarots": 14,
     "vouchers": 13,

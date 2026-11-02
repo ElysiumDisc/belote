@@ -46,6 +46,9 @@ class Statistics:
     # 3.0.0: Achievement registry — IDs of unlocked achievements. List
     # rather than set for JSON-friendliness; uniqueness enforced on insert.
     achievements: list[str] = field(default_factory=list)
+    # 5.0.0 Le Carnet de Parties: the last five finished games, newest first
+    # (see carnet.py for the entry shape).
+    recent_games: list[dict[str, object]] = field(default_factory=list)
 
     def unlock_achievement(self, ach_id: str) -> bool:
         """Returns True if newly unlocked; False if already had it."""
@@ -65,7 +68,11 @@ class Statistics:
         # default per field instead of crashing the first update.
         base = cls()
         for f in fields(cls):
-            if f.name in data:
+            if f.name == "recent_games":
+                from .carnet import conform_entries
+
+                base.recent_games = conform_entries(data.get(f.name))
+            elif f.name in data:
                 setattr(base, f.name, _conform(getattr(base, f.name), data[f.name]))
         return base
 
@@ -238,6 +245,14 @@ class StatisticsManager:
         self.flush_stats()
         return unlocked
 
+    def add_recent_game(self, entry: dict[str, object]) -> None:
+        """5.0.0 Le Carnet de Parties: keep the newest five games."""
+        from .carnet import CARNET_SIZE
+
+        stats = self.load_stats()
+        stats.recent_games = [entry, *stats.recent_games][:CARNET_SIZE]
+        self.flush_stats()
+
     def update_stats_game(self, won: bool, num_rounds: int, difficulty: str) -> list[Achievement]:
         stats = self.load_stats()
         stats.games_played += 1
@@ -304,3 +319,8 @@ def update_stats_game(won: bool, num_rounds: int, difficulty: str) -> list[Achie
 
 def get_session_stats() -> SessionStats:
     return _MANAGER.get_session_stats()
+
+
+def add_recent_game(entry: dict[str, object]) -> None:
+    """Record a finished game in Le Carnet de Parties (5.0.0)."""
+    _MANAGER.add_recent_game(entry)

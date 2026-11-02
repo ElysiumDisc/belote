@@ -32,8 +32,8 @@ class LaSentinelle(Joker):
         # Detect whether *our team* (NS) was dealt the trump Jack by inspecting
         # the trick it was played in. Each player plays only their own cards,
         # so the seat that plays the Jack is the seat that was dealt it.
-        state[f"{self.id}_had_jack"] = False
-        state[f"{self.id}_won_with_jack"] = False
+        state[self.state_key("had_jack")] = False
+        state[self.state_key("won_with_jack")] = False
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
@@ -47,14 +47,14 @@ class LaSentinelle(Joker):
         for card in event.cards:
             if card.suit == trump and card.rank == Rank.JACK and team_of(seat) == 0:
                 # NS team was dealt the trump Jack (either South or North).
-                state[f"{self.id}_had_jack"] = True
+                state[self.state_key("had_jack")] = True
                 if team_of(event.winner) == 0:
-                    state[f"{self.id}_won_with_jack"] = True
+                    state[self.state_key("won_with_jack")] = True
             seat = seat.next_seat()
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        if state.get(f"{self.id}_had_jack") and not state.get(f"{self.id}_won_with_jack"):
+        if state.get(self.state_key("had_jack")) and not state.get(self.state_key("won_with_jack")):
             return JokerResult(times_mult=3.0)
         return None
 
@@ -79,18 +79,18 @@ class LAccumulateur(Joker):
     cost = 6
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_stored_chips"] = 0
+        state[self.state_key("stored_chips")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) == 0:
             count = sum(1 for c in event.cards if c.rank in (Rank.SEVEN, Rank.EIGHT))
-            stored = state.get(f"{self.id}_stored_chips", 0)
-            state[f"{self.id}_stored_chips"] = stored + (count * 5)
+            stored = state.get(self.state_key("stored_chips"), 0)
+            state[self.state_key("stored_chips")] = stored + (count * 5)
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
-        stored = state.get(f"{self.id}_stored_chips", 0)
+        stored = state.get(self.state_key("stored_chips"), 0)
         if stored > 0:
             return JokerResult(add_chips=stored)
         return None

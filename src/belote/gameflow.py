@@ -539,6 +539,9 @@ def run_play(
 
 def _record_round_stats(current: GameState, breakdown: ScoringBreakdown, reader: KeyReader) -> None:
     """Update the player's global stats and toast any new achievements."""
+    from . import carnet
+
+    carnet.note_round(breakdown)  # 5.0.0: the Carnet's deciding-round facts
     trump_sym = current.trump.symbol if current.trump else None
     unlocked = update_stats_round(
         _is_player_capot(breakdown),

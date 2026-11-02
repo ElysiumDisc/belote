@@ -60,6 +60,23 @@ class TrickWonEvent:
 
 
 @dataclass(frozen=True)
+class CardCapturedEvent:
+    """5.0.0: an enhanced / sealed card your team (NS) just captured.
+
+    Not published on the bus — the accumulator fires it straight at the
+    jokers' `on_card_captured` hook, once per modded card in an NS-won trick
+    (see `core/card_mods.py`). `shattered` is True when a Verre broke.
+    """
+
+    card: Card
+    enhancement: str | None
+    seal: str | None
+    trick_number: int
+    winner: Seat
+    shattered: bool = False
+
+
+@dataclass(frozen=True)
 class BeloteAnnouncedEvent:
     seat: Seat
     is_rebelote: bool

@@ -34,7 +34,7 @@ class LeFanatique(Joker):
     is_unlockable = True
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_wins"] = 0
+        state[self.state_key("wins")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
@@ -43,8 +43,8 @@ class LeFanatique(Joker):
             return None
 
         if team_of(event.winner) == 0:
-            wins = state.get(f"{self.id}_wins", 0) + 1
-            state[f"{self.id}_wins"] = wins
+            wins = state.get(self.state_key("wins"), 0) + 1
+            state[self.state_key("wins")] = wins
             if wins > 4:
                 return JokerResult(times_mult=1.5)
         return None

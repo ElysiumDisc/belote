@@ -185,6 +185,35 @@ def handle_key(setup: BossRushSetup, event: KeyEvent) -> str | None:
     return None
 
 
+_ARROW_ROWS = (0, 1, 2, 4)  # rows whose value steps with ◀ ▶
+
+
+def click_targets() -> list[tuple[str, object]]:
+    """5.0.0 mouse: each row's label selects it, its ◀ / ▶ step it, and
+    "[ Start ]" starts — in screen order, for `hitmap.targets_from_lines`."""
+    targets: list[tuple[str, object]] = []
+    for i, label in enumerate(ROWS):
+        if i == _ROW_START:
+            targets.append(("[ Start ]", ("start", i)))
+            continue
+        targets.append((label, ("row", i)))
+        if i in _ARROW_ROWS:
+            targets += [("◀", ("step", i, -1)), ("▶", ("step", i, +1))]
+    return targets
+
+
+def handle_click(setup: BossRushSetup, target: object) -> str | None:
+    """Apply a click target. Returns "start" or None, like `handle_key`."""
+    if not isinstance(target, tuple):
+        return None
+    if target[0] == "start":
+        return "start"
+    setup.row = int(target[1])
+    if target[0] == "step":
+        setup.step(int(target[2]))
+    return None
+
+
 def show_boss_rush(reader: KeyReader, profile: Profile) -> BelAtroRun | None:
     """Run the setup screen; the configured run, or None on Esc."""
     from belote.ui.fit_guard import require_minimum
@@ -199,7 +228,14 @@ def show_boss_rush(reader: KeyReader, profile: Profile) -> BelAtroRun | None:
         sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(body))
         sys.stdout.flush()
         invalidate_diff()
-        action = handle_key(setup, reader.read())
+        from belote.ui import hitmap
+
+        hitmap.targets_from_lines("menu", body, click_targets(), pad=1)
+        event = reader.read()
+        if event.key == Key.MOUSE:
+            action = handle_click(setup, hitmap.hit("menu", event.pos))
+        else:
+            action = handle_key(setup, event)
         if action == "back":
             return None
         if action == "start":

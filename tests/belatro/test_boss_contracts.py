@@ -52,10 +52,10 @@ if TYPE_CHECKING:
 # ── Registry invariant ────────────────────────────────────────────────────
 
 
-def test_all_24_bosses_registered() -> None:
+def test_all_25_bosses_registered() -> None:
     """Audit invariant: ALL_BOSS_MODIFIERS must contain every concrete boss.
     Pinning the count surfaces accidental omissions when adding a new boss."""
-    assert len(ALL_BOSS_MODIFIERS) == 24
+    assert len(ALL_BOSS_MODIFIERS) == 25  # 5.0.0: + La Gangrène
 
 
 @pytest.mark.parametrize("boss_cls", ALL_BOSS_MODIFIERS)

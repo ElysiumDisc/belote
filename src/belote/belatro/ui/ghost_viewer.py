@@ -285,6 +285,17 @@ def shop_line(event: dict[str, object]) -> str:
         return f"  used {name}"
     if kind == "acquire":
         return f"  gained {name} (from {event.get('source', '?')})"
+    if kind == "loan":
+        return f"  borrowed ${event.get('amount', '?')} from L'Usurier"
+    if kind == "repay":
+        return f"  repaid ${event.get('amount', '?')} to L'Usurier"
+    if kind == "skip":
+        from ..run.medals import MEDALS
+
+        medal = MEDALS.get(str(event.get("medal")))
+        raw = event.get("blind")
+        blind = ("Small", "Big", "Boss")[raw] if isinstance(raw, int) and 0 <= raw <= 2 else "?"
+        return f"  skipped the {blind} Blind" + (f" for {medal.name}" if medal else "")
     return f"  {kind}"
 
 
@@ -366,7 +377,7 @@ def control_action(event: KeyEvent | None, ctl: ReplayControl) -> str:
         return "quit"
     if _is_char(event, "n") or key == Key.ENTER:
         return "skip"
-    if key == Key.SPACE or _is_char(event, " ", "p"):
+    if key in (Key.SPACE, Key.MOUSE) or _is_char(event, " ", "p"):  # 5.0.0: click pauses
         ctl.paused = not ctl.paused
         return "stay" if ctl.paused else "next"
     if _is_char(event, "+", "="):
@@ -438,11 +449,27 @@ def show_ghost_picker(reader: KeyReader) -> None:
     while True:
         require_minimum(reader)
         term_w, term_h = get_term_size()
-        lines = picker_lines(ghosts, selected, term_w, max(3, term_h - 8))
-        sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(vcenter_lines(lines, term_h)))
+        max_rows = max(3, term_h - 8)
+        lines = vcenter_lines(picker_lines(ghosts, selected, term_w, max_rows), term_h)
+        sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(lines))
         sys.stdout.flush()
         invalidate_diff()
-        key = reader.read().key
+        from belote.ui import hitmap
+
+        top = max(0, min(selected - max_rows + 1, len(ghosts) - max_rows))
+        shown = range(top, min(len(ghosts), top + max_rows))
+        hitmap.targets_from_lines(
+            "menu",
+            lines,
+            [(ghosts[i].summary[: max(20, term_w - 8)], i) for i in shown],
+            full_row=True,
+        )
+        event = reader.read()
+        key = event.key
+        if key == Key.MOUSE:  # 5.0.0: a click watches that run
+            clicked = hitmap.hit("menu", event.pos)
+            if isinstance(clicked, int):
+                selected, key = clicked, Key.ENTER
         if key in (Key.ESC, Key.QUIT, Key.EOF):
             return
         if not ghosts:

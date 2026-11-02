@@ -152,7 +152,28 @@ def set_bid_hint_provider(provider: Callable[[GameState], str | None] | None) ->
     _bid_hint_provider = provider
 
 
-def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -> list[str]:
+# 5.0.0 mouse: the selector's option line (the exact str object returned) and
+# each option's (0-based column, width, option index) on it. `render` finds
+# the line again by identity after centring and records the "bid" hit map.
+_last_bid_spans: tuple[str, tuple[tuple[int, int, int], ...]] | None = None
+
+
+def _spans(pieces: list[str], sep: str, lead: int) -> list[tuple[int, int]]:
+    """(visible offset, visible width) of each piece in `sep.join(pieces)`,
+    after dropping `lead` visible cells from the front."""
+    out: list[tuple[int, int]] = []
+    offset = -lead
+    for piece in pieces:
+        width = visible_len(piece)
+        start = max(0, offset)
+        out.append((start, width - (start - offset)))
+        offset += width + visible_len(sep)
+    return out
+
+
+def _build_bid_prompt_lines(
+    state: GameState, term_w: int, bid_selection: int, *, boxed: bool = True
+) -> list[str]:
     """Build the in-frame bidding prompt: optional tendency line, then the
     selector (Round 1: inline highlighted Take/Pass; Round 2: boxed grid).
 
@@ -184,9 +205,10 @@ def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -
     if hint:
         lines.append(ansi_center(f"{DIM}{hint}{RESET}", term_w))
 
-    if state.bidding_round == 2:
+    global _last_bid_spans
+    if state.bidding_round == 2 and boxed:
         inner_w = 60
-        opt_str = ""
+        entries: list[str] = []
         for i, lbl in enumerate(labels):
             prefix = f"{BOLD}{gold_fg()}" if i == bid_selection else ""
             color = ""
@@ -194,26 +216,38 @@ def _build_bid_prompt_lines(state: GameState, term_w: int, bid_selection: int) -
             if isinstance(opt, Suit):
                 color = red_fg() if opt.is_red else black_fg()
             entry = f"{prefix}({i + 1}) {color}{lbl}{RESET}{prefix}"
-            entry = f"{REVERSE} {entry} {RESET}" if i == bid_selection else f" {entry} "
-            opt_str += entry + "  "
-
+            entries.append(f"{REVERSE} {entry} {RESET}" if i == bid_selection else f" {entry} ")
+        opt_str = "".join(e + "  " for e in entries)
+        stripped = opt_str.strip()
+        lead = len(opt_str) - len(opt_str.lstrip())  # plain spaces: 1 cell each
+        option_row = ansi_center(f"│{ansi_center(stripped, inner_w)}│", term_w)
         box = [
             f"┌{'─' * inner_w}┐",
             f"│{f'ROUND {state.bidding_round} BID'.center(inner_w)}│",
             f"├{'─' * inner_w}┤",
             f"│{' ' * inner_w}│",
-            f"│{ansi_center(opt_str.strip(), inner_w)}│",
+            None,
             f"│{' ' * inner_w}│",
             f"└{'─' * inner_w}┘",
         ]
-        lines.extend(ansi_center(bl, term_w) for bl in box)
+        lines.extend(option_row if bl is None else ansi_center(bl, term_w) for bl in box)
+        box_left = max(0, (term_w - (inner_w + 2)) // 2)
+        inner_left = max(0, (inner_w - visible_len(stripped)) // 2)
+        base = box_left + 1 + inner_left
+        spans = _spans(entries, "  ", lead)
+        _last_bid_spans = (option_row, tuple((base + o, w, i) for i, (o, w) in enumerate(spans)))
     else:
         parts = [
             f"{BOLD}{gold_fg()}({i + 1}){lbl}{RESET}" if i == bid_selection else f"({i + 1}){lbl}"
             for i, lbl in enumerate(labels)
         ]
-        prompt = f"{BOLD}{white_fg()}Round {state.bidding_round} Bid: {'  '.join(parts)}{RESET}"
-        lines.append(ansi_center(prompt, term_w))
+        head = f"Round {state.bidding_round} Bid: "
+        prompt = f"{BOLD}{white_fg()}{head}{'  '.join(parts)}{RESET}"
+        row = ansi_center(prompt, term_w)
+        lines.append(row)
+        base = max(0, (term_w - visible_len(prompt)) // 2) + len(head)
+        spans = _spans(parts, "  ", 0)
+        _last_bid_spans = (row, tuple((base + o, w, i) for i, (o, w) in enumerate(spans)))
 
     return lines
 
@@ -237,9 +271,19 @@ def _phase_info(state: GameState) -> str:
     return phase_info
 
 
-def _bid_lines(state: GameState, term_w: int, bid_selection: int | None) -> list[str]:
-    """SOUTH's bidding prompt: the interactive selector, or the static hint."""
+def _bid_lines(
+    state: GameState, term_w: int, bid_selection: int | None, room: int | None = None
+) -> list[str]:
+    """SOUTH's bidding prompt: the interactive selector, or the static hint.
+
+    5.0.0: `room` is the rows left on screen. The round-2 box is 7 rows; where
+    it doesn't fit (most terminals — the table is fitted for card play) the
+    selector takes the one-line form round 1 uses, instead of being clipped
+    off the bottom of the screen with its options."""
     if bid_selection is not None:
-        return _build_bid_prompt_lines(state, term_w, bid_selection)
+        lines = _build_bid_prompt_lines(state, term_w, bid_selection)
+        if room is not None and len(lines) > room:
+            lines = _build_bid_prompt_lines(state, term_w, bid_selection, boxed=False)
+        return lines
     prompt = f"{BOLD}{gold_fg()}Bid: [P]ass  [1]♠  [2]♥  [3]♦  [4]♣{RESET}"
     return [ansi_center(prompt, term_w)]

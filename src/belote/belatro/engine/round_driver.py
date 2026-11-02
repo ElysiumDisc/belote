@@ -107,6 +107,12 @@ class RoundUICallbacks(ABC):
         """
         return False
 
+    def prompt_special_contract(self, state: BelatroState, kind: str) -> bool:
+        """5.0.0: offer to declare a Contrat Capot / Grand Chelem (`kind`) on
+        a contract blind, after bidding, when the player's team holds the
+        contract (see `belatro/run/contracts.py`). Default: decline."""
+        return False
+
     def on_redeal(self, state: BelatroState) -> None:  # noqa: B027 - optional hook
         """Notify the UI that everyone passed and the cards were redealt.
 
@@ -226,6 +232,7 @@ class _RoundContext(RoundPolicy[BelatroState]):
     def on_contract(self, state: BelatroState) -> BelatroState:
         state = _run_coinche(self, state)
         _offer_heist(self, state)
+        _offer_special_contract(self, state)
         return state
 
     # ── RoundPolicy: play ───────────────────────────────────────────────
@@ -516,6 +523,22 @@ def _offer_heist(ctx: _RoundContext, state: BelatroState) -> None:
     """
     if state.phase == Phase.PLAYING and state.taker == Seat.SOUTH and ctx.ui.prompt_heist(state):
         state._joker_state["heist_declared"] = True
+
+
+def _offer_special_contract(ctx: _RoundContext, state: BelatroState) -> None:
+    """5.0.0 Contrat Capot / Grand Chelem: on a contract blind (the offer
+    flag rides in from the run), once NS holds the contract the player may
+    declare it. Like the heist, a single in-place joker_state write."""
+    from ..run.contracts import DECLARED_KEY, OFFER_KEY
+
+    kind = state._joker_state.get(OFFER_KEY)
+    if (
+        isinstance(kind, str)
+        and state.phase == Phase.PLAYING
+        and state.taker in (Seat.SOUTH, Seat.NORTH)
+        and ctx.ui.prompt_special_contract(state, kind)
+    ):
+        state._joker_state[DECLARED_KEY] = kind
 
 
 # ── Phase: play ─────────────────────────────────────────────────────────

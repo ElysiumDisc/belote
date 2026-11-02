@@ -13,6 +13,7 @@ from belote.ansi import (
     green_fg,
     menu_art_fg,
     move,
+    red_fg,
     white_fg,
 )
 from belote.input import Key, typed
@@ -39,6 +40,7 @@ class ShopScreen:
         self.shop = shop
         self.reader = reader
         self.selected = 0
+        self.spent_medals: list[str] = []
 
     def _forge_available(self) -> bool:
         """The Forge action only appears when the player owns the TierceForge
@@ -50,46 +52,55 @@ class ShopScreen:
             and self.shop.run.tierce_charges >= 3
         )
 
+    def _actions(self) -> list[str]:
+        """Action buttons after the item cards, in order (5.0.0: Fuse when Le
+        Serment has something to fuse). Skipping the next blind is the K
+        hotkey, advertised on the status line."""
+        from ..run import usurier
+
+        actions = ["reroll"]
+        if self._forge_available():
+            actions.append("forge")
+        if self.shop.available_fusions():
+            actions.append("fuse")
+        # 5.0.0 L'Usurier: his loan when he visits; Repay while you owe him.
+        if self.shop.run.loan_debt > 0:
+            actions.append("repay")
+        elif usurier.can_borrow(self.shop.run):
+            actions.append("loan")
+        return actions
+
     def run(self) -> None:
         """Main shop loop."""
+        # 5.0.0: waiting Médailles bend this shop's first roll.
+        self.spent_medals = [m.name for m in self.shop.spend_medals()]
         self.shop.generate_inventory()
         self._render()
         while True:
             event = self.reader.read()
             key = event.key
             num_items = len(self.shop.inventory)
-            forge_idx = num_items + 1 if self._forge_available() else -1
-            total_options = num_items + 1 + (1 if forge_idx >= 0 else 0)
+            actions = self._actions()
+            total_options = num_items + len(actions)
             if key == Key.LEFT:
                 self.selected = (self.selected - 1) % total_options
             elif key == Key.RIGHT:
                 self.selected = (self.selected + 1) % total_options
             elif key == Key.ENTER:
-                if self.selected < num_items:
-                    # 4.8.0: capture pre-purchase context for the animation.
-                    money_before = self.shop.run.economy.money
-                    sel_idx = self.selected
-                    bought = self.shop.buy_item(self.selected)
-                    if not bought and self.shop.last_buy_failure == "slots_full":
-                        from .announce import BelAtroAnnounce
-
-                        BelAtroAnnounce.banner(
-                            "Slots full — press S to sell a joker", self.reader, hold=1.0
-                        )
-                    elif bought:
-                        money_after = self.shop.run.economy.money
-                        self._animate_purchase(sel_idx, num_items, money_before, money_after)
-                    if self.selected >= len(self.shop.inventory):
-                        self.selected = max(0, len(self.shop.inventory) - 1)
-                elif self.selected == num_items:
-                    self._animate_reroll(num_items)
-                    self.shop.reroll()
-                    # Clamp to a *valid* index: len(inventory)-1, not len.
-                    # The previous form let `selected == len(inventory)` slip
-                    # through, OOB on the next render's inventory[self.selected].
-                    self.selected = min(self.selected, max(0, len(self.shop.inventory) - 1))
-                elif self.selected == forge_idx:
-                    self._handle_forge()
+                self._activate(num_items, actions)
+            elif key == Key.MOUSE:
+                # 5.0.0: click an offer / button to select it, click it again
+                # to buy / press it (the keyboard's ← → then Enter).
+                target = self._clicked(event.pos, num_items)
+                if target is not None:
+                    if target == self.selected:
+                        self._activate(num_items, actions)
+                    else:
+                        self.selected = target
+            elif typed(event, "k"):
+                # 5.0.0 Médailles: skip the next blind for its medal.
+                if self._handle_skip():
+                    break
             elif key == Key.CHAR and event.char and event.char.lower() == "c":
                 # Open the consumables tray. Local import to avoid a circular
                 # module load at startup (consumables imports from this UI tree).
@@ -108,9 +119,125 @@ class ShopScreen:
                     )
             elif typed(event, "s"):  # S is also the DOWN alias
                 self._handle_sell()
+                self._clamp_selection()
             elif key in (Key.ESC, Key.QUIT, Key.EOF):
                 break
             self._render()
+
+    def _activate(self, num_items: int, actions: list[str]) -> None:
+        """Enter on the current selection: buy the offer or press the button."""
+        if self.selected < num_items:
+            self._handle_buy(num_items)
+        else:
+            action = actions[min(self.selected - num_items, len(actions) - 1)]
+            if action == "reroll":
+                self._animate_reroll(num_items)
+                self.shop.reroll()
+            elif action == "forge":
+                self._handle_forge()
+            elif action == "fuse":
+                self._handle_fuse()
+            elif action in ("loan", "repay"):
+                self._handle_usurier(action)
+        self._clamp_selection()
+
+    def _handle_usurier(self, action: str) -> None:
+        """5.0.0: take L'Usurier's loan, or repay what you can."""
+        from ..run import usurier
+        from .announce import BelAtroAnnounce
+
+        run = self.shop.run
+        if action == "loan":
+            if BelAtroAnnounce.yes_no(
+                f"L'Usurier: borrow ${usurier.LOAN_AMOUNT} at "
+                f"{int(usurier.INTEREST * 100)}% per ante, compounding? "
+                f"(Owe ${usurier.SEIZE_AT}+ and he seizes your money, then jokers.)",
+                self.reader,
+            ) and usurier.borrow(run):
+                BelAtroAnnounce.banner(
+                    f"+${usurier.LOAN_AMOUNT} — L'Usurier will be back for it.",
+                    self.reader,
+                    hold=1.2,
+                )
+            return
+        paid = usurier.repay(run)
+        if paid:
+            left = f" (${run.loan_debt} still owed)" if run.loan_debt else " — debt cleared!"
+            BelAtroAnnounce.banner(f"Repaid ${paid}{left}", self.reader, hold=1.2)
+        else:
+            BelAtroAnnounce.banner("No money to repay with", self.reader, hold=1.0)
+
+    @staticmethod
+    def _clicked(pos: tuple[int, int] | None, num_items: int) -> int | None:
+        """Selection index of the offer / button under a click, or None."""
+        from belote.ui import hitmap
+
+        target = hitmap.hit("shop", pos)
+        if not isinstance(target, tuple):
+            return None
+        kind, index = target
+        return int(index) if kind == "item" else num_items + int(index)
+
+    def _clamp_selection(self) -> None:
+        """Keep the cursor on a real option after the item / action lists
+        changed (a purchase, a reroll, a fusion)."""
+        total = len(self.shop.inventory) + len(self._actions())
+        self.selected = max(0, min(self.selected, total - 1))
+
+    def _handle_buy(self, num_items: int) -> None:
+        from .announce import BelAtroAnnounce
+
+        # 4.8.0: capture pre-purchase context for the animation.
+        money_before = self.shop.run.economy.money
+        sel_idx = self.selected
+        bought = self.shop.buy_item(self.selected)
+        if not bought and self.shop.last_buy_failure == "slots_full":
+            BelAtroAnnounce.banner("Slots full — press S to sell a joker", self.reader, hold=1.0)
+        elif bought:
+            money_after = self.shop.run.economy.money
+            self._animate_purchase(sel_idx, num_items, money_before, money_after)
+            # 5.0.0 Le Serment: a third copy makes the oath possible.
+            if any(f.kind == "oath" for f in self.shop.available_fusions()):
+                BelAtroAnnounce.banner(
+                    "Three copies! Le Serment can fuse them — choose Fuse.", self.reader, hold=1.5
+                )
+        if self.selected >= len(self.shop.inventory):
+            self.selected = max(0, len(self.shop.inventory) - 1)
+
+    def _handle_fuse(self) -> None:
+        """5.0.0 Le Serment: pick a fusion (recipe or three-copy oath)."""
+        from .announce import BelAtroAnnounce
+
+        fusions = self.shop.available_fusions()
+        if not fusions:
+            return
+        idx = self._pick_from(
+            "LE SERMENT — FUSE JOKERS",
+            "The inputs are consumed; the result takes the first one's slot.",
+            [f.label for f in fusions],
+        )
+        if idx is None:
+            return
+        joker = self.shop.fuse(fusions[idx])
+        if joker is not None:
+            BelAtroAnnounce.banner(f"Le Serment: {joker.display_name}!", self.reader, hold=1.5)
+
+    def _handle_skip(self) -> bool:
+        """5.0.0 Médailles: skip the next blind? True = leave the shop now."""
+        from .announce import BelAtroAnnounce
+
+        medal = self.shop.skip_offer()
+        if medal is None:
+            return False
+        if not BelAtroAnnounce.yes_no(
+            f"Skip the next blind (no round, no payout, no shop) for {medal.name}: "
+            f"{medal.description}?",
+            self.reader,
+        ):
+            return False
+        self.shop.skip_next = True
+        self.shop.skip_medal = medal.id
+        return True
 
     def _handle_sell(self) -> None:
         """Numbered overlay: pick an owned joker to sell for half its cost."""
@@ -179,37 +306,40 @@ class ShopScreen:
     def _pick_planet(self) -> str | None:
         """Numbered overlay to pick a planet contract. Returns the chosen
         planet id, or None if the player cancelled."""
-        from belote.ui.fit_guard import require_minimum
-        from belote.ui.layout import vcenter_lines
-        from belote.ui.render import get_term_size
-
         from ..items.registry import registry
 
         planet_ids = list(registry.planets.keys())
         if not planet_ids:
             return None
+        names = []
+        for p_id in planet_ids:
+            planet_cls = registry.get_planet(p_id)
+            names.append(getattr(planet_cls, "name", p_id) if planet_cls else p_id)
+        idx = self._pick_from("FORGE A PLANET", "Spend 3 Tierce charges to level up:", names)
+        return None if idx is None else planet_ids[idx]
 
+    def _pick_from(self, title: str, subtitle: str, labels: list[str]) -> int | None:
+        """Numbered overlay (up to 9 entries). Returns the picked index, or
+        None if the player cancelled."""
+        from belote.ui.fit_guard import require_minimum
+        from belote.ui.layout import vcenter_lines
+        from belote.ui.render import get_term_size, invalidate_diff
+
+        labels = labels[:9]
         require_minimum(self.reader)
         term_w, term_h = get_term_size()
-
-        lines: list[str] = []
-        lines.append(ansi_center(gold_fg() + BOLD + "FORGE A PLANET" + RESET, term_w))
-        lines.append("")
-        lines.append(
-            ansi_center(white_fg() + "Spend 3 Tierce charges to level up:" + RESET, term_w)
-        )
-        lines.append("")
-        for i, p_id in enumerate(planet_ids):
-            planet_cls = registry.get_planet(p_id)
-            name = getattr(planet_cls, "name", p_id) if planet_cls else p_id
-            lines.append(ansi_center(white_fg() + f"[{i + 1}] {name}" + RESET, term_w))
-        lines.append("")
-        lines.append(ansi_center("[1-9] pick   Esc cancel", term_w))
-
+        lines: list[str] = [
+            ansi_center(gold_fg() + BOLD + title + RESET, term_w),
+            "",
+            ansi_center(white_fg() + subtitle + RESET, term_w),
+            "",
+        ]
+        for i, label in enumerate(labels):
+            text = f"[{i + 1}] {label}"[: term_w - 2]
+            lines.append(ansi_center(white_fg() + text + RESET, term_w))
+        lines += ["", ansi_center("[1-9] pick   Esc cancel", term_w)]
         sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
         sys.stdout.flush()
-        from belote.ui.render import invalidate_diff
-
         invalidate_diff()
 
         while True:
@@ -218,34 +348,60 @@ class ShopScreen:
                 return None
             if event.key == Key.CHAR and event.char and event.char.isdigit():
                 idx = int(event.char) - 1
-                if 0 <= idx < len(planet_ids):
-                    return planet_ids[idx]
+                if 0 <= idx < len(labels):
+                    return idx
 
     # Card frame width — must match the printable width of the borders in
     # _render_planet_card / _render_item_card. Don't change without re-laying
     # out the art inside.
     _CARD_W = 16
+    # Vertical block: title / money / status / cards (9) / actions /
+    # description / hints, with blank separators → 20 rows.
+    _CONTENT_H = 20
+
+    def _rows(self, term_h: int) -> dict[str, int]:
+        top = max(1, (term_h - self._CONTENT_H) // 2)
+        return {
+            "title": top,
+            "money": top + 2,
+            "status": top + 3,
+            "cards": top + 5,
+            "actions": top + 15,  # cards + 9 (planet height) + 1 blank
+            "desc": top + 17,
+            "hint": top + 19,
+        }
+
+    def _window(self, num_items: int, term_w: int) -> tuple[int, int]:
+        """(first, count) of the cards shown. 5.0.0: a shop can now hold more
+        cards than fit (the Atelier offer, L'Épicier's extra jokers, Le
+        Téléphone), so the strip scrolls to keep the selection on screen."""
+        fit = max(1, (term_w - 2) // self._CARD_W)
+        if num_items <= fit:
+            return 0, num_items
+        sel = min(self.selected, num_items - 1)
+        first = max(0, min(sel - fit + 1, num_items - fit))
+        if sel < first:
+            first = sel
+        return first, fit
 
     def _card_col(self, i: int, num_items: int, term_w: int) -> int:
-        """Column for the i-th *card* (not the action buttons).
+        """Column for the i-th *card* (not the action buttons), or -1 when it
+        is scrolled out of view.
 
-        Centers the row of `num_items` cards across the terminal, tightening
-        the inter-card gap as needed to avoid overflow. Cards may touch at
-        narrow widths; they never overlap and the strip never overflows.
+        Centers the visible cards across the terminal, tightening the gap as
+        needed; cards may touch at narrow widths but never overlap or overflow.
         """
-        if num_items <= 0:
-            return 2
+        first, count = self._window(num_items, term_w)
+        if not first <= i < first + count:
+            return -1
         card_w = self._CARD_W
-        # Try a 2-col gap by default; shrink to 0 if the strip would overflow.
+        slot = i - first
         for gap in (2, 1, 0):
-            strip = num_items * card_w + (num_items - 1) * gap
+            strip = count * card_w + (count - 1) * gap
             if strip <= term_w - 2:
                 start = max(2, (term_w - strip) // 2)
-                return start + i * (card_w + gap)
-        # Even with cards touching (gap=0) we overflow — clamp leftmost to 2
-        # and let the strip extend right; the caller can't render this many
-        # cards at this width anyway.
-        return 2 + i * card_w
+                return start + slot * (card_w + gap)
+        return 2 + slot * card_w
 
     def _render_planet_card(self, item: object, row: int, col: int, is_sel: bool) -> list[str]:
         bc = REVERSE if is_sel else ""
@@ -288,22 +444,96 @@ class ShopScreen:
         )
         return parts
 
+    def _owned_copies(self, item: object) -> int:
+        item_id = getattr(item, "id", None)
+        return sum(1 for j in self.shop.run.jokers if j.id == item_id)
+
     def _render_item_card(self, item: object, row: int, col: int, is_sel: bool) -> list[str]:
+        from ..core.card_mods import CardModOffer
+
         bc = REVERSE if is_sel else ""
         ac = RESET
         # Frame is _CARD_W (16) cells: 14 inner + 2 borders. Names longer than
         # 14 cells used to overflow the frame into the neighbouring card.
         name = str(getattr(item, "name", "?"))[:14]
         cost = getattr(item, "cost", 0)
-        # 4.11.0 Le Téléphone: partner-slot offers are tagged on the blank row.
-        tag = "for partner" if getattr(item, "for_partner", False) else ""
+        # The blank row carries a tag: 4.11.0 Le Téléphone partner offers;
+        # 5.0.0 the Atelier offer's card, and how many copies of an offered
+        # joker you already own (Le Serment wants three).
+        if isinstance(item, CardModOffer):
+            tag = f"on {item.card!r}"
+        elif getattr(item, "for_partner", False):
+            tag = "for partner"
+        else:
+            owned = self._owned_copies(item)
+            tag = f"you own {owned}" if owned else ""
+        price = "free" if cost == 0 else "$" + str(cost)
         return [
             move(row, col) + bc + "┌──────────────┐" + ac + "\n",
             move(row + 1, col) + bc + f"│{gold_fg()}{name:^14}{RESET}{bc}│" + ac + "\n",
             move(row + 2, col) + bc + f"│{green_fg()}{tag:^14}{RESET}{bc}│" + ac + "\n",
-            move(row + 3, col) + bc + f"│{white_fg()}{'$' + str(cost):^14}{RESET}{bc}│" + ac + "\n",
+            move(row + 3, col) + bc + f"│{white_fg()}{price:^14}{RESET}{bc}│" + ac + "\n",
             move(row + 4, col) + bc + "└──────────────┘" + ac + "\n",
         ]
+
+    def _status_line(self) -> str:
+        """5.0.0: medals spent on this shop, else a preview of the next blind
+        (its target and any Contrat Capot / Grand Chelem on offer)."""
+        from ..run.contracts import CONTRACTS, contract_for
+        from ..run.medals import upcoming_blind
+
+        spent = getattr(self, "spent_medals", [])
+        if spent:
+            return "Médailles: " + ", ".join(spent)
+        run = self.shop.run
+        ante, offset, blind = upcoming_blind(run)
+        label = ("Small", "Big", "Boss")[blind]
+        text = f"Next: Ante {ante} · {label} Blind"
+        kind = contract_for(run, ante, offset, blind)
+        if kind is not None:
+            text += f" · {CONTRACTS[kind].name} on offer"
+        pending = len(run.medals)
+        if pending:
+            text += f" · {pending} Médaille(s) waiting"
+        medal = self.shop.skip_offer()
+        if medal is not None:
+            text += f" · K: skip it for {medal.name}"
+        return text
+
+    def _action_label(self, action: str) -> str:
+        if action == "reroll":
+            return (
+                "[ Reroll free ]"
+                if self.shop.reroll_cost == 0
+                else (f"[ Reroll ${self.shop.reroll_cost} ]")
+            )
+        if action == "forge":
+            return f"[ Forge x{self.shop.run.tierce_charges}/3 ]"
+        if action == "loan":
+            from ..run.usurier import LOAN_AMOUNT
+
+            return f"[ Loan ${LOAN_AMOUNT} ]"
+        if action == "repay":
+            run = self.shop.run
+            return f"[ Repay ${min(run.loan_debt, run.economy.money)} ]"
+        return f"[ Fuse x{len(self.shop.available_fusions())} ]"
+
+    def _action_description(self, action: str) -> str:
+        if action == "forge":
+            return "Spend 3 Tierce charges to level up a Planet contract."
+        if action == "fuse":
+            return "Le Serment: fuse a recipe pair, or three copies of a joker into a Juré (✦)."
+        if action == "loan":
+            return (
+                "L'Usurier lends $30 at 20% per ante, compounding. Repay any time; owe $90 "
+                "and he seizes your money, then your jokers."
+            )
+        if action == "repay":
+            return (
+                f"You owe L'Usurier ${self.shop.run.loan_debt} (+20% each ante). "
+                "Pay back as much as you can."
+            )
+        return ""
 
     def _render(self) -> None:
         from belote.ui.fit_guard import require_minimum
@@ -313,75 +543,75 @@ class ShopScreen:
 
         require_minimum(self.reader)
         term_w, term_h = get_term_size()
+        rows = self._rows(term_h)
 
         # Accumulate the entire frame into one buffer so it lands as a single
-        # `sys.stdout.write` + `flush`. Pre-4.6.1 used ~16 bare `print()` calls
-        # per redraw — each its own syscall. Same batched-write convention as
+        # `sys.stdout.write` + `flush`. Same batched-write convention as
         # `belatro/ui/hud.py::_render` and `prompts.py::show_help`.
         parts: list[str] = [clear_screen()]
-
-        # Vertical layout (centered for the planet-card worst case of 9 rows):
-        #   title / blank / money / blank / cards (9) / blank / actions /
-        #   blank / description / blank / hints                 → 19 rows
-        # Compute top so the block sits centered in term_h.
-        content_h = 19
-        top = max(1, (term_h - content_h) // 2)
-        title_row = top
-        money_row = top + 2
-        card_row = top + 4
-        actions_row = top + 14  # card_row + 9 (planet height) + 1 blank
-        desc_row = top + 16
-        hint_row = top + 18
-
         parts.append(
-            move(title_row, 1)
+            move(rows["title"], 1)
             + ansi_center(gold_fg() + BOLD + "=== THE SHOP ===" + RESET, term_w)
             + "\n"
         )
+        debt = self.shop.run.loan_debt
+        owed = f"{white_fg()}   Debt: {red_fg()}${debt}" if debt else ""
         parts.append(
-            move(money_row, 1)
+            move(rows["money"], 1)
             + ansi_center(
-                white_fg() + "Money: " + green_fg() + f"${self.shop.run.economy.money}" + RESET,
+                white_fg()
+                + "Money: "
+                + green_fg()
+                + f"${self.shop.run.economy.money}"
+                + owed
+                + RESET,
                 term_w,
             )
             + "\n"
         )
+        parts.append(
+            move(rows["status"], 1)
+            + ansi_center(menu_art_fg() + self._status_line()[: term_w - 2] + RESET, term_w)
+            + "\n"
+        )
+
+        from belote.ui import hitmap
 
         num_items = len(self.shop.inventory)
-
+        first, count = self._window(num_items, term_w)
+        regions: list[hitmap.Region] = []
         for i, item in enumerate(self.shop.inventory):
             col = self._card_col(i, num_items, term_w)
+            if col < 0:
+                continue
             is_sel = i == self.selected
             if isinstance(item, Planet):
-                parts.extend(self._render_planet_card(item, card_row, col, is_sel))
+                card = self._render_planet_card(item, rows["cards"], col, is_sel)
             else:
-                parts.extend(self._render_item_card(item, card_row, col, is_sel))
+                card = self._render_item_card(item, rows["cards"], col, is_sel)
+            parts.extend(card)
+            regions.append(hitmap.Region(rows["cards"], col, len(card), self._CARD_W, ("item", i)))
+        # Scroll hints when cards are out of view.
+        if first > 0:
+            parts.append(move(rows["cards"] + 2, 1) + gold_fg() + "‹" + RESET)
+        if first + count < num_items:
+            parts.append(move(rows["cards"] + 2, term_w) + gold_fg() + "›" + RESET)
 
-        # Action buttons (reroll, forge) render on their own row BELOW the
-        # cards. Pre-3.7.2 these sat inline mid-card, which overflowed 80-col
-        # terminals when the forge slot appeared. Centering the action strip
-        # avoids that regardless of slot count.
-        reroll_idx = num_items
-        forge_idx = num_items + 1 if self._forge_available() else -1
-        reroll_label = f"[ Reroll ${self.shop.reroll_cost} ]"
-        forge_label = f"[ Forge x{self.shop.run.tierce_charges}/3 ]" if forge_idx >= 0 else ""
-        actions: list[tuple[int, str, bool]] = [
-            (reroll_idx, reroll_label, self.selected == reroll_idx),
-        ]
-        if forge_idx >= 0:
-            actions.append((forge_idx, forge_label, self.selected == forge_idx))
-
-        # Center the action strip: total width = sum(label widths) + 4-col gaps.
-        gap = 4
-        labels_w = sum(len(lbl) for _, lbl, _ in actions) + gap * (len(actions) - 1)
-        start_col = max(2, (term_w - labels_w) // 2)
-        cursor = start_col
-        for _, lbl, sel in actions:
-            bc = REVERSE if sel else ""
-            parts.append(move(actions_row, cursor) + bc + lbl + RESET + "\n")
+        # Action buttons render on their own row BELOW the cards, centered.
+        actions = self._actions()
+        labels = [self._action_label(a) for a in actions]
+        gap = 3
+        labels_w = sum(len(lbl) for lbl in labels) + gap * (len(labels) - 1)
+        cursor = max(2, (term_w - labels_w) // 2)
+        for j, lbl in enumerate(labels):
+            bc = REVERSE if self.selected == num_items + j else ""
+            parts.append(move(rows["actions"], cursor) + bc + lbl + RESET + "\n")
+            regions.append(hitmap.Region(rows["actions"], cursor, 1, len(lbl), ("action", j)))
             cursor += len(lbl) + gap
+        hitmap.set_regions("shop", regions)
 
-        # Selected item description
+        # Selected item / action description
+        desc = ""
         if self.selected < num_items:
             item = self.shop.inventory[self.selected]
             desc = getattr(item, "description", "")
@@ -392,18 +622,12 @@ class ShopScreen:
                 desc = f"[{ed_label}] {desc}"
             if getattr(item, "for_partner", False):
                 desc = f"[Partner slot] {desc}"
+        elif self.selected - num_items < len(actions):
+            desc = self._action_description(actions[self.selected - num_items])
+        if desc:
             parts.append(
-                move(desc_row, 1)
+                move(rows["desc"], 1)
                 + ansi_center(white_fg() + desc[: term_w - 2] + RESET, term_w)
-                + "\n"
-            )
-        elif forge_idx >= 0 and self.selected == forge_idx:
-            parts.append(
-                move(desc_row, 1)
-                + ansi_center(
-                    white_fg() + "Spend 3 Tierce charges to level up a Planet contract." + RESET,
-                    term_w,
-                )
                 + "\n"
             )
 
@@ -412,7 +636,11 @@ class ShopScreen:
             f"← → Navigate   Enter: Buy   S: Sell   C: Consumables ({consumable_count})   "
             "Esc: Continue"
         )
-        parts.append(move(hint_row, 1) + ansi_center(gold_fg() + hint + RESET, term_w) + "\n")
+        parts.append(
+            move(rows["hint"], 1)
+            + ansi_center(gold_fg() + hint[: term_w - 2] + RESET, term_w)
+            + "\n"
+        )
 
         sys.stdout.write("".join(parts))
         sys.stdout.flush()
@@ -440,15 +668,13 @@ class ShopScreen:
             return
 
         term_w, term_h = get_term_size()
-        content_h = 19
-        top = max(1, (term_h - content_h) // 2)
-        card_row = top + 4
-        money_row = top + 2
+        rows = self._rows(term_h)
+        card_row, money_row = rows["cards"], rows["money"]
 
         # Pulse a 16-cell wide gold band across the card's top border. We
         # paint on the same row the card frame currently occupies; the
         # following `_render()` will fully repaint the area.
-        col = self._card_col(sel_idx, num_items_before, term_w)
+        col = max(2, self._card_col(sel_idx, num_items_before, term_w))
         band = gold_fg() + BOLD + "★" * self._CARD_W + RESET
         pulse_text(
             card_row,
@@ -489,9 +715,7 @@ class ShopScreen:
             return
 
         term_w, term_h = get_term_size()
-        content_h = 19
-        top = max(1, (term_h - content_h) // 2)
-        card_row = top + 4
+        card_row = self._rows(term_h)["cards"]
 
         # Wipe the card row with a centered "rerolling..." marker that
         # pulses gold→white→gold. Cheap fade-out cue without per-card art.

@@ -100,18 +100,20 @@ class LaRemontee(Joker):
     rarity = Rarity.RARE
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_early_losses"] = 0
+        state[self.state_key("early_losses")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if event.trick_number <= 3 and team_of(event.winner) == _EW:
-            state[f"{self.id}_early_losses"] = int(state.get(f"{self.id}_early_losses", 0)) + 1
+            state[self.state_key("early_losses")] = (
+                int(state.get(self.state_key("early_losses"), 0)) + 1
+            )
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
         if getattr(event, "re_emit", False):
             return None
         made = event.taker_seat in (Seat.SOUTH, Seat.NORTH) and not event.breakdown.is_failed
-        if made and state.get(f"{self.id}_early_losses", 0) >= 2:
+        if made and state.get(self.state_key("early_losses"), 0) >= 2:
             return JokerResult(times_mult=3.0)
         return None

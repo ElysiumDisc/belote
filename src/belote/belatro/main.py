@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from ..input import KeyReader
     from .ghost_run import GhostRecorder
+    from .partner.story import RoundFacts
     from .progression.save import Profile
     from .run.boss import BossModifier
     from .ui.hud import BelAtroHUD
@@ -76,6 +77,36 @@ def _partner_bid_hint(state: GameState) -> str | None:
     stamped into joker_state by `_round_flags`)."""
     hint = joker_flag(state, "partner_bid_tendency_text")
     return hint if isinstance(hint, str) and hint else None
+
+
+def _gold_sealed_keys(run: BelAtroRun) -> frozenset[str]:
+    """card_keys carrying a Sceau d'Or (5.0.0), plus the four Aces when the
+    run has L'Aristocrate's `gold_seal_aces` flag."""
+    from belote.deck import Card, Rank, Suit
+
+    from .core.card_mods import card_key
+
+    keys = {key for key, mod in run.card_mods.items() if mod.seal == "or"}
+    if run.gold_seal_aces:
+        keys |= {card_key(Card(s, Rank.ACE)) for s in Suit if s.is_card_suit}
+    return frozenset(keys)
+
+
+def _cards_won_by_team(state: BelatroState, team: int, keys: frozenset[str]) -> int:
+    """Cards whose card_key is in `keys` captured by `team` this round
+    (resolved winners, as in `_aces_won_by_team`)."""
+    from belote.deck import Contract
+    from belote.game import compute_trick_winners, team_of
+
+    from .core.card_mods import card_key
+
+    is_sa = state.contract == Contract.SANS_ATOUT
+    winners = compute_trick_winners(state, state.trump, is_sa)
+    return sum(
+        sum(1 for tc in trick if card_key(tc.card) in keys)
+        for trick, w in zip(state.completed_tricks, winners, strict=True)
+        if w is not None and team_of(w) == team
+    )
 
 
 def _aces_won_by_team(state: BelatroState, team: int) -> int:
@@ -294,6 +325,18 @@ class UICallbacks(RoundUICallbacks):
         prompt = f"{coincheur.name} coinched! Surcoinche back?"
         return BelAtroAnnounce.yes_no(prompt, self.reader)
 
+    def prompt_special_contract(self, state: BelatroState, kind: str) -> bool:
+        """5.0.0: declare this contract blind's Contrat Capot / Grand Chelem?"""
+        from .run.contracts import CONTRACTS
+        from .ui.announce import BelAtroAnnounce
+
+        info = CONTRACTS[kind]
+        return BelAtroAnnounce.yes_no(
+            f"{info.name.upper()} — {info.rule}: {info.reward}. Miss and the blind is lost. "
+            "Declare?",
+            self.reader,
+        )
+
     def prompt_heist(self, state: BelatroState) -> bool:
         """4.7.0: Dix de Der Heist declaration prompt.
 
@@ -500,6 +543,9 @@ class BelAtroGame:
                 if not self.run.challenge:
                     self.unlock_tracker.check_ante_unlocks(self.run.ante_number)
                 self._drain_unlock_announcements()
+                # 5.0.0: the player skipped the blind just reached for a medal.
+                if shop.skip_next and not self.run.run_won:
+                    self._skip_blind(shop.skip_medal)
                 if self.run.run_won:
                     if not self.run.challenge:
                         self.unlock_tracker.notify_run_won()
@@ -527,6 +573,51 @@ class BelAtroGame:
             self.run.run_over = True
             return
 
+    def _skip_blind(self, medal_id: str | None) -> None:
+        """5.0.0 Médailles: skip the current (Small / Big) blind — no round,
+        no payout, no shop — take its medal, and move on to the next blind."""
+        run, reader = self.run, self.reader
+        if run is None or reader is None:
+            return
+        from .run import medals as medal_mod
+        from .ui.announce import BelAtroAnnounce
+        from .ui.history import BelAtroHistoryEntry
+
+        if run.blind_index == 0:
+            self._start_ante(run, reader)  # even when its Small Blind is skipped
+        run.blinds_skipped += 1
+        label = ("Small", "Big", "Boss")[run.blind_index]
+        run.history.append(
+            BelAtroHistoryEntry(
+                ante=run.ante_number,
+                blind_label=label,
+                target=run.target_score,
+                boss_name=None,
+                taker_label="—",
+                contract="—",
+                tricks_ns=0,
+                tricks_ew=0,
+                score=0,
+                status="SKIPPED",
+                money_delta=0,
+                decl_summary_ns=(),
+                decl_summary_ew=(),
+            )
+        )
+        if self._ghost_recorder is not None:
+            self._ghost_recorder.note_skip(run.ante_number, run.blind_index, medal_id)
+        if medal_id is not None and medal_id in medal_mod.MEDALS:
+            medal = medal_mod.grant(run, medal_id)
+            BelAtroAnnounce.banner(
+                f"{label} Blind skipped — Médaille: {medal.name} ({medal.description})",
+                reader,
+                hold=2.0,
+            )
+        run.advance_blind()
+        if not run.challenge:
+            self.unlock_tracker.check_ante_unlocks(run.ante_number)
+        self._drain_unlock_announcements()
+
     def _play_blind(self) -> None:
         """Execute one Belote round for the current blind.
 
@@ -537,7 +628,7 @@ class BelAtroGame:
         if run is None or reader is None:
             return
         if run.blind_index == 0:
-            self._roll_ante_theme(run)
+            self._start_ante(run, reader)
         # 3.3.0: snapshots used at end of round to build the [H] history entry.
         history_ante = run.ante_number
         history_blind_index = run.blind_index
@@ -584,9 +675,16 @@ class BelAtroGame:
         trust.auto_capot_used = False
 
         round_flags = self._round_flags(run)
+        # 5.0.0: a contract blind offers its Contrat Capot / Grand Chelem.
+        contract_offer = None if boss is not None else self._offer_contract_blind(run, reader)
+        if contract_offer is not None:
+            from .run.contracts import OFFER_KEY
+
+            round_flags[OFFER_KEY] = contract_offer
         # Per-round deal seed drawn from the run's seeded RNG so a whole run
         # (deals + AI play) replays from run.seed — ghost runs depend on it.
         round_seed = run._get_rng().getrandbits(32)
+        acc.mod_seed = round_seed  # 5.0.0 L'Atelier: Verre / Chance dice
         if self._ghost_recorder is not None:
             self._ghost_recorder.note_round_start(
                 run, boss=boss, round_seed=round_seed, target=effective_target
@@ -629,17 +727,19 @@ class BelAtroGame:
         # 4.8.0 / B4: snapshot for the trust-bar tick animation below.
         pre_trust_value = trust.value
         self._harvest_round_state(run, final_state)
+        self._harvest_card_mods(run, acc)
 
-        survived_via_insurance = False
-        if total < effective_target:
-            survived_via_insurance = self._settle_failed_blind(
-                run, reader, final_state, bd, total, effective_target, lock_trust
-            )
-        else:
-            self._settle_won_blind(
-                run, final_state, total, effective_target, auto_coinche_active, lock_trust
-            )
-        if boss is not None and total >= effective_target and not run.challenge:
+        won, survived_via_insurance, made_contract = self._settle_blind(
+            run,
+            reader,
+            final_state,
+            bd,
+            total,
+            effective_target,
+            auto_coinche_active=auto_coinche_active,
+            lock_trust=lock_trust,
+        )
+        if boss is not None and won and not run.challenge:
             self.unlock_tracker.notify_boss_defeated()
         # Partner-specific trust events (skipped under Le Divorce)
         if not lock_trust:
@@ -653,6 +753,27 @@ class BelAtroGame:
         if trust.value != pre_trust_value:
             trust_bar.animate_change(pre_trust_value, reader)
 
+        # 5.0.0: feats earn a Médaille; a capot stops La Gangrène; the partner
+        # may have something to say about it all.
+        from .partner.story import RoundFacts
+
+        facts = RoundFacts(
+            trust_before=pre_trust_value,
+            trust_after=trust.value,
+            won=won,
+            ns_capot=bd.is_capot and bd.tricks_ns == 8,
+            ns_chute=bd.taker_team == 0 and bd.is_failed,
+            boss_beaten=boss is not None and won,
+            sabotaged=bool(
+                round_flags.get("traitre_active") or round_flags.get("agent_double_joker_active")
+            ),
+            coinche_made=final_state.coinche_level > 0 and bd.taker_team == 0 and not bd.is_failed,
+            insured=survived_via_insurance,
+            ante=history_ante,
+            first_round_of_ante=history_blind_index == 0,
+        )
+        self._after_round_extras(run, reader, acc, facts)
+
         # 3.3.0: append a BelAtro-side history entry (the [H] overlay reads
         # `run.history` via the override hook installed in `start()`).
         self._record_history_entry(
@@ -665,11 +786,183 @@ class BelAtroGame:
             total=total,
             money_delta=run.economy.money - money_before,
             survived_via_insurance=survived_via_insurance,
+            contract=made_contract,
         )
         if self._ghost_recorder is not None and run.history:
             self._ghost_recorder.note_round_result(run, run.history[-1], final_state)
 
     # ── _play_blind phases ──────────────────────────────────────────────
+
+    def _settle_blind(
+        self,
+        run: BelAtroRun,
+        reader: KeyReader,
+        final_state: BelatroState,
+        bd: ScoringBreakdown,
+        total: int,
+        effective_target: int,
+        *,
+        auto_coinche_active: bool,
+        lock_trust: bool,
+    ) -> tuple[bool, bool, str | None]:
+        """Pay out or fail the blind. Returns (won, survived on insurance,
+        the Contrat Capot / Grand Chelem made — or None).
+
+        5.0.0: a declared contract decides the blind on its own — made wins
+        it whatever the score, missed loses it."""
+        from .run.contracts import DECLARED_KEY, contract_made
+
+        declared = final_state._joker_state.get(DECLARED_KEY)
+        contract = declared if isinstance(declared, str) else None
+        made = contract is not None and contract_made(contract, final_state)
+        won = made if contract is not None else total >= effective_target
+        if not won:
+            survived = self._settle_failed_blind(
+                run,
+                reader,
+                final_state,
+                bd,
+                total,
+                effective_target,
+                lock_trust,
+                broken_contract=contract,
+            )
+            return False, survived, None
+        self._settle_won_blind(
+            run, final_state, total, effective_target, auto_coinche_active, lock_trust
+        )
+        if contract is not None:
+            self._reward_contract(run, reader, contract)
+        return True, False, contract
+
+    def _after_round_extras(
+        self, run: BelAtroRun, reader: KeyReader, acc: ScoreAccumulator, facts: RoundFacts
+    ) -> None:
+        """5.0.0: the feat Médaille, La Gangrène's cure, the partner's story."""
+        from .ui.announce import BelAtroAnnounce
+
+        if facts.won and not run.run_over:
+            self._award_feat_medal(
+                run, reader, acc, facts.ns_capot, facts.insured, facts.boss_beaten
+            )
+        if facts.ns_capot and run.gangrene_active:
+            run.gangrene_active = False
+            BelAtroAnnounce.banner("Capot! La Gangrène stops spreading.", reader, hold=1.5)
+        if not run.run_over:
+            self._story_beat(run, reader, facts)
+
+    def _start_ante(self, run: BelAtroRun, reader: KeyReader) -> None:
+        """A new ante: its theme, then (5.0.0) La Gangrène's spread and
+        L'Usurier's interest."""
+        from .run import usurier
+        from .ui.announce import BelAtroAnnounce
+
+        self._roll_ante_theme(run)
+        self._spread_gangrene(run, reader)
+        lines = usurier.accrue(run)
+        if lines:
+            seized = len(lines) > 1
+            BelAtroAnnounce.banner(
+                "  ".join(lines), reader, color="red" if seized else "gold", hold=2.0
+            )
+
+    @staticmethod
+    def _spread_gangrene(run: BelAtroRun, reader: KeyReader) -> None:
+        """5.0.0 La Gangrène: once met, the rot takes another joker at the
+        start of every ante until a capot stops it."""
+        if not run.gangrene_active:
+            return
+        from .run.boss import rot_joker
+        from .ui.announce import BelAtroAnnounce
+
+        rotted = rot_joker(run)
+        if rotted is not None:
+            BelAtroAnnounce.banner(f"La Gangrène spreads: {rotted}", reader, color="red", hold=2.0)
+
+    @staticmethod
+    def _offer_contract_blind(run: BelAtroRun, reader: KeyReader) -> str | None:
+        """5.0.0: announce this blind's Contrat Capot / Grand Chelem (if it
+        is a contract blind) and return its kind for the round flags."""
+        from .run.contracts import CONTRACTS, contract_blind
+        from .ui.announce import BelAtroAnnounce
+
+        kind = contract_blind(run)
+        if kind is None:
+            return None
+        info = CONTRACTS[kind]
+        BelAtroAnnounce.banner(
+            f"{info.name.upper()} on offer — if your team takes the contract, declare it: "
+            f"{info.rule}.",
+            reader,
+            hold=2.5,
+        )
+        return kind
+
+    def _reward_contract(self, run: BelAtroRun, reader: KeyReader, kind: str) -> None:
+        from .run import medals as medal_mod
+        from .run.contracts import CONTRACTS
+        from .ui.announce import BelAtroAnnounce
+
+        info = CONTRACTS[kind]
+        run.capot_contracts_won += 1
+        run.economy.add_money(info.money)
+        if info.extra_slot:
+            run.joker_slots += 1
+        names = [
+            medal_mod.grant(run, medal_mod.pick_medal(run, f"contract{i}")).name
+            for i in range(info.medals)
+        ]
+        BelAtroAnnounce.banner(
+            f"{info.name.upper()} MADE! {info.reward}"
+            + (f" ({', '.join(names)})" if names else ""),
+            reader,
+            hold=2.5,
+        )
+
+    @staticmethod
+    def _award_feat_medal(
+        run: BelAtroRun,
+        reader: KeyReader,
+        acc: ScoreAccumulator,
+        ns_capot: bool,
+        insured: bool,
+        boss: bool = False,
+    ) -> None:
+        from .run import medals as medal_mod
+        from .ui.announce import BelAtroAnnounce
+
+        medal_id = medal_mod.feat_medal(
+            run, capot=ns_capot, reached_at=acc.target_reached_at, insured=insured, boss=boss
+        )
+        if medal_id is None:
+            return
+        run.feat_medal_ante = (run.ante_number, run.endless_ante_offset)
+        medal = medal_mod.grant(run, medal_id)
+        why = "capot" if ns_capot else "survived" if insured else "boss crushed"
+        BelAtroAnnounce.banner(
+            f"Médaille ({why}): {medal.name} — {medal.description}", reader, hold=2.0
+        )
+
+    @staticmethod
+    def _story_beat(run: BelAtroRun, reader: KeyReader, facts: RoundFacts) -> None:
+        from .partner.story import grant, next_beat
+        from .ui.announce import BelAtroAnnounce
+
+        beat = next_beat(run, facts)
+        if beat is None:
+            return
+        grant(run, beat)
+        BelAtroAnnounce.story(beat, run.partner.personality.name, reader)
+
+    @staticmethod
+    def _harvest_card_mods(run: BelAtroRun, acc: ScoreAccumulator) -> None:
+        """5.0.0 L'Atelier: a Verre that shattered this round is gone."""
+        if not acc.shattered:
+            return
+        from .core.card_mods import remove_enhancement
+
+        for key in acc.shattered:
+            remove_enhancement(run.card_mods, key)
 
     @staticmethod
     def _roll_ante_theme(run: BelAtroRun) -> None:
@@ -708,6 +1001,11 @@ class BelAtroGame:
         # fixed for the round (a mid-round La Voûte purchase shouldn't pump an
         # already-resolved heist).
         acc.interest_rate = run.economy.interest_rate
+        # 5.0.0: L'Atelier's per-card mods, and the partner story's one-shot
+        # buff (spent by this round).
+        acc.card_mods = run.card_mods
+        acc.story_buff = dict(run.story_buff)
+        run.story_buff.clear()
         acc.attach_jokers(run.jokers + run.partner.jokers)
         return acc
 
@@ -744,6 +1042,10 @@ class BelAtroGame:
         if run.profile is not None:
             run.profile.discover(boss.id)  # Collection → Bosses tab
         BelAtroAnnounce.boss_reveal(boss, reader)
+        # 5.0.0: run-level reveal effects (La Gangrène's rot).
+        message = boss.on_reveal(run)
+        if message:
+            BelAtroAnnounce.banner(message, reader, color="red", hold=2.0)
         return boss
 
     @staticmethod
@@ -806,18 +1108,15 @@ class BelAtroGame:
         pending = final_state._joker_state.get("_pending_tierce_charge", 0)
         if isinstance(pending, int) and pending > 0:
             run.tierce_charges += pending
-        # Phase 2.1: persist Tout Atout streak between rounds.
-        streak = final_state._joker_state.get("tout_streak_streak", 0)
-        if isinstance(streak, int):
-            run.card_enhancements["tout_streak_streak"] = streak
-        # 4.11.0: run-scoped joker counters (L'Horloger, ...) ride on
-        # card_enhancements between rounds, like the Tout Atout streak.
-        from .items.jokers.tempo import PERSISTENT_JOKER_KEYS
-
-        for key in PERSISTENT_JOKER_KEYS:
-            value = final_state._joker_state.get(key)
-            if isinstance(value, int):
-                run.card_enhancements[key] = value
+        # Run-scoped joker counters (the Tout Atout streak, L'Horloger, ...)
+        # ride on card_enhancements between rounds. 5.0.0: each joker names
+        # its own (`persistent_keys`), namespaced per copy (`state_key`).
+        for joker in (*run.jokers, *run.partner.jokers):
+            for name in joker.persistent_keys:
+                key = joker.state_key(name)
+                value = final_state._joker_state.get(key)
+                if isinstance(value, int):
+                    run.card_enhancements[key] = value
         # Phase 2.3: refresh partner_mood for HUD display.
         run.partner_mood = run.partner.trust.mood()
 
@@ -830,18 +1129,23 @@ class BelAtroGame:
         total: int,
         effective_target: int,
         lock_trust: bool,
+        broken_contract: str | None = None,
     ) -> bool:
-        """Target missed. Returns True when Capot Insurance saved the run."""
+        """Target missed (or a declared Contrat Capot / Grand Chelem broken,
+        5.0.0). Returns True when Capot Insurance saved the run."""
         from .ui.announce import BelAtroAnnounce
 
         survived = False
         # Phase 2.1: Capot Insurance halves the chute loss (one-shot) and defers
-        # run-over by one blind.
-        if bd.is_failed and run.capot_insurance:
+        # run-over by one blind. 5.0.0: it also covers a broken capot contract
+        # — the one thing its name always promised.
+        if (bd.is_failed or broken_contract is not None) and run.capot_insurance:
             run.capot_insurance = False
             survived = True
             BelAtroAnnounce.banner(
-                "[Assurance Capot] Chute pénalité divisée par deux — round survived.",
+                "[Assurance Capot] Contrat brisé — round survived."
+                if broken_contract is not None
+                else "[Assurance Capot] Chute pénalité divisée par deux — round survived.",
                 reader,
                 hold=2.0,
             )
@@ -851,12 +1155,13 @@ class BelAtroGame:
             self._reconcile_bonus_money(final_state._bonus_money)
         else:
             run.run_over = True
-            BelAtroAnnounce.banner(
-                f"RUN OVER — Failed to meet target {effective_target} (scored {total}).",
-                reader,
-                color="red",
-                hold=2.5,
-            )
+            if broken_contract is not None:
+                from .run.contracts import CONTRACTS
+
+                message = f"RUN OVER — {CONTRACTS[broken_contract].name} broken."
+            else:
+                message = f"RUN OVER — Failed to meet target {effective_target} (scored {total})."
+            BelAtroAnnounce.banner(message, reader, color="red", hold=2.5)
         if not lock_trust:
             run.partner.trust.blind_failed()
         return survived
@@ -881,11 +1186,13 @@ class BelAtroGame:
         self._reconcile_bonus_money(final_state._bonus_money)
         if final_state._joker_state.get("puriste_triggered"):
             run.economy.add_money(max(0, margin // 10))  # Le Puriste: double base payout
-        # L'Aristocrate deck: +$1 per Ace captured by NS team this round.
-        if run.gold_seal_aces:
-            aces_won = _aces_won_by_team(final_state, team=0)
-            if aces_won > 0:
-                run.economy.add_money(aces_won)
+        # Sceau d'Or (5.0.0 L'Atelier; L'Aristocrate's four Aces): +$1 per
+        # gold-sealed card captured by the NS team this round.
+        gold = _gold_sealed_keys(run)
+        if gold:
+            sealed_won = _cards_won_by_team(final_state, 0, gold)
+            if sealed_won > 0:
+                run.economy.add_money(sealed_won)
         if not lock_trust:
             if total >= effective_target * 1.5:
                 run.partner.trust.big_margin_win()
@@ -909,6 +1216,7 @@ class BelAtroGame:
         total: int,
         money_delta: int,
         survived_via_insurance: bool,
+        contract: str | None = None,
     ) -> None:
         """Build and append one BelAtroHistoryEntry to `self.run.history`.
 
@@ -942,7 +1250,9 @@ class BelAtroGame:
         else:
             contract_str = "—"
 
-        if total >= target and bd.is_capot and bd.taker_team == 0:
+        if contract == "chelem":
+            status = "CHELEM"  # 5.0.0: a made Grand Chelem
+        elif contract == "capot" or (total >= target and bd.is_capot and bd.taker_team == 0):
             status = "CAPOT"
         elif total >= target:
             status = "WON"

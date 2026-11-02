@@ -277,6 +277,13 @@ def show_stats(reader: KeyReader) -> None:
     lines.append(f"  Capots: {stats.capots_achieved:<6} Max Streak: {stats.max_capot_streak}")
     lines.append("")
 
+    # ── 5.0.0: Le Carnet de Parties — the last five games ───────────────
+    from ..carnet import carnet_lines
+
+    lines.append(f"  {UNDERLINE}Le Carnet de Parties{RESET}")
+    lines.extend(carnet_lines(stats.recent_games))
+    lines.append("")
+
     # ── Expansion sections (e.g. BelAtro, registered by the entry point) ──
     for section in _STATS_SECTIONS:
         lines.extend(section())

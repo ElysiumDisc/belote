@@ -131,11 +131,12 @@ def profile() -> Profile:
 
 def test_collection_browse_categories_and_items(tui: TUI, profile: Profile) -> None:
     first_joker = next(iter(registry.jokers.values()))
-    r = tui.reader("down", "down", "up", "right", "right", "right", "right", "left", "q")
+    # 5.0.0: Recipes and Médailles sit between Jokers and Tarots.
+    r = tui.reader("down", "down", "up", *["right"] * 6, "left", "q")
     show_collection(r.as_reader(), profile)
     assert r.exhausted
     text = tui.text
-    for cat in ("Jokers", "Tarots", "Planets", "Vouchers"):
+    for cat in ("Jokers", "Recipes", "Médailles", "Tarots", "Planets", "Vouchers"):
         assert f"COLLECTION - {cat} (2 Discovered)" in text
     assert first_joker.name in text
     assert "??? (Undiscovered)" in text

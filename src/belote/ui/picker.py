@@ -33,7 +33,13 @@ def pick_option(
         while True:
             _paint(title, subtitle, options, sel)
             ev = reader.read()
-            if ev.key in (Key.UP, Key.LEFT):
+            if ev.key == Key.MOUSE:  # 5.0.0: a click picks the option
+                from . import hitmap
+
+                clicked = hitmap.hit("menu", ev.pos)
+                if isinstance(clicked, int):
+                    return clicked
+            elif ev.key in (Key.UP, Key.LEFT):
                 sel = (sel - 1) % len(options)
             elif ev.key in (Key.DOWN, Key.RIGHT):
                 sel = (sel + 1) % len(options)
@@ -62,7 +68,12 @@ def _paint(title: str, subtitle: str, options: Sequence[str], sel: int) -> None:
     lines += ["", f"{light_gray_fg()}↑/↓ Select   Enter Confirm   Esc Back{RESET}"]
     top = max(1, (term_h - len(lines)) // 2)
     out = [clear_screen(), hide_cursor()]
-    for i, line in enumerate(lines):
-        out.append(f"\x1b[{top + i};1H{ansi_center(line, term_w)}")
+    centered = [ansi_center(line, term_w) for line in lines]
+    for i, line in enumerate(centered):
+        out.append(f"\x1b[{top + i};1H{line}")
     sys.stdout.write("".join(out))
     sys.stdout.flush()
+    from . import hitmap
+
+    labels = [(f"{i + 1}. {opt}", i) for i, opt in enumerate(options)]
+    hitmap.targets_from_lines("menu", centered, labels, first_row=top)

@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-11-02
+
+BelAtro's depth release: the joker engine made safe for duplicate copies
+(verified byte-identical over 800 seeded BelAtro rounds with the new content
+masked; classic rounds untouched), then six systems built on it, plus Le
+Carnet de Parties for Classic; L'Usurier and mouse support. Tests 1954 → 2055.
+
+### Added
+- **L'Atelier — per-card enhancements & seals.** Each of the 32 cards can
+  carry one enhancement and one seal, bought from an Atelier offer present in
+  every shop and kept for the run (`BelAtroRun.card_mods`,
+  `core/card_mods.py`). They trigger on **capture**, not play — whoever held
+  the card, it pays when your team wins its trick. Verre (points count
+  twice; 1 in 4 it shatters, the trick scores 0 and the Verre is gone), Acier
+  (trick jokers trigger again), Chance (seeded random reward), Sceau Rouge
+  (+2 Mult when it takes the trick), Sceau Bleu (round-end jokers trigger
+  again), Sceau d'Or (+$1; L'Aristocrate's four Aces now carry one). New
+  joker hook `on_card_captured` (`CardCapturedEvent`) and four jokers on it:
+  Le Vitrier, Le Ferronnier, La Voyante, Le Sigillaire. Inventory lists the
+  modded cards.
+- **Le Serment — joker fusion.** Owning three copies of a joker lets you Fuse
+  them into one **Juré** copy (✦) whose Chips / Mult / $ are doubled (a
+  ×Mult's bonus too: ×1.5 → ×2). Six recipes fuse two named jokers into a
+  unique one: Le Général (Maréchal + Capitaine), Le Tambour-Major (Sergent +
+  Métronome), L'Alpha et l'Oméga (Premier Sang + Dernier Mot), Le Couple
+  Royal (Rebelle + Écho de Rebelote), Le Corsaire (Contrebandier + Maître
+  d'Atout) and Lucifer (Traître + Démon — the curse fuses too). Fusion jokers
+  are never stocked. The Collection gains a hidden **Recipes** tab (each
+  revealed when first made) and a **Médailles** tab.
+- **Médailles.** Press **K** in the shop to skip the next Small or Big Blind
+  — no round, no payout, no shop — for its Médaille (shown up front). A
+  capot, crushing a Boss Blind (target reached by trick 4) or surviving on
+  Capot Insurance also earns one (one feat per Ante). Eight Médailles: Le
+  Sommelier (free rerolls), L'Épicier (+2 jokers), L'Antiquaire (an edition
+  joker), Le Tailleur (free Atelier upgrade), Le Mécène (free jokers), L'Écho
+  (copies of your jokers), Le Cartomancien (free tarot), La Cagnotte (double
+  your money, max +$20). The shop shows the next blind and any medals spent.
+- **Contrat Capot & Grand Chelem.** From Ante 2, some Big Blinds are seeded
+  contract blinds. Once your team holds the contract you may declare it:
+  take all 8 tricks and the blind is won whatever the score (+$10, a
+  Médaille); the Grand Chelem (Ante 5+, and you win 5+ tricks yourself) pays
+  +$25, +1 joker slot and two Médailles. A broken contract loses the blind —
+  Capot Insurance now covers it once. History shows CAPOT / CHELEM.
+- **Partner story beats.** Twelve café-text interstitials fire on the
+  moments that matter — betrayal after Le Traître, a reconciliation capot,
+  crossing trust thresholds, a first boss, a chute, midnight at Ante 6 —
+  once per run each, each granting a one-shot buff (chips / Mult / ×Mult next
+  round, money, or trust).
+- **La Gangrène** (boss 25): rots one of your jokers into a corrupted one for
+  good on reveal, then another at the start of every Ante until your team
+  wins a round by capot. New boss hook `BossModifier.on_reveal(run)`.
+- **L'Usurier — a loan in the shop.** From Ante 2 the moneylender visits
+  about half the shops (seeded) and lends $30 — one loan at a time — at 20%
+  per ante, compounding (`run/usurier.py`). Repay any part in any shop (the
+  Repay button stays while you owe). The cash feeds La Voûte's interest and
+  the Heist's wallet, but the debt outgrows the $5 interest cap: at $90 he
+  seizes your money, then your jokers (rightmost first, corrupted excepted).
+  Shown in the shop's money line and the inventory; recorded in ghost runs.
+  Named for the moneylender because Le Prêteur is already a joker.
+- **Mouse support (SGR mouse mode).** The Unix reader parses SGR mouse
+  reports from the same stdin stream as the keys (`ESC [ < b ; col ; row M`):
+  a left click is `Key.MOUSE` with `KeyEvent.pos`, the wheel arrives as
+  ↑ / ↓, releases and motion are swallowed (they can't dismiss an "any key"
+  screen). Renderers record click targets in `ui/hitmap.py`: click a card or
+  a bid to select it and again to play / bid it (illegal cards ignore
+  clicks); in the shop, click an offer or button to select it and again to
+  buy / press it. Menus (main, BelAtro, Hot-seat & Spectate, theme / AI
+  pickers, ghost runs) pick on a single click; Settings rows and their
+  sub-screens (card back / frame, Controls, Theme files), the deck picker
+  and AI seats select first, act on the second click. The Collection (tabs,
+  items), Boss Rush (labels select, ◀ / ▶ step, Start), the rules pages'
+  footer, `[Y]es` / `[N]o` and the coinche / surcoinche prompts are
+  clickable; a click pauses the ghost-run viewer
+  (`hitmap.targets_from_lines` finds each label in a painted screen, so
+  menus need no coordinate math).
+  Settings → Mouse (default on; `BELOTE_NO_MOUSE=1` forces off) — turning it
+  off gives the terminal's text selection back.
+- **Le Carnet de Parties** (Classic): the Statistics screen lists your last
+  five finished games with a one-line verdict ("You chutéed on a 92 vs 94 —
+  brutal"); the game-over screen shows the game's own.
+
+### Changed
+- **Duplicate jokers are safe.** Every joker keys its joker_state through
+  `Joker.state_key(...)`: the first copy keeps its historical keys, later
+  copies get `id#2`, `id#3`… (`assign_copy_indices`). Run-scoped counters are
+  declared per joker (`persistent_keys`) and harvested per copy. The shop
+  sometimes offers a copy of a joker you own (12% per offer).
+- New `BelAtroRun.add_joker` — the one acquisition path (copy index +
+  purchase hook) used by the shop, tarots and fusion.
+- The shop's card strip scrolls when there are more offers than fit; prices
+  read "free" at $0; a joker you already own shows "you own N".
+- Shop generation split into per-offer helpers (verified identical on 240
+  seeded shop rolls); `_play_blind` settlement extracted.
+
+### Fixed
+- **The round-2 bid box was clipped off the screen** at nearly every size
+  (the table is fitted for card play; the 7-row box overflowed it), hiding
+  the options — only the quick keys worked. It now takes the one-line form
+  when it doesn't fit (the box still shows on very tall terminals).
+- **Le Jugement skipped a granted joker's purchase hook** — a Le Traître
+  rolled from the tarot never applied its sabotage curse.
+- A second Le Démon (now possible) pays its own trust cost.
+
 ## [4.11.0] - 2026-11-01
 
 A big foundation-and-features release: the four largest modules split into

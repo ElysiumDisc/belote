@@ -34,7 +34,7 @@ from .game import (
 )
 from .gameflow import create_ai_players, run_round
 from .input import Key, KeyReader, key_label
-from .stats import flush_stats, update_stats_game
+from .stats import add_recent_game, flush_stats, update_stats_game
 from .table_modes import HOTSEAT_PRESETS, SOLO, SpectatorReader, TableMode, hotseat, spectate
 from .ui import (
     show_final_screen,
@@ -178,6 +178,7 @@ def _play_classic_game(
 
     watch = _Spectator(reader, mode) if mode.pace is not None else None
     round_reader: KeyReader = watch.reader if watch is not None else reader
+    verdict: str | None = None  # 5.0.0: Le Carnet's line for this game
     while state.phase != Phase.GAME_OVER:
         if watch is not None and not watch.before_round(len(state.score_history) + 1):
             return
@@ -203,9 +204,9 @@ def _play_classic_game(
         # re-checked targets and forced GAME_OVER unconditionally, breaking
         # the tie-breaker.
         if state.phase == Phase.GAME_OVER and mode.records_stats:
-            _record_game_over(state, diffs_map, target, reader)
+            verdict = _record_game_over(state, diffs_map, target, reader)
 
-    _game_over_screen(state, reader)
+    _game_over_screen(state, reader, verdict)
 
 
 class _Spectator:
@@ -243,8 +244,9 @@ class _Spectator:
 
 def _record_game_over(
     state: GameState, diffs_map: dict[Seat, str], target: int, reader: KeyReader
-) -> None:
-    """Persist the finished game's stats and toast any new achievements."""
+) -> str:
+    """Persist the finished game's stats and toast any new achievements.
+    Returns the game's Le Carnet de Parties verdict (5.0.0)."""
     ns, ew = state.team_scores
     unique_diffs = set(diffs_map.values())
     difficulty_str = next(iter(unique_diffs)) if len(unique_diffs) == 1 else "mixed"
@@ -253,19 +255,29 @@ def _record_game_over(
         num_rounds=len(state.score_history),
         difficulty=difficulty_str,
     )
+    # 5.0.0 Le Carnet de Parties: this game, with its one-line verdict.
+    from . import carnet
+
+    won = ns >= target and ns > ew
+    entry = carnet.record_game(state, won=won, difficulty=difficulty_str)
+    add_recent_game(entry)
     flush_stats()
     for achievement in unlocked:
         achievement_toast(achievement, reader)
+    return str(entry["verdict"])
 
 
-def _game_over_screen(state: GameState, reader: KeyReader) -> None:
-    """Final scores; H opens the round history, Enter/Q returns to the menu."""
+def _game_over_screen(state: GameState, reader: KeyReader, verdict: str | None = None) -> None:
+    """Final scores; H opens the round history, Enter/Q returns to the menu.
+    5.0.0: a recorded game shows its Le Carnet de Parties verdict."""
 
     def paint() -> None:
         # Raw mode is active (OPOST off), so line breaks must be "\r\n" — a
         # bare "\n" staircases.
         show_final_screen(state)
         sys.stdout.write(f"\r\n  {BOLD}{gold_fg()}GAME OVER{RESET}")
+        if verdict:
+            sys.stdout.write(f"\r\n  {white_fg()}Carnet: {verdict}{RESET}")
         quit_k, hist_k = key_label("quit"), key_label("history")
         sys.stdout.write(f"\r\n  {white_fg()}[Enter/{quit_k}] Menu  [{hist_k}] History{RESET} ")
         sys.stdout.flush()

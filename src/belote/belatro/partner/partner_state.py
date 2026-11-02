@@ -38,6 +38,10 @@ class PartnerState:
     def equip_joker(self, joker: Joker, run: BelAtroRun | None = None) -> bool:
         if len(self.jokers) < self.joker_slots:
             self.jokers.append(joker)
+            from ..items.base import assign_copy_indices
+
+            # 5.0.0: a copy of a joker the player owns keys its own state.
+            assign_copy_indices([*(run.jokers if run is not None else []), *self.jokers])
             # Fire the joker's purchase hook when a run is provided. The
             # shop path equips through this method; passing `run` lets
             # purchase-time effects (e.g. permanent stat boosts) apply

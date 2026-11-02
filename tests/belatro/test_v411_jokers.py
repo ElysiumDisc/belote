@@ -210,6 +210,7 @@ def test_horloger_counter_survives_between_rounds_via_harvest() -> None:
     from belote.belatro.main import BelAtroGame
 
     run = BelAtroRun(seed=1)
+    run.jokers.append(LHorloger())  # harvest reads the owned jokers' persistent_keys
     _, st = play([LHorloger()], round_end(S), flags=BelAtroGame._round_flags(run))
     BelAtroGame._harvest_round_state(run, st)
     assert run.card_enhancements[HORLOGER_KEY] == 1
@@ -333,7 +334,7 @@ def test_collection_hides_the_secret_until_unlocked() -> None:
     assert "Bosses" in dict(cats)
     profile.unlock("le_petit_poucet")
     cats, hints = collection_categories(profile)
-    assert LePetitPoucet in dict(cats)["Jokers"] and not hints
+    assert LePetitPoucet in dict(cats)["Jokers"] and "Jokers" not in hints
 
 
 def test_collection_screen_shows_riddle_and_bosses_tab(tui: Any) -> None:

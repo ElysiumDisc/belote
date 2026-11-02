@@ -83,7 +83,7 @@ class QuinteRoyale(Joker):
             and event.points >= 100
         ):
             # Quinte = 100 pts in classic belote scoring; mark for round-end mult.
-            state[f"{self.id}_armed"] = True
+            state[self.state_key("armed")] = True
         return None
 
     def on_round_end(self, event: RoundEndEvent, state: dict[str, Any]) -> JokerResult | None:
@@ -91,7 +91,7 @@ class QuinteRoyale(Joker):
         # so a re-emit would silently disarm without paying out. Skip entirely.
         if getattr(event, "re_emit", False):
             return None
-        if state.pop(f"{self.id}_armed", False) and not event.breakdown.is_failed:
+        if state.pop(self.state_key("armed"), False) and not event.breakdown.is_failed:
             return JokerResult(times_mult=4.0)
         return None
 

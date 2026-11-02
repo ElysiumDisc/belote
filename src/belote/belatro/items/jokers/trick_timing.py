@@ -17,16 +17,16 @@ class LePremierSang(Joker):
     cost = 6
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_active"] = False
+        state[self.state_key("active")] = False
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         # Arm on a trick-1 NS win, then keep paying out +2 Mult on every
         # subsequent NS-won trick for the rest of the round.
-        active = state.get(f"{self.id}_active", False)
+        active = state.get(self.state_key("active"), False)
         if event.trick_number == 1:
             if team_of(event.winner) == 0:
-                state[f"{self.id}_active"] = True
+                state[self.state_key("active")] = True
                 return JokerResult(add_mult=2.0)
             return None
         if active and team_of(event.winner) == 0:
@@ -46,18 +46,18 @@ class LeSergent(Joker):
     cost = 7
 
     def on_round_start(self, state: dict[str, Any]) -> JokerResult | None:
-        state[f"{self.id}_streak"] = 0
+        state[self.state_key("streak")] = 0
         return None
 
     def on_trick_won(self, event: TrickWonEvent, state: dict[str, Any]) -> JokerResult | None:
         if team_of(event.winner) == 0:
-            streak = state.get(f"{self.id}_streak", 0) + 1
-            state[f"{self.id}_streak"] = streak
+            streak = state.get(self.state_key("streak"), 0) + 1
+            state[self.state_key("streak")] = streak
             # +0.5 Mult per consecutive win (+0.5, +1.0, +1.5, ...), capped at
             # +2.0 per trick so a full 8-trick streak can't snowball (uncapped
             # it would total +18 Mult on a 7-cost joker).
             return JokerResult(add_mult=min(0.5 * streak, _SERGENT_MAX_MULT))
-        state[f"{self.id}_streak"] = 0
+        state[self.state_key("streak")] = 0
         return None
 
 

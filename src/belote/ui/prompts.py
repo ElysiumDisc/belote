@@ -30,7 +30,7 @@ from ..game import (
     sort_south_hand,
     team_of,
 )
-from ..input import Key, KeyReader, key_label, typed
+from ..input import Key, KeyEvent, KeyReader, key_label, typed
 from ..rules import RULES_CONTENT, RulesPage
 from ..themes import theme_manager
 from .render import display, get_term_size, invalidate_diff
@@ -154,20 +154,7 @@ def prompt_card(
     state = sort_south_hand(state)
     hand = state.hand_of(Seat.SOUTH)
     legal = legal_cards(state, Seat.SOUTH)
-
-    if not hand:
-        raise ValueError("No cards in hand")
-    if not legal:
-        # 4.7.1 B2: Belote's suit-follow / overtrump rules guarantee at least
-        # one legal card whenever the hand is non-empty. Silently substituting
-        # `hand[0]` here would let an illegal card reach `play_card` if
-        # `legal_cards` ever regresses. Match the AI-path contract
-        # (`ai.py::decide_card`) and fail loudly instead.
-        raise AssertionError(
-            f"legal_cards returned empty for non-empty hand "
-            f"(seat=SOUTH, phase={state.phase}, trump={state.trump}, "
-            f"contract={state.contract}, hand_size={len(hand)})"
-        )
+    _require_playable(state, hand, legal)
 
     # Start selection on the first legal card
     sel = next((i for i, c in enumerate(hand) if c in legal), 0)
@@ -206,8 +193,69 @@ def prompt_card(
                 choice = _card_quick_key(event.char.lower(), hand, legal)
                 if choice is not None:
                     return choice, state
+            case Key.MOUSE:
+                # 5.0.0: click a legal card to select it, again to play it.
+                clicked = _clicked_card(event.pos, hand, legal)
+                if clicked is not None and clicked == sel:
+                    return hand[sel], state
+                sel = sel if clicked is None else clicked
     # Unreachable: the while(True) above only exits via return.
     raise AssertionError("prompt_card loop fell through without returning")
+
+
+def _require_playable(state: GameState, hand: tuple[Card, ...], legal: tuple[Card, ...]) -> None:
+    """4.7.1 B2: Belote's suit-follow / overtrump rules guarantee at least one
+    legal card whenever the hand is non-empty. Silently substituting `hand[0]`
+    would let an illegal card reach `play_card` if `legal_cards` ever
+    regressed; match the AI-path contract (`ai.py::decide_card`) and fail
+    loudly instead."""
+    if not hand:
+        raise ValueError("No cards in hand")
+    if not legal:
+        raise AssertionError(
+            f"legal_cards returned empty for non-empty hand "
+            f"(seat=SOUTH, phase={state.phase}, trump={state.trump}, "
+            f"contract={state.contract}, hand_size={len(hand)})"
+        )
+
+
+def _clicked_card(
+    pos: tuple[int, int] | None, hand: tuple[Card, ...], legal: tuple[Card, ...]
+) -> int | None:
+    """Index of the legal hand card under a click (from the hit map the last
+    `display()` recorded), or None. Illegal cards ignore clicks: Enter on an
+    illegal selection would play the *nearest* legal card instead."""
+    from . import hitmap
+
+    idx = hitmap.hit("hand", pos)
+    if isinstance(idx, int) and 0 <= idx < len(hand) and hand[idx] in legal:
+        return idx
+    return None
+
+
+def _choice_line(prompt: str, choices: list[tuple[str, bool]]) -> bool:
+    """Paint a one-line yes / no prompt above the bottom row and record its
+    choices as click targets (5.0.0, namespace "choice"). Returns True."""
+    from . import hitmap
+
+    term_w, term_h = get_term_size()
+    row = max(1, term_h - 2)
+    line = ansi_center(prompt, term_w)
+    sys.stdout.write(f"\x1b[{row};1H\x1b[2K{line}")
+    sys.stdout.flush()
+    invalidate_diff()
+    hitmap.targets_from_lines("choice", [line], choices, first_row=row, pad=1)
+    return True
+
+
+def _clicked_choice(event: KeyEvent) -> bool | None:
+    """The yes / no choice a click landed on, or None."""
+    from . import hitmap
+
+    if event.key != Key.MOUSE:
+        return None
+    clicked = hitmap.hit("choice", event.pos)
+    return clicked if isinstance(clicked, bool) else None
 
 
 def prompt_coinche(state: GameState, reader: KeyReader) -> bool:
@@ -226,13 +274,12 @@ def prompt_coinche(state: GameState, reader: KeyReader) -> bool:
         f"{BOLD}{gold_fg()}Coinche?{RESET}  {white_fg()}{taker_label} took the bid. "
         f"Press [C] to coinche (×2), [Enter] to accept.{RESET}"
     )
-    term_w, term_h = get_term_size()
-    row = max(1, term_h - 2)
-    sys.stdout.write(f"\x1b[{row};1H\x1b[2K{ansi_center(prompt, term_w)}")
-    sys.stdout.flush()
-    invalidate_diff()
+    _choice_line(prompt, [("[C] to coinche", True), ("[Enter] to accept", False)])
     while True:
         event = reader.read()
+        clicked = _clicked_choice(event)
+        if clicked is not None:
+            return clicked
         if event.key in (Key.QUIT, Key.EOF, Key.ESC, Key.ENTER):
             return False
         if event.key == Key.CHAR and event.char and event.char.lower() == "c":
@@ -249,13 +296,12 @@ def prompt_surcoinche(reader: KeyReader, coincheur_label: str) -> bool:
         f"{BOLD}{gold_fg()}Surcoinche?{RESET}  {white_fg()}{coincheur_label} "
         f"coinched! Press [S] to surcoinche (×4), [Enter] to accept ×2.{RESET}"
     )
-    term_w, term_h = get_term_size()
-    row = max(1, term_h - 2)
-    sys.stdout.write(f"\x1b[{row};1H\x1b[2K{ansi_center(prompt, term_w)}")
-    sys.stdout.flush()
-    invalidate_diff()
+    _choice_line(prompt, [("[S] to surcoinche", True), ("[Enter] to accept", False)])
     while True:
         event = reader.read()
+        clicked = _clicked_choice(event)
+        if clicked is not None:
+            return clicked
         if event.key in (Key.QUIT, Key.EOF, Key.ESC, Key.ENTER):
             return False
         if typed(event, "s"):  # S is also the DOWN alias — match the letter
@@ -305,6 +351,15 @@ def prompt_bid(state: GameState, reader: KeyReader) -> Suit | str | ExtensionKey
                 bid = _bid_quick_key(event.char.lower(), options)
                 if not isinstance(bid, _NoBidKey):
                     return bid
+            case Key.MOUSE:
+                # 5.0.0: click a bid to select it, click it again to bid it.
+                from . import hitmap
+
+                clicked = hitmap.hit("bid", event.pos)
+                if isinstance(clicked, int) and 0 <= clicked < len(options):
+                    if clicked == sel:
+                        return options[sel]
+                    sel = clicked
 
 
 def _help_sections() -> list[tuple[str, list[tuple[str, str]]]]:
@@ -394,6 +449,21 @@ def show_help(reader: KeyReader) -> None:
     invalidate_diff()
 
 
+def _footer_click(event: KeyEvent) -> KeyEvent:
+    """5.0.0: a click on the rules footer's Back / language toggle, as the
+    key it stands for (other events pass through)."""
+    from . import hitmap
+
+    if event.key != Key.MOUSE:
+        return event
+    clicked = hitmap.hit("menu", event.pos)
+    if clicked == "back":
+        return KeyEvent(Key.ESC)
+    if clicked == "lang":
+        return KeyEvent(Key.CHAR, "l")
+    return event
+
+
 def show_rules(reader: KeyReader) -> None:
     """Display scrollable rules and history in EN/FR."""
     lang = "en"
@@ -440,14 +510,21 @@ def show_rules(reader: KeyReader) -> None:
         # Window the lines
         view_h = term_h - 4
         scroll = max(0, min(scroll, len(all_lines) - view_h))
-        visible_lines = all_lines[scroll : scroll + view_h]
+        visible_lines = [ansi_center(line, term_w) for line in all_lines[scroll : scroll + view_h]]
 
         out = clear_screen() + hide_cursor()
-        rendered = "\r\n".join(ansi_center(line, term_w) for line in visible_lines)
-        sys.stdout.write("".join([out, rendered]))
+        sys.stdout.write("".join([out, "\r\n".join(visible_lines)]))
         sys.stdout.flush()
+        from . import hitmap
 
-        event = reader.read()
+        # 5.0.0 mouse: the footer's two actions (the wheel scrolls).
+        hitmap.targets_from_lines(
+            "menu",
+            visible_lines,
+            [("[L] to Toggle Language", "lang"), ("[Q/Enter] Back", "back")],
+            pad=0,
+        )
+        event = _footer_click(reader.read())
         match event.key:
             case Key.QUIT | Key.ENTER | Key.ESC | Key.EOF:
                 invalidate_diff()

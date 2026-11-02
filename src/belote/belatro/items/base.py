@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from belote.deck import Card, Suit
 
@@ -12,6 +13,7 @@ if TYPE_CHECKING:
     from ..engine.event_bus import (
         BeloteAnnouncedEvent,
         BidMadeEvent,
+        CardCapturedEvent,
         DeclarationScoredEvent,
         RoundEndEvent,
         TrickWonEvent,
@@ -96,6 +98,36 @@ class Joker(ABC):
     # `name` for instances that don't set their own. Resolved lazily so the
     # default doesn't snapshot during class definition before name is set.
     _shortcode_override: str = ""
+    # 4.12.0: duplicate copies are safe. Every joker keys its per-round
+    # joker_state entries through `state_key(...)`. The first copy keys on its
+    # bare id (the historical `f"{id}_..."` keys, so tests, ghost files and
+    # run-scoped counters are unchanged); later copies key on "id#2",
+    # "id#3"… so two copies never share — and corrupt — a counter.
+    # `assign_copy_indices` hands the indices out; per instance once set.
+    copy_index: int = 0
+    # 4.12.0 Le Serment: three copies sworn into one Arc-en-ciel joker. The
+    # accumulator doubles every Chips / Mult / $ it pays (`doubled_result`).
+    sworn: bool = False
+    # joker_state key *names* (see `state_key`) that outlive the round:
+    # `BelAtroGame._harvest_round_state` copies `state_key(name)` into
+    # `run.card_enhancements`, which seeds the next round's joker_state.
+    persistent_keys: ClassVar[tuple[str, ...]] = ()
+    # 4.12.0: fusion results (Le Serment recipes) never appear in the shop.
+    shop_excluded: ClassVar[bool] = False
+
+    @property
+    def state_prefix(self) -> str:
+        """The joker_state namespace of this copy: the id, or "id#N"."""
+        return self.id if self.copy_index == 0 else f"{self.id}#{self.copy_index + 1}"
+
+    def state_key(self, name: str) -> str:
+        """This copy's joker_state key for `name` (``f"{state_prefix}_{name}"``)."""
+        return f"{self.state_prefix}_{name}"
+
+    @property
+    def display_name(self) -> str:
+        """Name with the Arc-en-ciel mark of a sworn joker."""
+        return f"{self.name} ✦" if self.sworn else self.name
 
     @property
     def shortcode(self) -> str:
@@ -123,6 +155,12 @@ class Joker(ABC):
         return None
 
     def on_bid(self, event: BidMadeEvent, state: dict[str, Any]) -> JokerResult | None:
+        return None
+
+    def on_card_captured(
+        self, event: CardCapturedEvent, state: dict[str, Any]
+    ) -> JokerResult | None:
+        """5.0.0: your team captured an enhanced / sealed card (L'Atelier)."""
         return None
 
     def on_purchase(self, run: BelAtroRun) -> None:  # noqa: B027
@@ -217,6 +255,40 @@ class Voucher(ABC):
     def _apply_once(self, run: BelAtroRun) -> None:
         """Subclass-defined permanent effect. Called exactly once per run."""
         ...
+
+
+def assign_copy_indices(jokers: Iterable[Joker]) -> None:
+    """Give every copy of the same joker its own `copy_index` (4.12.0).
+
+    Walks `jokers` in order; a joker whose index is already taken by an
+    earlier copy of the same id gets the lowest free one. Indices already
+    unique are left alone, so a copy keeps its joker_state namespace — and
+    its run-scoped counters — for the rest of the run, even after another
+    copy is sold. Idempotent.
+    """
+    taken: dict[str, set[int]] = {}
+    for joker in jokers:
+        joker_id = getattr(joker, "id", None)
+        if joker_id is None:
+            continue  # test doubles without an id have no state namespace
+        used = taken.setdefault(joker_id, set())
+        if joker.copy_index in used:
+            index = 0
+            while index in used:
+                index += 1
+            joker.copy_index = index
+        used.add(joker.copy_index)
+
+
+def doubled_result(result: JokerResult) -> JokerResult:
+    """Le Serment's Arc-en-ciel payout: Chips, +Mult and $ doubled, and a
+    ×Mult's bonus doubled (×1.5 → ×2, ×3 → ×5)."""
+    return JokerResult(
+        add_chips=result.add_chips * 2,
+        add_mult=result.add_mult * 2,
+        times_mult=(1.0 + 2 * (result.times_mult - 1.0)) if result.times_mult else 0.0,
+        add_money=result.add_money * 2,
+    )
 
 
 # ── Phase 3.2: Joker fusion (Endless mode) ────────────────────────────────

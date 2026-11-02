@@ -36,6 +36,7 @@ from ..input import (
     DEFAULT_BINDINGS,
     RESERVED_KEYS,
     Key,
+    KeyEvent,
     KeyReader,
     check_binding,
     raw_capture,
@@ -70,11 +71,28 @@ def condition_text(item: Cosmetic, stats: Statistics, *, named: bool = True) -> 
     return f"{m.name} — {m.description} {tail}" if named else f"{m.description} {tail}"
 
 
-def _paint(lines: list[str]) -> None:
+def _paint(lines: list[str], rows: list[str] | None = None) -> None:
+    """Paint a centred screen; `rows` are the labels of its selectable rows,
+    recorded as full-row click targets (5.0.0 mouse, namespace "menu")."""
+    from . import hitmap
+
     term_w, term_h = get_term_size()
-    body = [ansi_center(line, term_w) for line in lines]
-    sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(vcenter_lines(body, term_h)))
+    body = vcenter_lines([ansi_center(line, term_w) for line in lines], term_h)
+    sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(body))
     sys.stdout.flush()
+    if rows is not None:
+        hitmap.targets_from_lines("menu", body, [(r, i) for i, r in enumerate(rows)], full_row=True)
+
+
+def _click(event: KeyEvent, selected: int) -> tuple[int, Key | None]:
+    """5.0.0: a click on another row selects it (no key); on the selected
+    row it acts like Enter. Non-click events pass their key through."""
+    from . import hitmap
+
+    if event.key != Key.MOUSE:
+        return selected, event.key
+    sel, act = hitmap.select_or_act(hitmap.hit("menu", event.pos), selected)
+    return sel, (Key.ENTER if act else None)
 
 
 def _message_line(message: str, ok: bool) -> str:
@@ -203,15 +221,22 @@ def show_cosmetic_picker(
         p.message = "Unlocked: " + ", ".join(u.item.name for u in fresh)
     try:
         while True:
-            _paint(picker_lines(p, s.card_back if kind is CardBack else s.table_frame))
+            _paint(
+                picker_lines(p, s.card_back if kind is CardBack else s.table_frame),
+                [item.name for item in items],
+            )
             event = reader.read()
-            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
+            before = p.sel
+            p.sel, key = _click(event, p.sel)
+            if p.sel != before:
+                p.message = ""
+            if key in (Key.ESC, Key.QUIT, Key.EOF):
                 return
-            if event.key in (Key.UP, Key.LEFT):
+            if key in (Key.UP, Key.LEFT):
                 p.sel, p.message = (p.sel - 1) % len(items), ""
-            elif event.key in (Key.DOWN, Key.RIGHT):
+            elif key in (Key.DOWN, Key.RIGHT):
                 p.sel, p.message = (p.sel + 1) % len(items), ""
-            elif event.key == Key.ENTER:
+            elif key == Key.ENTER:
                 _choose(p, s)
     finally:
         invalidate_diff()
@@ -278,17 +303,19 @@ def show_controls(reader: KeyReader, s: Settings) -> None:
     n_rows = len(BINDINGS) + 2
     sel, message, ok = 0, "", True
     try:
+        row_labels = [b.label for b in BINDINGS] + ["Reset to defaults", "Back"]
         while True:
-            _paint(controls_lines(s, sel, message, ok))
+            _paint(controls_lines(s, sel, message, ok), row_labels)
             event = reader.read()
             message = ""
-            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
+            sel, key = _click(event, sel)
+            if key in (Key.ESC, Key.QUIT, Key.EOF):
                 return
-            if event.key == Key.UP:
+            if key == Key.UP:
                 sel = (sel - 1) % n_rows
-            elif event.key == Key.DOWN:
+            elif key == Key.DOWN:
                 sel = (sel + 1) % n_rows
-            elif event.key == Key.ENTER:
+            elif key == Key.ENTER:
                 if sel == n_rows - 1:
                     return
                 if sel == n_rows - 2:
@@ -352,15 +379,17 @@ def show_theme_files(reader: KeyReader) -> None:
             files = [p.name for p in list_theme_files()]
             n_rows = len(files) + 2
             sel = min(sel, n_rows - 1)
-            _paint(theme_file_lines(files, sel, message, ok))
+            labels = ["Export current theme", *(f"Import  {f}" for f in files), "Back"]
+            _paint(theme_file_lines(files, sel, message, ok), labels)
             event = reader.read()
-            if event.key in (Key.ESC, Key.QUIT, Key.EOF):
+            sel, key = _click(event, sel)
+            if key in (Key.ESC, Key.QUIT, Key.EOF):
                 return
-            if event.key == Key.UP:
+            if key == Key.UP:
                 sel = (sel - 1) % n_rows
-            elif event.key == Key.DOWN:
+            elif key == Key.DOWN:
                 sel = (sel + 1) % n_rows
-            elif event.key == Key.ENTER:
+            elif key == Key.ENTER:
                 if sel == n_rows - 1:
                     return
                 message, ok = export_current() if sel == 0 else import_file(files[sel - 1])

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from belote.input import KeyReader
 
     from ..core.scoring import ScoreAccumulator
+    from ..partner.story import StoryBeat
     from ..run.boss import BossModifier
 
 # 4.6.3: visibility flag for the BelAtro top-row overlays (joker pip strip,
@@ -197,6 +198,39 @@ class BelAtroAnnounce:
         invalidate_diff()
 
     @staticmethod
+    def story(beat: StoryBeat, partner: str, reader: KeyReader, *, hold: float = 8.0) -> None:
+        """5.0.0: a partner story beat — a short café-text interstitial with
+        the one-shot buff it grants. Any key (or `hold` seconds) continues."""
+        import sys
+
+        from belote.ui.layout import vcenter_lines
+        from belote.ui.render import get_term_size
+        from belote.ui.text import wrap_words
+
+        term_w, term_h = get_term_size()
+        wrap_at = max(20, min(64, term_w - 6))
+        lines = [
+            ansi_center(DIM + "☕  Café de la Gare" + RESET, term_w),
+            "",
+            ansi_center(gold_fg() + BOLD + beat.title.upper() + RESET, term_w),
+            "",
+        ]
+        for text in beat.text(partner):
+            lines.extend(
+                ansi_center(white_fg() + row + RESET, term_w) for row in wrap_words(text, wrap_at)
+            )
+        lines += [
+            "",
+            ansi_center(gold_fg() + "✦ " + beat.buff.label() + RESET, term_w),
+            "",
+            ansi_center(DIM + "[ any key ]" + RESET, term_w),
+        ]
+        sys.stdout.write(clear_screen() + "\r\n".join(vcenter_lines(lines, term_h)))
+        sys.stdout.flush()
+        reader.read_timeout(hold)
+        invalidate_diff()
+
+    @staticmethod
     def banner(message: str, reader: KeyReader, *, color: str = "gold", hold: float = 1.5) -> None:
         """Show a centered banner that doesn't scroll the alt-screen buffer."""
         from belote.ui.render import get_term_size
@@ -291,10 +325,20 @@ class BelAtroAnnounce:
         body = gold_fg() + BOLD + prompt + RESET
         hint = white_fg() + "[Y]es / [N]o" + RESET
         print(move(row, 1) + ansi_center(body, term_w), end="")
-        print(move(row + 2, 1) + ansi_center(hint, term_w), end="", flush=True)
+        hint_line = ansi_center(hint, term_w)
+        print(move(row + 2, 1) + hint_line, end="", flush=True)
+        from belote.ui import hitmap
+
+        hitmap.targets_from_lines(
+            "choice", [hint_line], [("[Y]es", True), ("[N]o", False)], first_row=row + 2, pad=1
+        )
         try:
             while True:
                 event = reader.read()
+                if event.key == Key.MOUSE:  # 5.0.0: click [Y]es / [N]o
+                    clicked = hitmap.hit("choice", event.pos)
+                    if isinstance(clicked, bool):
+                        return clicked
                 if event.key in (Key.ENTER,):
                     return True
                 if event.key in (Key.ESC, Key.QUIT, Key.EOF):

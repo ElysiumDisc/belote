@@ -50,7 +50,7 @@ class BelAtroHistoryEntry:
     tricks_ns: int
     tricks_ew: int
     score: int  # acc.get_total(final_state) at round end
-    status: str  # "WON" | "FAILED" | "CAPOT" | "SURVIVED"
+    status: str  # "WON" | "FAILED" | "CAPOT" | "SURVIVED" | 5.0.0: "CHELEM" | "SKIPPED"
     money_delta: int  # economy.money change across the blind
     decl_summary_ns: tuple[str, ...]
     decl_summary_ew: tuple[str, ...]
@@ -71,8 +71,10 @@ def _decl_str(items: tuple[str, ...], width: int) -> str:
 
 
 def _status_cell(status: str) -> str:
-    if status == "CAPOT":
-        return f"{gold_fg()}CAPOT{RESET}"
+    if status in ("CAPOT", "CHELEM"):
+        return f"{gold_fg()}{status}{RESET}"
+    if status == "SKIPPED":
+        return f"{DIM}SKIPPED{RESET}"
     if status == "FAILED":
         return f"{red_fg()}FAILED{RESET}"
     if status == "SURVIVED":

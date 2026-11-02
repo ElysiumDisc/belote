@@ -120,9 +120,12 @@ def _joker_entry(joker: object) -> _InventoryEntry:
         line = _EDITION_DETAIL.get(getattr(edition, "name", "").lower())
         if line:
             detail += ["", line]
+    if getattr(joker, "sworn", False):
+        detail += ["", "Juré (Le Serment): every Chips / Mult / $ it pays is doubled."]
+    name = getattr(joker, "display_name", None) or getattr(joker, "name", "?")
     return _InventoryEntry(
         category="JOKERS",
-        title=f"{getattr(joker, 'name', '?')}{_edition_tag(joker)}",
+        title=f"{name}{_edition_tag(joker)}",
         detail_lines=tuple(detail),
     )
 
@@ -156,6 +159,46 @@ def _contract_level_entry(contract_id: str, reward: Any) -> _InventoryEntry:
         title=f"{contract_id}",
         detail_lines=("; ".join(reward_bits) if reward_bits else "(no leveled effects)",),
     )
+
+
+def _atelier_entries(run: BelAtroRun) -> list[_InventoryEntry]:
+    """5.0.0 L'Atelier: one row per enhanced / sealed card."""
+    from ..core.card_mods import ENHANCEMENTS, SEALS, card_from_key
+
+    out: list[_InventoryEntry] = []
+    for key, mod in sorted(run.card_mods.items()):
+        card = card_from_key(key)
+        if card is None or mod.is_empty():
+            continue
+        detail = [
+            f"{table[mid][0]}: {table[mid][1]}"
+            for mid, table in ((mod.enhancement, ENHANCEMENTS), (mod.seal, SEALS))
+            if mid is not None
+        ]
+        detail += ["", "Triggers when your team captures the card — whoever held it."]
+        out.append(
+            _InventoryEntry(
+                category="ATELIER (CARDS)",
+                title=f"{card!r}  {mod.label()}",
+                detail_lines=tuple(detail),
+            )
+        )
+    return out
+
+
+def _medal_entries(run: BelAtroRun) -> list[_InventoryEntry]:
+    """5.0.0: Médailles waiting for the next shop."""
+    from ..run.medals import MEDALS
+
+    return [
+        _InventoryEntry(
+            category="MÉDAILLES",
+            title=MEDALS[m].name,
+            detail_lines=(MEDALS[m].description, "", "Spent by the next shop."),
+        )
+        for m in run.medals
+        if m in MEDALS
+    ]
 
 
 def _build_entries(run: BelAtroRun) -> list[_InventoryEntry]:
@@ -197,6 +240,22 @@ def _build_entries(run: BelAtroRun) -> list[_InventoryEntry]:
                 consumable_idx=idx,
             )
         )
+    if run.loan_debt:
+        from ..run.usurier import INTEREST, SEIZE_AT
+
+        entries.append(
+            _InventoryEntry(
+                category="DEBT",
+                title=f"L'Usurier: ${run.loan_debt}",
+                detail_lines=(
+                    f"Grows {int(INTEREST * 100)}% at the start of every ante. "
+                    "Repay any time in the shop.",
+                    f"At ${SEIZE_AT} he seizes your money, then your jokers.",
+                ),
+            )
+        )
+    entries.extend(_atelier_entries(run))
+    entries.extend(_medal_entries(run))
     bonus = _permanent_bonus_entry(run)
     if bonus is not None:
         entries.append(bonus)

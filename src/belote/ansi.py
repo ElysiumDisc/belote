@@ -269,6 +269,16 @@ def alt_screen_off() -> str:
     return "\x1b[?1049l"
 
 
+def mouse_on() -> str:
+    """5.0.0: button-press reporting (?1000) in SGR encoding (?1006) —
+    `ESC [ < b ; col ; row M|m`, no 223-column limit."""
+    return "\x1b[?1000h\x1b[?1006h"
+
+
+def mouse_off() -> str:
+    return "\x1b[?1006l\x1b[?1000l"
+
+
 # Palette accessors. Read precomputed escape strings from the active palette
 # (rebuilt by `_refresh_theme_cache()` via theme_manager's change callback).
 def felt_bg() -> str:

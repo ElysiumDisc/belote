@@ -585,6 +585,8 @@ def test_shop_excludes_owned_jokers() -> None:
     assert run.jokers
     shop = Shop(run)
     for _ in range(200):
+        # 5.0.0: owned jokers only come back as deliberate copy offers.
+        shop.copy_chance = 0.0
         shop.generate_inventory()
         assert not any(getattr(it, "id", None) in owned for it in shop.inventory)
 
@@ -600,6 +602,7 @@ def test_shop_with_every_joker_owned_offers_no_duplicate(
     available = registry.get_available_jokers(Profile())
     run.jokers = [cls() for cls in available.values()]
     shop = Shop(run)
+    shop.copy_chance = 0.0  # 5.0.0: no copy offers → no owned joker at all
     shop.generate_inventory()
     owned = {j.id for j in run.jokers}
     assert not any(getattr(it, "id", None) in owned for it in shop.inventory)

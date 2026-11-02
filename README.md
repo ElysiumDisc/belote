@@ -34,6 +34,72 @@ belatro
 | **L'Architecte** *(4.5.0)* | Pay $10 in bidding to choose the contract yourself. NS-won tricks containing a declared Annonce card pay +$2 |
 | **Le Complice** *(4.11.0, unlockable)* | Partner starts at Trust 7 (plays at Hard) with one random Partner Joker in its own slot; you start with $2. Unlocked after 5 lifetime Boss Blind wins |
 
+### New in 5.0.0
+
+**L'Atelier — per-card enhancements & seals.** Every shop offers one upgrade
+for a single card of the 32, kept for the whole run. They trigger when your
+team **captures** the card, whoever held it:
+
+| Mod | Effect when captured |
+|---|---|
+| **Verre** | Its points count twice — but 1 in 4 it shatters: the trick scores 0 and the Verre is gone |
+| **Acier** | Your trick Jokers trigger again on that trick |
+| **Chance** | A random reward: +20 chips, +2 Mult, +$2 or ×1.25 Mult |
+| **Sceau Rouge** | +2 Mult when it is the card that takes the trick |
+| **Sceau Bleu** | Your round-end Jokers trigger again |
+| **Sceau d'Or** | +$1 (L'Aristocrate's four Aces now carry one) |
+
+New Jokers ride the capture trigger: **Le Vitrier**, **Le Ferronnier**,
+**La Voyante**, **Le Sigillaire**.
+
+**Le Serment — Joker fusion.** Copies of a Joker are now safe to own (each
+copy keys its own counters), and the shop sometimes offers a copy of one of
+yours. Three copies **Fuse** into one **Juré** Joker (✦) that pays double.
+Six pairs fuse into unique Jokers — Le Maréchal + Le Capitaine → **Le
+Général**, Le Sergent + Le Métronome → **Le Tambour-Major**, Le Premier Sang +
+Le Dernier Mot → **L'Alpha et l'Oméga**, Le Rebelle + Écho de Rebelote → **Le
+Couple Royal**, Le Contrebandier + Le Maître d'Atout → **Le Corsaire**, and
+Le Traître + Le Démon → **Lucifer**. The recipes are a hidden page of the
+Collection.
+
+**Médailles.** Press **K** in the shop to skip the next Small or Big Blind
+(no round, no payout, no shop) for its Médaille; a capot, crushing a Boss
+Blind (target reached by trick 4) or surviving on Capot Insurance earns one
+too — one such feat per Ante. Eight Médailles bend the next
+shop — Le Sommelier (free rerolls), L'Épicier (+2 Jokers), L'Antiquaire, Le
+Tailleur, Le Mécène, L'Écho, Le Cartomancien — and La Cagnotte doubles your
+money on the spot.
+
+**Contrat Capot & Grand Chelem.** From Ante 2 some Big Blinds are contract
+blinds: once your team holds the contract, declare it. Take all 8 tricks
+and the blind is won whatever the score (+$10, a Médaille); the Grand Chelem
+(Ante 5+, and you win 5+ tricks yourself) pays +$25, +1 Joker slot and two
+Médailles. Miss, and the blind is lost — Capot Insurance covers it once.
+
+**Your partner's story.** Twelve café scenes fire on the moments that matter
+— a betrayal after Le Traître, a reconciliation capot, a sulk, a first boss
+— once per run each, each leaving a small one-shot gift.
+
+**L'Usurier — a loan in the shop.** From Ante 2 the moneylender visits about
+half the shops and offers **$30** (one loan at a time) at **20% per ante,
+compounding**. Repay in part or in full in any shop — the Repay button stays
+while you owe him. The cash feeds La Voûte's interest and the Heist, but the
+debt grows faster than the interest cap: let it reach **$90** and he seizes
+your money, then your jokers (rightmost first, corrupted ones excepted).
+*(Not "Le Prêteur" — that's already a joker.)*
+
+**Mouse support.** Click cards in your hand, bids, menu entries, yes / no
+prompts and the shop's offers / buttons (SGR mouse mode, read from the same
+input stream as the keys). Settings → Mouse turns it off.
+
+**La Gangrène** (boss 25): rots one of your Jokers into a corrupted one for
+good, and the rot spreads to another every Ante until you win a round by
+capot.
+
+**Le Carnet de Parties** (Classic): the Statistics screen lists your last five
+finished games with a one-line verdict ("You chutéed on a 92 vs 94 —
+brutal"), and the game-over screen shows the game's own.
+
 ### New in 4.11.0
 **Jokers (42 → 54):**
 
@@ -248,6 +314,7 @@ Every letter key below except the bidding keys can be rebound in
 - `1`-`5`: Inspect specific Jokers in the Shop
 - `C`: Open the Consumables tray in the Shop (use Tarots / Planets you've purchased)
 - `S` *(4.9.7)*: Sell a joker in the Shop for half its cost (corrupted jokers can't be sold)
+- `K` *(5.0.0)*: Skip the next Small / Big Blind for its Médaille
 
 **Gameplay:**
 - `←` `→` or `↑` `↓` or **`W` `A` `S` `D`** *(4.5.0)*: Move selection
@@ -256,13 +323,14 @@ Every letter key below except the bidding keys can be rebound in
 - `O`: Re-sort hand by suit and rank (hand auto-sorts on every play turn since 3.9.4 — this key is now a manual re-sort, kept for muscle memory)
 - `Z`: Undo last move
 - `Space` or `Esc`: Skip animations
+- **Mouse** *(5.0.0)*: click a card in your hand — or a bid in the bid selector — to select it, click it again to play / bid it (illegal cards ignore clicks); in the BelAtro shop, click an offer or button to select it and again to buy / press it. Menus (main menu, BelAtro menu, Hot-seat & Spectate, theme / AI pickers) take a single click; Settings rows, the deck picker, the AI seats, the card-back / frame pickers, Controls and Theme files select on the first click and act on the second. The Collection's tabs and items, Boss Rush (row labels select, ◀ / ▶ step, `[ Start ]` starts), the ghost-run picker (a click watches; in the viewer a click pauses / resumes) and the rules pages' footer (language toggle, Back) are clickable too, as are `[Y]es` / `[N]o` and the coinche / surcoinche prompts. The wheel scrolls lists and pages; "any key" screens close on a click. Turn it off in **Settings → Mouse** (or `BELOTE_NO_MOUSE=1`) to get your terminal's text selection back.
 - During bidding round 2: `P` = Pass, `X` = Tout Atout, `N` = Sans Atout *(remapped from A/S in 4.5.0 to make room for WASD nav)*
 - `I` *(4.6.3, BelAtro only)*: Toggle the BelAtro top HUD (joker pip strip, ante/blind/target line, chips×mult score, trust bar, synergy tooltip) AND, since 4.7.0, the persistent slot-machine tally readout at the bottom. Visible by default; press `I` to hide both and reveal the classic Belote HUD's `Trump:` / `Taker:` fields underneath. Press `I` again to bring them back.
 - `V` *(4.7.0; 4.9.0 / U5: activation merged in, BelAtro only)*: Open the inventory overlay (jokers, vouchers, consumables, permanent bonuses, contract levels). Since 4.9.0 also activates consumables: `1`–`9` from the list or `A` on a detail page. Pre-4.7.0 this was an alias of `I`; it's now its own thing.
 
 ## Features
 
-- **BelAtro Roguelite Mode:** A massive expansion featuring 54 jokers, 14 tarots, 9 planets, 13 vouchers, 13 decks, 24 bosses, Boss Rush, ghost-run replays, and permanent upgrades.
+- **BelAtro Roguelite Mode:** A massive expansion featuring 64 jokers (6 only made by fusion), 14 tarots, 9 planets, 13 vouchers, 13 decks, 25 bosses, per-card enhancements, Médailles, Capot contracts, Boss Rush, ghost-run replays, and permanent upgrades.
 - **Dix de Der Heist (4.7.0):** Take a contract and declare a heist before trick 1 — win trick 8 for a `×(1 + interest_rate)` Mult multiplier on your round score; lose it and forfeit your card chips from tricks 1–7. Gated on owning **La Voûte** voucher (`interest_rate > 0`). AI never declares.
 - **Slot-Machine Score Tally (4.7.0):** Per-trick odometer animation replaces the static popup. Chip-bucket fills, mult pulses, total ticks toward target, and a flame row crowns the odometer when you blow past 120% of the blind. Skippable on SPACE / ESC / ENTER. Final readout persists in the HUD between tricks (toggled by `I` alongside the top HUD). Suppressed under Le Brouillard (`hide_hud`) and La Compétition (`separate_scoring`).
 - **Inventory Overlay on V (4.7.0; 4.9.0 / U5):** Press `V` mid-game to inspect everything you own — jokers (with edition tags + per-edition bonus blurb), vouchers, consumables, permanent chip / mult bonuses, and per-contract planet levels. List view → ↑/↓ navigate, Enter for detail, Esc/V/Q close. Since 4.9.0 also activates consumables: `1`–`9` from the list or `A` on a detail page (the shop's standalone `C` tray remains for in-shop quick-pick).
@@ -281,7 +349,7 @@ Every letter key below except the bidding keys can be rebound in
 - **Hand Sorting:** Strategic "play value" organization (honors grouped together) for better tactical awareness.
 - **Main Menu:** BelAtro, Daily Challenge, Start Game, Hot-seat & Spectate, Settings, Rules & History, Statistics. On short terminals (under 30 rows) the coffee-cup art gives way to a compact menu.
 - **Undo/Redo:** Press `Z` to undo your last move during bidding or play.
-- **Statistics:** unified global tracking of games played, win rates, best rounds, and BelAtro expansion milestones.
+- **Statistics:** unified global tracking of games played, win rates, best rounds, and BelAtro expansion milestones, plus *(5.0.0)* **Le Carnet de Parties** — your last five games with a verdict each.
 - **Responsive Layout (4 tiers, 4.11.0):** **mini** (80×24, 3-row cards), **compact** (80×32), **standard** (96×40), **spacious** (120×48+). The largest card size whose essential rows fit is chosen on every frame, then optional rows (selection bar, mat labels, card readout, decorative frame, breathing space) are added only while they fit — the table is never taller than your terminal. Before 4.11.0 the bottom of the hand was cut off at most sizes.
 - **Alternate Screen Buffer:** Both classic Belote and BelAtro run in a dedicated terminal buffer for a clean, non-overlapping interface — your shell scrollback stays untouched after you quit.
 - **Declarations:** Automatic detection and announcement of sequences (Tierce, Quarte, etc.) and Carrés after the first trick.
@@ -343,7 +411,7 @@ belote/
 PYTHONPATH=src pytest
 ```
 
-Currently **1954 tests** passing, 95% line coverage overall (4.11.0).
+Currently **2055 tests** passing, 95% line coverage overall (5.0.0).
 
 ## Technical Integrity
 

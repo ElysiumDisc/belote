@@ -28,7 +28,7 @@ from ..ansi import (
 )
 from ..cosmetics import CardBack, TableFrame
 from ..game import Seat
-from ..input import Key, KeyReader
+from ..input import Key, KeyEvent, KeyReader
 from ..settings import DIFFICULTIES, SPEEDS, TARGETS, Settings
 from ..themes import THEMES, theme_manager
 from .layout import vcenter_lines
@@ -52,6 +52,7 @@ _CORE_ROWS: tuple[_Row, ...] = (
     _Row("animations", "Animations"),
     _Row("fast_redraw", "Fast redraw"),
     _Row("screen_reader", "Screen-reader hints"),
+    _Row("mouse", "Mouse (click cards & shop)"),
     _Row("replay_analysis", "Post-round replay analysis"),
     _Row("controls", "Controls"),
 )
@@ -63,6 +64,7 @@ _ENV_FOR: dict[str, str] = {
     "animations": "BELOTE_NO_ANIM",
     "fast_redraw": "BELOTE_NO_DIFF",
     "screen_reader": "BELOTE_A11Y",
+    "mouse": "BELOTE_NO_MOUSE",
     "replay_analysis": "BELOTE_REPLAY",
 }
 
@@ -232,13 +234,27 @@ def show_settings(reader: KeyReader, s: Settings) -> None:
         while True:
             all_rows = rows()
             term_w, term_h = get_term_size()
-            lines = [ansi_center(line, term_w) for line in settings_lines(s, sel)]
-            sys.stdout.write(
-                clear_screen() + hide_cursor() + "\r\n".join(vcenter_lines(lines, term_h))
+            lines = vcenter_lines(
+                [ansi_center(line, term_w) for line in settings_lines(s, sel)], term_h
             )
+            sys.stdout.write(clear_screen() + hide_cursor() + "\r\n".join(lines))
             sys.stdout.flush()
+            from . import hitmap
+
+            hitmap.targets_from_lines(
+                "menu", lines, [(r.label, i) for i, r in enumerate(all_rows)], full_row=True
+            )
 
             event = reader.read()
+            if event.key == Key.MOUSE:
+                # 5.0.0: click a row to select it, click it again for Enter.
+                clicked = hitmap.hit("menu", event.pos)
+                if not isinstance(clicked, int):
+                    continue
+                if clicked != sel:
+                    sel = clicked
+                    continue
+                event = KeyEvent(Key.ENTER)
             key = all_rows[sel].key
             match event.key:
                 case Key.QUIT | Key.ESC | Key.EOF:

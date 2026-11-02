@@ -139,6 +139,37 @@ class BelAtroRun:
     # need to consult this set, but adding their id is harmless. 4.7.3.
     _applied_purchase_ids: set[str] = field(default_factory=set)
 
+    # ── 5.0.0: L'Atelier — per-card enhancements and seals ─
+    # card_key (e.g. "ACE_HEARTS") → CardMod. See core/card_mods.py.
+    card_mods: dict[str, Any] = field(default_factory=dict)
+
+    # ── 5.0.0: Médailles (run/medals.py) ───────────────────
+    # Earned medals waiting for the next shop, which consumes them all.
+    medals: list[str] = field(default_factory=list)
+    medals_earned: int = 0
+    blinds_skipped: int = 0
+    # (ante, endless cycle) that already paid a feat medal — one per ante.
+    feat_medal_ante: tuple[int, int] | None = None
+
+    # ── 5.0.0: Capot / Grand Chelem contracts (run/contracts.py) ──
+    capot_contracts_won: int = 0
+
+    # ── 5.0.0: partner story beats (partner/story.py) ──────
+    story_seen: set[str] = field(default_factory=set)
+    # One-shot buff granted by the last beat, spent by the next round:
+    # {"chips": int, "mult": float, "times_mult": float}.
+    story_buff: dict[str, float] = field(default_factory=dict)
+    # Facts the beats key on that aren't in the history.
+    sabotage_seen: bool = False
+
+    # ── 5.0.0: L'Usurier — the shop's loan (run/usurier.py) ─
+    loan_debt: int = 0
+    loans_taken: int = 0
+
+    # ── 5.0.0: La Gangrène boss — the rot spreads each ante ─
+    gangrene_active: bool = False
+    gangrene_rotted: int = 0
+
     # ── Recent-boss tracker (3.9.3 Phase 5) ────────────────
     # Used by the BelAtro main loop to suppress immediate boss repeats in
     # endless mode. The deque holds at most 2 recent boss ids; the selector
@@ -194,6 +225,16 @@ class BelAtroRun:
                     self.recorder.note_acquire(joker, source=getattr(item, "id", "?"))
         return True
 
+    def add_joker(self, joker: Joker) -> None:
+        """Put `joker` in the player's slots (the caller checked capacity),
+        give it its own copy index, then fire its purchase hook (5.0.0: the
+        one path the shop, tarots and Le Serment all take)."""
+        from ..items.base import assign_copy_indices
+
+        self.jokers.append(joker)
+        assign_copy_indices([*self.jokers, *self.partner.jokers])
+        joker.on_purchase(self)
+
     def _get_rng(self) -> Any:
         """Per-run random.Random instance, seeded from `seed` when given."""
         if self._rng is None:
@@ -244,12 +285,15 @@ class BelAtroRun:
 
     def _apply_starting_deck(self, deck: Any, registry: Any) -> None:
         """Starting money, jokers, a free planet, and the deck's rule flags."""
+        from ..items.base import assign_copy_indices
+
         mods = deck.deck_modifications
         self.economy.money = deck.initial_money
         for joker_id in deck.initial_jokers:
             joker_cls = registry.get_joker(joker_id)
             if joker_cls:
                 self.jokers.append(joker_cls())
+                assign_copy_indices(self.jokers)
                 if self.profile:
                     self.profile.discover(joker_id)
 
@@ -262,7 +306,7 @@ class BelAtroRun:
             if mods.get(flag):
                 self.card_enhancements[flag] = True
         if mods.get("gold_seal_aces"):
-            self.gold_seal_aces = True
+            self._seal_gold_aces()
         if mods.get("corrupted_pool_visible"):
             self.corrupted_pool_visible = True
         if self.deck_id == "republicain":
@@ -277,6 +321,17 @@ class BelAtroRun:
             self.partner.trust.value = int(mods["partner_trust"])
         if mods.get("partner_joker"):
             self._grant_partner_joker(registry)
+
+    def _seal_gold_aces(self) -> None:
+        """L'Aristocrate: the four Aces carry a Sceau d'Or (5.0.0: in the
+        per-card layer, `card_mods`)."""
+        from belote.deck import Card, Rank, Suit
+
+        from .card_mods import apply_mod
+
+        self.gold_seal_aces = True
+        for suit in (Suit.SPADES, Suit.HEARTS, Suit.DIAMONDS, Suit.CLUBS):
+            apply_mod(self.card_mods, Card(suit, Rank.ACE), "or")
 
     def _grant_partner_joker(self, registry: Any) -> None:
         """Equip one random partner joker on the partner's own slots."""
